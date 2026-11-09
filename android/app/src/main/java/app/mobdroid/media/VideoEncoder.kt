@@ -102,7 +102,7 @@ class VideoEncoder(
         }
     }
 
-    fun release() {
+    fun release(timeoutMs: Long = 2000): Boolean {
         val done = CountDownLatch(1)
         val posted = handler.post {
             if (!released) {
@@ -114,7 +114,7 @@ class VideoEncoder(
             thread.quitSafely()
             done.countDown()
         }
-        if (posted && Thread.currentThread() != thread) done.await(2, TimeUnit.SECONDS)
+        return !posted || Thread.currentThread() == thread || done.await(timeoutMs, TimeUnit.MILLISECONDS)
     }
 
     private inner class Callback : MediaCodec.Callback() {

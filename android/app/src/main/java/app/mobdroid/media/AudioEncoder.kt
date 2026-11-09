@@ -34,17 +34,22 @@ class AudioEncoder(
     var level = 0f
         private set
 
-    private val codec: MediaCodec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC).apply {
-        configure(
-            MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, sampleRate, channels).apply {
-                setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
-                setInteger(MediaFormat.KEY_BIT_RATE, bitrateBps)
-                setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, frameBytes)
-            },
-            null,
-            null,
-            MediaCodec.CONFIGURE_FLAG_ENCODE,
-        )
+    private val codec: MediaCodec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC).also { codec ->
+        try {
+            codec.configure(
+                MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, sampleRate, channels).apply {
+                    setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+                    setInteger(MediaFormat.KEY_BIT_RATE, bitrateBps)
+                    setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, frameBytes)
+                },
+                null,
+                null,
+                MediaCodec.CONFIGURE_FLAG_ENCODE,
+            )
+        } catch (e: Exception) {
+            codec.release()
+            throw e
+        }
     }
 
     private val record = try {

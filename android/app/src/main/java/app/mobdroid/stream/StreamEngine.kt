@@ -370,8 +370,12 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         if (!isLive) return
         Log.w(TAG, "Restarting video encoder: $reason")
         compositor?.setEncoder(null)
-        videoEncoder?.release()
+        val released = videoEncoder?.release(timeoutMs = 5000) ?: true
         videoEncoder = null
+        if (!released) {
+            onFatal("Video encoder stopped responding")
+            return
+        }
         runCatching { startVideoEncoder() }.onFailure { onFatal("Video encoder: ${it.message}") }
     }
 
@@ -508,7 +512,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                     UvcCamera.open(context, device)
                 } catch (e: Exception) {
                     Log.e(TAG, "USB camera open failed", e)
-                    _ui.update { it.copy(error = "USB camera: ${e.message}") }
+                    onUvcError(generation, e.message ?: "open failed")
                     return@launch
                 }
                 val format = uvc.formats.closest(maxOf(w, h), minOf(w, h), profile.fps)
