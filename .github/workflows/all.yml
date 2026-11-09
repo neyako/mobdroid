@@ -36,3 +36,27 @@ jobs:
           just web-remote-control-frontend-build
           git diff --exit-code
 
+
+  android:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+      - name: Install NDK, CMake and ffmpeg
+        run: |
+          sdkmanager --install "ndk;29.0.14206865" "cmake;3.22.1" "platforms;android-37.0"
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      - name: Engine tests
+        run: |
+          ./gradlew :engine:test
+      - name: App unit tests and build
+        run: |
+          ./gradlew :app:testDebugUnitTest :app:assembleDebug

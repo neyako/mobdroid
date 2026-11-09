@@ -15,6 +15,8 @@ Read the file for the part you are working on before changing it:
 
 - `tests/AGENTS.md` — the system tests: launching the app, module names and how tests are written.
 - `WebRemoteControlFrontend/AGENTS.md` — the web remote control frontend, its build and its protocol.
+- `android/AGENTS.md` — the native Android port (Kotlin, Compose), its modules and commands. The Swift
+  rules below (Xcode builds, Mac Catalyst tests, `just` targets) do not apply to it.
 
 ## Commands
 
