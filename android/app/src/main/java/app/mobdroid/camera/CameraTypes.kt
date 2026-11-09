@@ -22,8 +22,10 @@ data class CameraDescriptor(
     val hasFlash: Boolean,
     val maxFpsBySize: Map<Size, Int> = emptyMap(),
     val realtimeTimestamps: Boolean = false,
+    val vendorFpsBySize: Map<Size, Int> = emptyMap(),
 ) {
-    fun maxFps(size: Size): Int = maxFpsBySize[size] ?: fpsRanges.maxOfOrNull { it.upper } ?: 30
+    fun maxFps(size: Size): Int =
+        maxOf(maxFpsBySize[size] ?: fpsRanges.maxOfOrNull { it.upper } ?: 30, vendorFpsBySize[size] ?: 0)
 
     fun chooseSize(width: Int, height: Int, fps: Int): Size? =
         pickSize(sizes, { it.width }, { it.height }, ::maxFps, width, height, fps)

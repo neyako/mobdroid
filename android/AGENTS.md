@@ -64,7 +64,13 @@ them, not code style.
   thread. `CameraController` reopens with backoff on errors, stalls and availability changes and steps
   down session options on configuration failures. Call `SurfaceTexture.setDefaultBufferSize` before
   `open`; `open` resets zoom, torch, exposure and locks.
-- Samsung does not advertise 60 fps to Camera2 on most models, so the encoder runs at
+- Samsung does not advertise 60 fps in the Camera2 AE ranges on most models. Its vendor table
+  `samsung.android.scaler.availableVideoConfigurations` (6 ints per entry: width, height, min fps, max fps
+  and two unused) lists the real video frame rates, read by `samsungVideoFps` into
+  `CameraDescriptor.vendorFpsBySize`. When the AE ranges cannot reach the profile's rate,
+  `CameraController` sets `samsung.android.control.recordingMaxFps`/`recordingMinFps` with a fixed AE
+  range, and drops them at the last fallback level. The ultra wide lens still delivers 30 fps, and the
+  camera takes a few seconds to return to 60 after zooming back from it. Elsewhere the encoder runs at
   `min(profile fps, camera max fps)`.
 - `uvc/`: userspace UVC for phones without an external camera HAL. libusb, libuvc and libjpeg-turbo are
   fetched by CMake at configure time with pinned hashes. MJPEG or YUYV frames are decoded into the

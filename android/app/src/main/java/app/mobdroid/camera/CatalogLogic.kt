@@ -40,6 +40,7 @@ internal data class RawCamera(
     val stabilization: List<Stabilization>,
     val hasFlash: Boolean,
     val realtimeTimestamps: Boolean,
+    val vendorFps: Map<Dim, Int> = emptyMap(),
 )
 
 internal data class CatalogEntry(

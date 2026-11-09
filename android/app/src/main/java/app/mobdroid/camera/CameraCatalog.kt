@@ -28,6 +28,9 @@ object CameraCatalog {
     }
 }
 
+private val SAMSUNG_VIDEO_CONFIGURATIONS =
+    CameraCharacteristics.Key("samsung.android.scaler.availableVideoConfigurations", IntArray::class.java)
+
 private fun characteristics(manager: CameraManager, id: String): CameraCharacteristics? =
     try {
         manager.getCameraCharacteristics(id)
@@ -74,6 +77,8 @@ private fun readCamera(manager: CameraManager, id: String, visible: Boolean): Ra
         hasFlash = chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true,
         realtimeTimestamps = chars.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) ==
             CameraMetadata.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME,
+        vendorFps = samsungVideoFps(runCatching { chars.get(SAMSUNG_VIDEO_CONFIGURATIONS) }.getOrNull() ?: IntArray(0))
+            .filterKeys { it in sizes },
     )
 }
 
@@ -155,9 +160,10 @@ private fun CatalogEntry.toDescriptor() = CameraDescriptor(
     sensorOrientation = camera.sensorOrientation,
     sizes = camera.sizes.sortedByDescending { it.area }.map { Size(it.width, it.height) },
     fpsRanges = camera.fpsRanges.map { Range(it.lower, it.upper) },
-    supports60Fps = supportsFps(camera.fpsRanges, camera.maxFps, 60),
+    supports60Fps = supportsFps(camera.fpsRanges, camera.maxFps, 60) || camera.vendorFps.values.any { it >= 60 },
     stabilizationModes = camera.stabilization,
     hasFlash = camera.hasFlash,
     maxFpsBySize = camera.maxFps.mapKeys { Size(it.key.width, it.key.height) },
     realtimeTimestamps = camera.realtimeTimestamps,
+    vendorFpsBySize = camera.vendorFps.mapKeys { Size(it.key.width, it.key.height) },
 )

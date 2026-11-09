@@ -69,7 +69,12 @@ private class Controls {
     }
 }
 
-private class Plan(val fpsRange: Range<Int>?, val stabilizationMode: Int, val ois: Boolean)
+private val SAMSUNG_RECORDING_MAX_FPS =
+    CaptureRequest.Key("samsung.android.control.recordingMaxFps", Int::class.javaObjectType)
+private val SAMSUNG_RECORDING_MIN_FPS =
+    CaptureRequest.Key("samsung.android.control.recordingMinFps", Int::class.javaObjectType)
+
+private class Plan(val fpsRange: Range<Int>?, val vendorFps: Int, val stabilizationMode: Int, val ois: Boolean)
 
 private class Hardware(chars: CameraCharacteristics) {
     private val focusModes = chars.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES) ?: IntArray(0)
@@ -120,7 +125,7 @@ class CameraController(context: Context) {
     private val closing = HashSet<CameraDevice>()
     private var request: OpenRequest? = null
     private var hardware: Hardware? = null
-    private var plan = Plan(null, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF, false)
+    private var plan = Plan(null, 0, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF, false)
     private var device: CameraDevice? = null
     private var session: CameraCaptureSession? = null
     private var builder: CaptureRequest.Builder? = null
@@ -397,9 +402,19 @@ class CameraController(context: Context) {
             effectiveStabilization(current.stabilization, current.camera.stabilizationModes)
         }
         val ranges = current.camera.fpsRanges.map { Fps(it.lower, it.upper) }
-        val fpsRange = chooseFpsRange(ranges, current.fps, current.camera.maxFps(current.size))
+        val vendorFps = if (level >= MAX_LEVEL) {
+            0
+        } else {
+            vendorFps(ranges, current.fps, current.camera.vendorFpsBySize[current.size] ?: 0)
+        }
+        val fpsRange = if (vendorFps > 0) {
+            Fps(vendorFps, vendorFps)
+        } else {
+            chooseFpsRange(ranges, current.fps, current.camera.maxFps(current.size))
+        }
         plan = Plan(
             fpsRange = fpsRange?.let { Range(it.lower, it.upper) },
+            vendorFps = vendorFps,
             stabilizationMode = when (stabilization) {
                 Stabilization.OFF -> CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF
                 Stabilization.VIDEO -> CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON
@@ -621,6 +636,10 @@ class CameraController(context: Context) {
         b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
         b.set(CaptureRequest.CONTROL_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_AUTO)
         plan.fpsRange?.let { b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
+        if (plan.vendorFps > 0) {
+            b.set(SAMSUNG_RECORDING_MAX_FPS, plan.vendorFps)
+            b.set(SAMSUNG_RECORDING_MIN_FPS, plan.vendorFps)
+        }
         if (hw.hasVideoStabilization) {
             b.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, plan.stabilizationMode)
         }

@@ -51,6 +51,23 @@ internal fun chooseFpsRange(ranges: List<Fps>, fps: Int, sizeMaxFps: Int): Fps? 
 internal fun supportsFps(ranges: List<Fps>, maxFps: Map<Dim, Int>, fps: Int): Boolean =
     ranges.any { it.upper >= fps } && maxFps.values.any { it >= fps }
 
+internal fun samsungVideoFps(table: IntArray): Map<Dim, Int> {
+    if (table.size % 6 != 0) return emptyMap()
+    val result = HashMap<Dim, Int>()
+    for (i in table.indices step 6) {
+        val lower = table[i + 2]
+        val upper = table[i + 3]
+        if (table[i] <= 0 || table[i + 1] <= 0 || lower !in 1..upper || upper > 240) return emptyMap()
+        result.merge(Dim(table[i], table[i + 1]), upper, ::max)
+    }
+    return result
+}
+
+internal fun vendorFps(ranges: List<Fps>, fps: Int, vendorMaxFps: Int): Int {
+    val target = min(fps, vendorMaxFps)
+    return if (ranges.none { it.upper >= target }) target else 0
+}
+
 internal fun retryDelayMs(failures: Int): Long = min(250L shl (failures - 1).coerceIn(0, 5), 5000L)
 
 internal fun effectiveStabilization(requested: Stabilization, available: List<Stabilization>): Stabilization =

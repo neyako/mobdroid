@@ -10,6 +10,17 @@ import kotlin.test.assertTrue
 private val flip5Back = Flip5Fixture.cameras.first { it.id == "0" }
 private val active = IRect(0, 0, 4000, 3000)
 
+private val flip5VideoTable = intArrayOf(
+    1920, 1440, 15, 30, 25, 0,
+    1920, 1440, 30, 30, 25, 0,
+    1920, 1080, 15, 30, 25, 0,
+    1920, 1080, 30, 30, 25, 0,
+    1920, 1080, 15, 60, 25, 0,
+    1920, 1080, 60, 60, 25, 0,
+    1280, 720, 30, 30, 20, 0,
+    3840, 2160, 60, 60, 0, 0,
+)
+
 private fun choose(sizes: List<Dim>, width: Int, height: Int, fps: Int = 30, maxFps: (Dim) -> Int = { 30 }) =
     pickSize(sizes, { it.width }, { it.height }, maxFps, width, height, fps)
 
@@ -78,6 +89,32 @@ class CameraMathTest {
         assertEquals(Fps(15, 60), chooseFpsRange(listOf(Fps(30, 30), Fps(15, 60)), 60, 60))
         assertEquals(Fps(24, 30), chooseFpsRange(listOf(Fps(7, 30), Fps(15, 30), Fps(24, 30)), 30, 30))
         assertNull(chooseFpsRange(emptyList(), 30, 30))
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+        "60, 60, 60",
+        "50, 60, 50",
+        "30, 60, 0",
+        "60, 30, 0",
+        "60, 0, 0",
+    )
+    fun `vendor fps on the flip5 back camera`(fps: Int, vendorMaxFps: Int, expected: Int) {
+        assertEquals(expected, vendorFps(flip5Back.fpsRanges, fps, vendorMaxFps))
+    }
+
+    @Test
+    fun `samsung video table gives the highest frame rate of each size`() {
+        assertEquals(
+            mapOf(Dim(1920, 1440) to 30, Dim(1920, 1080) to 60, Dim(1280, 720) to 30, Dim(3840, 2160) to 60),
+            samsungVideoFps(flip5VideoTable),
+        )
+    }
+
+    @Test
+    fun `samsung video table in an unknown layout is ignored`() {
+        assertEquals(emptyMap(), samsungVideoFps(flip5VideoTable.copyOf(flip5VideoTable.size - 1)))
+        assertEquals(emptyMap(), samsungVideoFps(intArrayOf(1920, 1080, 60, 30, 25, 0)))
     }
 
     @Test
