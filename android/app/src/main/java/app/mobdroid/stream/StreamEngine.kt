@@ -13,7 +13,6 @@ import app.mobdroid.camera.CameraDescriptor
 import app.mobdroid.camera.CameraState
 import app.mobdroid.camera.Facing
 import app.mobdroid.camera.Stabilization
-import app.mobdroid.camera.chooseSize
 import app.mobdroid.engine.RtmpPublisher
 import app.mobdroid.engine.SrtPublisher
 import app.mobdroid.engine.media.VideoCodec
@@ -99,18 +98,30 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
 
     val isLive: Boolean get() = session != null
 
-    @Synchronized
     fun startPreview() {
-        if (previewActive) return
-        previewActive = true
-        val cameras = runCatching { CameraCatalog.list(context) }.getOrDefault(emptyList())
-        val key = settings.settings.value.cameraKey
-        val selected = cameras.firstOrNull { it.key == key } ?: cameras.firstOrNull { it.facing == Facing.BACK }
-            ?: cameras.firstOrNull()
-        _ui.update { it.copy(cameras = cameras, camera = selected) }
-        ensureCompositor()
-        openCamera()
+        synchronized(this) {
+            if (previewActive) return
+            previewActive = true
+        }
+        scope.launch {
+            val cameras = cachedCameras ?: runCatching { CameraCatalog.list(context) }
+                .onFailure { Log.e(TAG, "Camera catalog failed", it) }
+                .getOrDefault(emptyList())
+                .also { cachedCameras = it }
+            synchronized(this@StreamEngine) {
+                if (!previewActive) return@launch
+                val key = settings.settings.value.cameraKey
+                val selected = cameras.firstOrNull { it.key == key } ?: cameras.firstOrNull { it.facing == Facing.BACK }
+                    ?: cameras.firstOrNull()
+                _ui.update { it.copy(cameras = cameras, camera = selected) }
+                ensureCompositor()
+                openCamera()
+            }
+        }
     }
+
+    @Volatile
+    private var cachedCameras: List<CameraDescriptor>? = null
 
     @Synchronized
     fun stopPreviewIfIdle() {
@@ -342,10 +353,10 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         val (w, h) = outputSize(profile)
         val long = maxOf(w, h)
         val short = minOf(w, h)
-        val size = chooseSize(descriptor.sizes, long, short)
+        val size = descriptor.chooseSize(long, short, profile.fps) ?: descriptor.sizes.firstOrNull() ?: return
+        val fps = minOf(profile.fps, descriptor.maxFps(size))
         currentInputSize = size
         applyInputTransform()
-        val fps = if (profile.fps > 30 && !descriptor.supports60Fps) 30 else profile.fps
         camera.open(descriptor, compositor.inputSurface, size, fps, stabilization())
     }
 
