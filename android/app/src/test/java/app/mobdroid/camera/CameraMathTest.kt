@@ -118,6 +118,20 @@ class CameraMathTest {
     }
 
     @Test
+    fun `qualcomm video table gives the frame rate of each size`() {
+        assertEquals(
+            mapOf(Dim(3840, 2160) to 60, Dim(1920, 1080) to 120, Dim(1280, 720) to 60),
+            qualcommVideoFps(intArrayOf(3840, 2160, 60, 0, 1920, 1080, 60, 0, 1920, 1080, 120, 0, 1280, 720, 60, 0)),
+        )
+    }
+
+    @Test
+    fun `qualcomm video table in an unknown layout is ignored`() {
+        assertEquals(emptyMap(), qualcommVideoFps(intArrayOf(1920, 1080, 60)))
+        assertEquals(emptyMap(), qualcommVideoFps(intArrayOf(1920, 1080, 0, 0)))
+    }
+
+    @Test
     fun `sixty fps needs both a range and a size that can deliver it`() {
         val sizes = mapOf(Dim(1920, 1080) to 60, Dim(3840, 2160) to 30)
         assertTrue(supportsFps(listOf(Fps(30, 30), Fps(60, 60)), sizes, 60))

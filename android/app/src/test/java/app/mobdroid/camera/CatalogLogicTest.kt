@@ -211,7 +211,7 @@ class CatalogLogicTest {
     }
 
     @Test
-    fun `hidden physical ids are never opened as standalone cameras`() {
+    fun `lens the zoom range cannot reach is opened as its own camera when it has one`() {
         val cameras = listOf(
             camera(
                 "0",
@@ -221,7 +221,57 @@ class CatalogLogicTest {
             ),
             camera("2", lens("2", 1.7f, 4.48f, 2.2f), visible = false),
         )
-        assertEquals(listOf("0" to null, "0" to "2"), buildCatalog(cameras).map { it.camera.id to it.physicalId })
+        assertEquals(listOf("0" to null, "2" to null), buildCatalog(cameras).map { it.camera.id to it.physicalId })
+    }
+
+    @Test
+    fun `hidden physical ids the logical camera reaches are not listed`() {
+        val cameras = listOf(
+            camera(
+                "0",
+                lens("0", 5f, 7.2f),
+                capabilities = logicalCapabilities,
+                zoomRange = 0.5f..8f,
+                physical = listOf(lens("5", 5f, 7.2f), lens("2", 1.7f, 4.48f, 2.2f)),
+            ),
+            camera("2", lens("2", 1.7f, 4.48f, 2.2f), visible = false),
+        )
+        assertEquals(listOf("0" to null), buildCatalog(cameras).map { it.camera.id to it.physicalId })
+    }
+
+    @Test
+    fun `vivo with a 35 mm main lens lists the hidden three lens camera and the ultra wide`() {
+        val main = lens("3", 11.56f, 11.424f, 1.85f)
+        val ultraWide = lens("4", 4.03f, 9.994f, 2f)
+        val telephoto = lens("5", 22.48f, 9.139f, 2.67f)
+        val cameras = listOf(
+            camera(
+                "0",
+                main.copy(id = "0"),
+                capabilities = logicalCapabilities,
+                zoomRange = 0.65f..10f,
+                physical = listOf(ultraWide, main),
+            ),
+            camera("1", lens("1", 3.64f, 5.2f, 2f), facing = Facing.FRONT),
+            camera(
+                "2",
+                main.copy(id = "2"),
+                visible = false,
+                capabilities = logicalCapabilities,
+                zoomRange = 0.65f..10f,
+                physical = listOf(ultraWide, main, telephoto),
+            ),
+            camera("3", main, visible = false),
+            camera("4", ultraWide, visible = false),
+            camera("5", telephoto, visible = false),
+        )
+        val entries = buildCatalog(cameras)
+        assertEquals(
+            listOf("2" to "Back", "4" to "Ultra wide", "1" to "Front"),
+            entries.map { it.camera.id to it.label },
+        )
+        assertEquals(listOf(0.65f, 1f, 2.5f), entries.first().zoomStops)
+        assertEquals(listOf(null, null, null), entries.map { it.physicalId })
     }
 
     @Test

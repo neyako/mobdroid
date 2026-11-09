@@ -71,6 +71,17 @@ internal fun samsungVideoFps(table: IntArray): Map<Dim, Int> {
     return result
 }
 
+internal fun qualcommVideoFps(table: IntArray): Map<Dim, Int> {
+    if (table.size % 4 != 0) return emptyMap()
+    val result = HashMap<Dim, Int>()
+    for (i in table.indices step 4) {
+        val fps = table[i + 2]
+        if (table[i] <= 0 || table[i + 1] <= 0 || fps !in 1..240) return emptyMap()
+        result.merge(Dim(table[i], table[i + 1]), fps, ::max)
+    }
+    return result
+}
+
 internal fun vendorFps(ranges: List<Fps>, fps: Int, vendorMaxFps: Int): Int {
     val target = min(fps, vendorMaxFps)
     return if (ranges.none { it.upper >= target }) target else 0

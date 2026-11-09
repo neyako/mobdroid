@@ -64,16 +64,30 @@ them, not code style.
   hide auxiliary cameras), filters depth, secure, monochrome and low resolution sensors, dedupes lenses
   and derives zoom stops from field of view. It blocks for tens of milliseconds; call it off the main
   thread. `CameraController` reopens with backoff on errors, stalls and availability changes and steps
-  down session options on configuration failures and on faults before the first frame. Call `SurfaceTexture.setDefaultBufferSize` before
-  `open`; `open` resets zoom, torch, exposure and locks.
+  down session options on configuration failures and on faults before the first frame. Call
+  `SurfaceTexture.setDefaultBufferSize` before `open`; `open` resets zoom, torch, exposure and locks.
+- Catalog rules (`buildCatalog`): a hidden logical camera replaces a visible logical one of the same
+  facing when it has all of its lenses and more zoom stops (the vivo X300 lists a two lens camera and
+  hides the three lens one). When a lens is wider than the zoom range reaches, the range's start is a
+  stop of its own (vivo: 0.65x is a crop of the ultra wide, the full lens is 0.4x). A lens the zoom
+  range cannot reach becomes its own entry: opened by its own camera id when that id can be probed,
+  through a physical stream of the logical camera only otherwise. A physical stream crashes the vivo's
+  Qualcomm camera provider (`ChiMcxStaticPolicy::ActivateAuxCameraStateAndMask`) at every fallback level.
+- A camera provider restart takes about 6 s, during which `getCameraCharacteristics` throws. That is a
+  recoverable fault retried with backoff; an id `openCamera` rejects is not.
 - Samsung does not advertise 60 fps in the Camera2 AE ranges on most models. Its vendor table
   `samsung.android.scaler.availableVideoConfigurations` (6 ints per entry: width, height, min fps, max fps
   and two unused) lists the real video frame rates, read by `samsungVideoFps` into
   `CameraDescriptor.vendorFpsBySize`. When the AE ranges cannot reach the profile's rate,
   `CameraController` sets `samsung.android.control.recordingMaxFps`/`recordingMinFps` with a fixed AE
   range, and drops them at the last fallback level. The ultra wide lens still delivers 30 fps, and the
-  camera takes a few seconds to return to 60 after zooming back from it. Elsewhere the encoder runs at
-  `min(profile fps, camera max fps)`.
+  camera takes a few seconds to return to 60 after zooming back from it.
+- Qualcomm phones (vivo, and likely OPPO and Xiaomi) list 60 fps in
+  `org.quic.camera2.customhfrfps.info.CustomHFRFpsTable` (4 ints per entry: width, height, fps and one
+  unused), read by `qualcommVideoFps` into the same map. There a fixed AE range alone delivers the rate;
+  the Samsung keys are set only for a camera that has the Samsung table (the keys are not in
+  `availableCaptureRequestKeys` on the Flip5, and unknown vendor keys throw). Elsewhere the encoder
+  runs at `min(profile fps, camera max fps)`.
 - The encoder's key frame interval counts frames at its configured rate, so `VideoEncoder` requests a key
   frame when one is 25% overdue. That keeps the interval near the profile's when the camera delivers
   fewer frames than the encoder's rate.

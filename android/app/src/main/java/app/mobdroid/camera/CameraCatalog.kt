@@ -28,8 +28,13 @@ object CameraCatalog {
     }
 }
 
-private val SAMSUNG_VIDEO_CONFIGURATIONS =
+internal val SAMSUNG_VIDEO_CONFIGURATIONS =
     CameraCharacteristics.Key("samsung.android.scaler.availableVideoConfigurations", IntArray::class.java)
+private val QUALCOMM_VIDEO_FRAME_RATES =
+    CameraCharacteristics.Key("org.quic.camera2.customhfrfps.info.CustomHFRFpsTable", IntArray::class.java)
+
+internal fun vendorTable(chars: CameraCharacteristics, key: CameraCharacteristics.Key<IntArray>): IntArray =
+    runCatching { chars.get(key) }.getOrNull() ?: IntArray(0)
 
 private fun characteristics(manager: CameraManager, id: String): CameraCharacteristics? =
     try {
@@ -77,8 +82,10 @@ private fun readCamera(manager: CameraManager, id: String, visible: Boolean): Ra
         hasFlash = chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true,
         realtimeTimestamps = chars.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) ==
             CameraMetadata.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME,
-        vendorFps = samsungVideoFps(runCatching { chars.get(SAMSUNG_VIDEO_CONFIGURATIONS) }.getOrNull() ?: IntArray(0))
-            .filterKeys { it in sizes },
+        vendorFps = (
+            samsungVideoFps(vendorTable(chars, SAMSUNG_VIDEO_CONFIGURATIONS)) +
+                qualcommVideoFps(vendorTable(chars, QUALCOMM_VIDEO_FRAME_RATES))
+            ).filterKeys { it in sizes },
     )
 }
 

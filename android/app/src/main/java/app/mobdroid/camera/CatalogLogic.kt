@@ -136,7 +136,10 @@ private class Candidate(val camera: RawCamera) {
     val logical = ratios.isNotEmpty()
     val reachable = ratios.filter { isReachable(it.ratio, camera.zoomRange) }
     val keys = (reachable.map { it.lens } + camera.lens).map { lensKey(camera.facing, it) }
-    val stops = reachable.map { niceStop(it.ratio, camera.zoomRange) }.distinct().sorted()
+    private val widerLens = ratios.any { it.ratio < camera.zoomRange.start * 0.9f }
+    val stops = reachable.map { niceStop(it.ratio, camera.zoomRange) }
+        .plus(listOfNotNull(camera.zoomRange.start.takeIf { widerLens }))
+        .distinct().sorted()
         .takeIf { it.size >= 2 }.orEmpty()
     val rank = when {
         camera.visible && logical -> 0
@@ -144,6 +147,10 @@ private class Candidate(val camera: RawCamera) {
         !logical -> 2
         else -> 3
     }
+
+    fun extends(other: Candidate): Boolean =
+        other.rank == 0 && camera.facing == other.camera.facing && stops.size > other.stops.size &&
+            keys.containsAll(other.keys)
 }
 
 private class Draft(
@@ -172,8 +179,9 @@ internal fun buildCatalog(cameras: List<RawCamera>): List<CatalogEntry> {
     val covered = HashSet<String>()
     val drafts = ArrayList<Draft>()
     val accepted = ArrayList<Candidate>()
-    for (candidate in candidates) {
-        if (candidate.keys.all { it in covered }) continue
+    for (listed in candidates) {
+        if (listed.keys.all { it in covered }) continue
+        val candidate = candidates.filter { it.extends(listed) }.maxByOrNull { it.stops.size } ?: listed
         covered += candidate.keys
         accepted += candidate
         drafts += Draft(candidate.camera, null, candidate.camera.lens, candidate.camera.zoomRange, candidate.stops)
@@ -181,6 +189,11 @@ internal fun buildCatalog(cameras: List<RawCamera>): List<CatalogEntry> {
     for (candidate in accepted) {
         for (unreachable in candidate.ratios - candidate.reachable.toSet()) {
             if (!covered.add(lensKey(candidate.camera.facing, unreachable.lens))) continue
+            val standalone = cameras.firstOrNull { it.id == unreachable.lens.id }
+            if (standalone != null) {
+                drafts += Draft(standalone, null, standalone.lens, standalone.zoomRange, emptyList())
+                continue
+            }
             val range = 1f..max(1f, candidate.camera.zoomRange.endInclusive)
             drafts += Draft(candidate.camera, unreachable.lens.id, unreachable.lens, range, emptyList())
         }

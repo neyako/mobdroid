@@ -104,6 +104,7 @@ private class Hardware(chars: CameraCharacteristics) {
     val flash = chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
     val hasVideoStabilization =
         chars.get(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES)?.isNotEmpty() == true
+    val samsungRecordingFps = vendorTable(chars, SAMSUNG_VIDEO_CONFIGURATIONS).isNotEmpty()
     val videoRecordUseCase = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
         chars.get(CameraCharacteristics.SCALER_AVAILABLE_STREAM_USE_CASES)
             ?.contains(CameraMetadata.SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_RECORD.toLong()) == true
@@ -302,7 +303,7 @@ class CameraController(context: Context) {
         val chars = try {
             manager.getCameraCharacteristics(current.camera.id)
         } catch (e: IllegalArgumentException) {
-            fail("Camera ${current.camera.id} not found", false, Reason.FAULT)
+            fail("Camera ${current.camera.id} not found", true, Reason.FAULT)
             return
         } catch (e: CameraAccessException) {
             fail("Camera unavailable", true, Reason.BUSY)
@@ -325,7 +326,7 @@ class CameraController(context: Context) {
             fail(describe(e.reason), true, if (isBusy(e.reason)) Reason.BUSY else Reason.FAULT)
         } catch (e: IllegalArgumentException) {
             pendingOpen = NONE
-            fail("Camera ${current.camera.id} not found", false, Reason.FAULT)
+            fail("Camera ${current.camera.id} cannot be opened", false, Reason.FAULT)
         }
     }
 
@@ -638,7 +639,7 @@ class CameraController(context: Context) {
         b.set(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_ON)
         b.set(CaptureRequest.CONTROL_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_AUTO)
         plan.fpsRange?.let { b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
-        if (plan.vendorFps > 0) {
+        if (plan.vendorFps > 0 && hw.samsungRecordingFps) {
             b.set(SAMSUNG_RECORDING_MAX_FPS, plan.vendorFps)
             b.set(SAMSUNG_RECORDING_MIN_FPS, plan.vendorFps)
         }
