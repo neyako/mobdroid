@@ -79,7 +79,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateRotation() {
-        val rotation = display.rotation
+        @Suppress("DEPRECATION")
+        val rotation = if (Build.VERSION.SDK_INT >= 30) display.rotation else windowManager.defaultDisplay.rotation
         app.engine.setDisplayRotation(rotation * 90)
     }
 
