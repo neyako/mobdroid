@@ -94,6 +94,9 @@ class SrtPublisher internal constructor(
         }
     }
 
+    val latencyMs: Int
+        get() = runCatching { SrtUrl.parse(url).latencyMs }.getOrDefault(app.mobdroid.engine.abr.DEFAULT_SRT_LATENCY_MS)
+
     override fun stats(): PublisherStats {
         val counters = session?.counters()
         return PublisherStats(

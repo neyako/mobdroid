@@ -12,6 +12,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -75,6 +76,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -113,7 +117,17 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
         Preview(engine, ui)
         BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
             val landscape = maxWidth > maxHeight
-            StatusOverlay(ui, stats, appSettings.selectedProfile.name, Modifier.align(Alignment.TopStart).padding(12.dp))
+            StatusOverlay(
+                ui,
+                stats,
+                appSettings.selectedProfile.name,
+                appSettings.selectedProfile.bitrateKbps * 1000,
+                onDismissError = engine::clearError,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(12.dp)
+                    .padding(end = if (landscape) 96.dp else 0.dp),
+            )
             ZoomStops(
                 ui,
                 onZoom = engine::setZoom,
@@ -141,16 +155,6 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                 onTorch = { engine.setTorch(!ui.torch) },
                 modifier = Modifier.align(if (landscape) Alignment.CenterEnd else Alignment.BottomCenter),
             )
-            ui.error?.let { error ->
-                Text(
-                    error,
-                    style = statusStyle.copy(color = MaterialTheme.colorScheme.error),
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 12.dp)
-                        .pointerInput(Unit) { detectTapGestures { engine.clearError() } },
-                )
-            }
         }
         AnimatedVisibility(
             visible = showSettings,
@@ -215,7 +219,14 @@ private fun Preview(engine: StreamEngine, ui: UiState) {
 }
 
 @Composable
-private fun StatusOverlay(ui: UiState, stats: LiveStats, profileName: String, modifier: Modifier) {
+private fun StatusOverlay(
+    ui: UiState,
+    stats: LiveStats,
+    profileName: String,
+    maxBitrateBps: Int,
+    onDismissError: () -> Unit,
+    modifier: Modifier,
+) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             val (label, color) = when (ui.live) {
@@ -234,11 +245,12 @@ private fun StatusOverlay(ui: UiState, stats: LiveStats, profileName: String, mo
             Text(
                 buildString {
                     append(formatBitrate(stats.bitrateBps))
+                    if (stats.targetBitrateBps in 1 until maxBitrateBps) append("  ABR ${formatBitrate(stats.targetBitrateBps.toLong())}")
                     append("  ")
                     append("%.0f fps".format(stats.fps))
                     if (stats.rttMs > 0) append("  %.0f ms".format(stats.rttMs))
                     stats.codec?.let { append("  ").append(it.label) }
-                    if (stats.links > 0) append("  ${stats.links} links")
+                    if (stats.links > 0) append(if (stats.links == 1) "  1 link" else "  ${stats.links} links")
                 },
                 style = statusStyle,
             )
@@ -252,6 +264,15 @@ private fun StatusOverlay(ui: UiState, stats: LiveStats, profileName: String, mo
         }
         if (alerts.isNotEmpty()) {
             Text(alerts.joinToString("  "), style = statusStyle.copy(color = Color(0xFFFFCC00)))
+        }
+        ui.error?.let { error ->
+            Text(
+                error,
+                style = statusStyle.copy(color = Color(0xFFFF8A80)),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.pointerInput(Unit) { detectTapGestures { onDismissError() } },
+            )
         }
     }
 }
@@ -353,7 +374,10 @@ private fun LiveButton(state: LiveState, confirmStop: Boolean, onClick: () -> Un
         shape = RoundedCornerShape(corner),
         color = Color.Black.copy(alpha = 0.35f),
         border = androidx.compose.foundation.BorderStroke(3.dp, Color.White),
-        modifier = Modifier.size(80.dp).scale(pressScale),
+        modifier = Modifier
+            .size(80.dp)
+            .scale(pressScale)
+            .semantics { contentDescription = if (confirmStop) "Confirm stop" else if (live) "Stop stream" else "Go live" },
     ) {
         Box(contentAlignment = Alignment.Center) {
             Box(Modifier.size(inner).clip(RoundedCornerShape(innerCorner)).background(LiveRed))
@@ -406,11 +430,11 @@ private fun CameraList(cameras: List<CameraDescriptor>, selected: CameraDescript
                 headlineContent = { Text(camera.label) },
                 supportingContent = {
                     Text(
-                        buildString {
-                            append(camera.facing.name.lowercase().replaceFirstChar(Char::uppercase))
-                            camera.sizes.maxByOrNull { it.width * it.height }?.let { append("  ${it.width}x${it.height}") }
-                            if (camera.supports60Fps) append("  60 fps")
-                        },
+                        listOfNotNull(
+                            camera.facing.name.lowercase().replaceFirstChar(Char::uppercase).takeIf { it != camera.label },
+                            camera.sizes.maxByOrNull { it.width * it.height }?.let { "${it.width}x${it.height}" },
+                            "60 fps".takeIf { camera.supports60Fps },
+                        ).joinToString("  "),
                     )
                 },
                 leadingContent = {
@@ -426,7 +450,7 @@ private fun CameraList(cameras: List<CameraDescriptor>, selected: CameraDescript
                 modifier = Modifier
                     .padding(horizontal = 12.dp)
                     .clip(RoundedCornerShape(16.dp))
-                    .pointerInput(camera) { detectTapGestures { onSelect(camera) } },
+                    .clickable { onSelect(camera) },
             )
         }
     }

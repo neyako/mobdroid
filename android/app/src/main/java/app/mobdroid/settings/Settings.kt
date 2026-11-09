@@ -66,3 +66,6 @@ data class AppSettings(
 fun isValidBitrateKbps(kbps: Int) = kbps in 50..50_000
 
 val fpsChoices = listOf(25, 30, 50, 60)
+
+val StreamProfile.allowedCodecs: List<VideoCodec>
+    get() = if (url.startsWith("srt")) platform.codecs - VideoCodec.AV1 else platform.codecs

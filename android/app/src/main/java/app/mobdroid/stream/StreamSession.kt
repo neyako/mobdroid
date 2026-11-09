@@ -28,7 +28,8 @@ class StreamSession(
     val lastError: StateFlow<String?> = _lastError
 
     @Volatile
-    private var publisher: Publisher? = null
+    var publisher: Publisher? = null
+        private set
 
     @Volatile
     private var waitingForKeyFrame = true
@@ -64,11 +65,12 @@ class StreamSession(
                     var reason = events.receive()
                     if (reason == null) {
                         attempt = 0
+                        requestKeyFrame()
                         _state.value = LiveState.LIVE
                         _lastError.value = null
                         reason = events.receive()
                     }
-                    _lastError.value = reason
+                    _lastError.value = reason?.let(::describeError)
                 } finally {
                     publisher = null
                     next.stop()
@@ -112,5 +114,17 @@ class StreamSession(
 
     private companion object {
         val BACKOFF_MS = longArrayOf(500, 1000, 2000, 3000, 5000)
+    }
+}
+
+fun describeError(reason: String): String {
+    val lower = reason.lowercase()
+    return when {
+        "econnrefused" in lower || "connection refused" in lower -> "Server refused the connection"
+        "unknownhost" in lower || "unable to resolve" in lower || "no address" in lower -> "Server not found"
+        "timed out" in lower || "timeout" in lower -> "Connection timed out"
+        "enetunreach" in lower || "network is unreachable" in lower -> "No network"
+        "econnreset" in lower || "broken pipe" in lower || "connection reset" in lower -> "Connection dropped"
+        else -> reason.lineSequence().first().take(120)
     }
 }

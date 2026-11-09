@@ -13,8 +13,15 @@ import app.mobdroid.camera.CameraDescriptor
 import app.mobdroid.camera.CameraState
 import app.mobdroid.camera.Facing
 import app.mobdroid.camera.Stabilization
-import app.mobdroid.engine.RtmpPublisher
-import app.mobdroid.engine.SrtPublisher
+import app.mobdroid.engine.abr.ADAPTIVE_BITRATE_UPDATE_INTERVAL_MS
+import app.mobdroid.engine.abr.AdaptiveBitrate
+import app.mobdroid.engine.abr.BelaboxAdaptiveBitrate
+import app.mobdroid.engine.abr.QueueAdaptiveBitrate
+import app.mobdroid.engine.abr.TransportBitrateMeter
+import app.mobdroid.engine.abr.toStreamStats
+import app.mobdroid.engine.rtmp.RtmpPublisher
+import app.mobdroid.engine.srt.SrtPublisher
+import app.mobdroid.settings.allowedCodecs
 import app.mobdroid.engine.media.VideoCodec
 import app.mobdroid.engine.net.Publisher
 import app.mobdroid.engine.net.PublisherListener
@@ -26,6 +33,15 @@ import app.mobdroid.settings.Orientation
 import app.mobdroid.settings.SettingsStore
 import app.mobdroid.settings.StabilizationSetting
 import app.mobdroid.settings.StreamProfile
+import app.mobdroid.uvc.UvcCamera
+import app.mobdroid.uvc.UvcDevices
+import app.mobdroid.uvc.closest
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbManager
+import android.util.Range
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -35,6 +51,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -71,6 +90,10 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private val batteryManager = context.getSystemService(BatteryManager::class.java)
     private val camera = CameraController(context)
     private val links = AndroidNetworkLinks(context)
+    private val uvcDevices = UvcDevices(context)
+    private var uvcCamera: UvcCamera? = null
+    private var uvcSurface: Surface? = null
+    private var cameraGeneration = 0
     private val _ui = MutableStateFlow(UiState())
     val ui: StateFlow<UiState> = _ui.asStateFlow()
     private val _stats = MutableStateFlow(LiveStats())
@@ -91,10 +114,83 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
 
     init {
         scope.launch { camera.state.collect { s -> _ui.update { it.copy(cameraState = s) } } }
+        scope.launch {
+            settings.settings
+                .map { s -> listOf(s.selectedProfile.resolution, s.selectedProfile.orientation, s.selectedProfile.fps, s.stabilization) }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect {
+                    synchronized(this@StreamEngine) {
+                        if (isLive || !previewActive) return@collect
+                        val (w, h) = outputSize(settings.settings.value.selectedProfile)
+                        compositor?.setOutputSize(w, h)
+                        openCamera()
+                    }
+                }
+        }
         powerManager.addThermalStatusListener(context.mainExecutor) { status ->
             _ui.update { it.copy(thermal = status) }
         }
+        ContextCompat.registerReceiver(
+            context,
+            object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    onUsbChanged(intent.action == UsbManager.ACTION_USB_DEVICE_ATTACHED)
+                }
+            },
+            IntentFilter().apply {
+                addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+                addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+            },
+            ContextCompat.RECEIVER_EXPORTED,
+        )
     }
+
+    private fun listCameras(): List<CameraDescriptor> {
+        val builtIn = cachedCameras ?: runCatching { CameraCatalog.list(context) }
+            .onFailure { Log.e(TAG, "Camera catalog failed", it) }
+            .getOrDefault(emptyList())
+            .also { cachedCameras = it }
+        return builtIn + uvcDevices.list().map(::uvcDescriptor)
+    }
+
+    private fun uvcDescriptor(device: UsbDevice) = CameraDescriptor(
+        id = UVC_PREFIX + device.deviceName,
+        physicalId = null,
+        facing = Facing.EXTERNAL,
+        label = device.productName?.trim()?.takeIf { it.isNotEmpty() } ?: "USB camera",
+        zoomRatioRange = 1f..1f,
+        lensZoomStops = emptyList(),
+        sensorOrientation = 0,
+        sizes = emptyList(),
+        fpsRanges = listOf(Range(30, 30)),
+        supports60Fps = true,
+        stabilizationModes = listOf(Stabilization.OFF),
+        hasFlash = false,
+    )
+
+    private fun onUsbChanged(attached: Boolean) {
+        scope.launch {
+            val cameras = listCameras()
+            synchronized(this@StreamEngine) {
+                val current = _ui.value.camera
+                val newUvc = cameras.firstOrNull { it.id.startsWith(UVC_PREFIX) && it.key != current?.key }
+                val next = when {
+                    attached && newUvc != null -> newUvc
+                    current != null && cameras.none { it.key == current.key } -> defaultCamera(cameras)
+                    else -> current
+                }
+                _ui.update { it.copy(cameras = cameras) }
+                if (next != null && next.key != current?.key) {
+                    _ui.update { it.copy(camera = next, zoom = 1f, torch = false) }
+                    if (previewActive) openCamera()
+                }
+            }
+        }
+    }
+
+    private fun defaultCamera(cameras: List<CameraDescriptor>) =
+        cameras.firstOrNull { it.facing == Facing.BACK } ?: cameras.firstOrNull()
 
     val isLive: Boolean get() = session != null
 
@@ -104,15 +200,11 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             previewActive = true
         }
         scope.launch {
-            val cameras = cachedCameras ?: runCatching { CameraCatalog.list(context) }
-                .onFailure { Log.e(TAG, "Camera catalog failed", it) }
-                .getOrDefault(emptyList())
-                .also { cachedCameras = it }
+            val cameras = listCameras()
             synchronized(this@StreamEngine) {
                 if (!previewActive) return@launch
                 val key = settings.settings.value.cameraKey
-                val selected = cameras.firstOrNull { it.key == key } ?: cameras.firstOrNull { it.facing == Facing.BACK }
-                    ?: cameras.firstOrNull()
+                val selected = cameras.firstOrNull { it.key == key } ?: defaultCamera(cameras)
                 _ui.update { it.copy(cameras = cameras, camera = selected) }
                 ensureCompositor()
                 openCamera()
@@ -127,7 +219,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     fun stopPreviewIfIdle() {
         if (!previewActive || isLive) return
         previewActive = false
-        camera.close()
+        closeSources()
         compositor?.release()
         compositor = null
     }
@@ -178,7 +270,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         if (isLive) return
         val profile = settings.settings.value.selectedProfile
         val (w, h) = outputSize(profile)
-        val codec = CodecCatalog.choose(profile.codec, profile.platform.codecs, w, h, profile.fps)
+        val codec = CodecCatalog.choose(profile.codec, profile.allowedCodecs, w, h, profile.fps)
         if (CodecCatalog.encoders[codec] == null) {
             _ui.update { it.copy(error = "No hardware video encoder") }
             return
@@ -186,11 +278,13 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         liveProfile = profile
         liveCodec = codec
         targetBitrate = profile.bitrateKbps * 1000
-        context.startForegroundService(Intent(context, StreamService::class.java))
+        context.startForegroundService(
+            Intent(context, StreamService::class.java).putExtra(StreamService.EXTRA_USB, uvcCamera != null),
+        )
         ensureCompositor()
         if (!previewActive) startPreview()
         compositor!!.setOutputSize(w, h)
-        compositor!!.setFrameRate(profile.fps)
+        compositor!!.setFrameRate(encoderFps(profile))
         val newSession = StreamSession(ioScope, { listener -> createPublisher(profile, listener) }) {
             videoEncoder?.requestKeyFrame()
         }
@@ -213,6 +307,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         monitor = scope.launch {
             launch { newSession.state.collect { s -> _ui.update { it.copy(live = s) } } }
             launch { newSession.lastError.collect { e -> if (e != null) _ui.update { it.copy(error = e) } } }
+            if (profile.adaptiveBitrate) launch { runAdaptiveBitrate(newSession, profile) }
             while (isActive) {
                 delay(1000)
                 tick(newSession)
@@ -233,7 +328,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         audioEncoder = null
         links.stop()
         liveProfile = null
-        _ui.update { it.copy(live = LiveState.OFFLINE) }
+        _ui.update { it.copy(live = LiveState.OFFLINE, error = null) }
         _stats.value = LiveStats()
         context.stopService(Intent(context, StreamService::class.java))
         if (previewSurface == null) stopPreviewIfIdle()
@@ -259,7 +354,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             codec = liveCodec!!,
             width = w,
             height = h,
-            fps = profile.fps,
+            fps = encoderFps(profile),
             bitrateBps = targetBitrate,
             keyFrameIntervalSeconds = profile.keyFrameIntervalSeconds,
             sink = session,
@@ -302,13 +397,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         ) {
             restartVideoEncoder("no output for 5 s")
         }
-        if (profile.adaptiveBitrate && session.state.value == LiveState.LIVE) {
-            val next = adaptBitrate(stats, profile)
-            if (next != targetBitrate) {
-                targetBitrate = next
-                videoEncoder?.setBitrate(next)
-            }
-        }
+        transportMeter.update(stats.bytesSent, System.nanoTime())
         _stats.value = LiveStats(
             bitrateBps = stats.sendBitrateBps,
             targetBitrateBps = targetBitrate,
@@ -318,22 +407,41 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             droppedFrames = stats.droppedVideoFrames,
             uptimeSeconds = (System.nanoTime() - liveStartedAt) / 1_000_000_000L,
             codec = liveCodec,
-            links = links.links.value.size,
+            links = (session.publisher as? SrtPublisher)?.linkStats()?.count { it.bytesSent > 0 } ?: 0,
             audioLevel = audioEncoder?.level ?: 0f,
         )
         _ui.update { it.copy(battery = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)) }
     }
 
-    private fun adaptBitrate(stats: app.mobdroid.engine.net.PublisherStats, profile: StreamProfile): Int {
-        val max = profile.bitrateKbps * 1000
-        val min = profile.minBitrateKbps * 1000
-        val queuedMs = if (targetBitrate > 0) stats.queuedBytes * 8000 / targetBitrate else 0
-        val next = when {
-            queuedMs > 1000 -> (targetBitrate * 0.7).toInt()
-            queuedMs > 300 -> (targetBitrate * 0.9).toInt()
-            else -> targetBitrate + max / 20
+    private val transportMeter = TransportBitrateMeter(ADAPTIVE_BITRATE_START_BPS)
+
+    private suspend fun runAdaptiveBitrate(session: StreamSession, profile: StreamProfile) {
+        val max = profile.bitrateKbps * 1000L
+        val min = profile.minBitrateKbps * 1000L
+        var abr: AdaptiveBitrate? = null
+        var owner: Any? = null
+        while (true) {
+            delay(ADAPTIVE_BITRATE_UPDATE_INTERVAL_MS)
+            val publisher = session.publisher
+            if (publisher == null || session.state.value != LiveState.LIVE) continue
+            if (owner !== publisher) {
+                owner = publisher
+                abr = if (publisher is SrtPublisher) {
+                    BelaboxAdaptiveBitrate(max, min)
+                } else {
+                    QueueAdaptiveBitrate(max, min)
+                }
+            }
+            val stats = publisher.stats().toStreamStats(
+                latencyMs = (publisher as? SrtPublisher)?.latencyMs,
+                transportBitrate = transportMeter.bitrate,
+            )
+            val next = abr!!.update(stats).toInt()
+            if (next != targetBitrate) {
+                targetBitrate = next
+                videoEncoder?.setBitrate(next)
+            }
         }
-        return next.coerceIn(min, max)
     }
 
     private fun ensureCompositor() {
@@ -346,21 +454,99 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         }
     }
 
+    private fun closeSources() {
+        cameraGeneration++
+        camera.close()
+        uvcCamera?.let { uvc ->
+            uvcCamera = null
+            uvc.onError = null
+            uvc.close()
+        }
+        uvcSurface?.release()
+        uvcSurface = null
+    }
+
     private fun openCamera() {
         val descriptor = _ui.value.camera ?: return
         val compositor = compositor ?: return
+        closeSources()
+        if (descriptor.id.startsWith(UVC_PREFIX)) {
+            openUvc(descriptor, compositor)
+            return
+        }
         val profile = liveProfile ?: settings.settings.value.selectedProfile
         val (w, h) = outputSize(profile)
         val long = maxOf(w, h)
         val short = minOf(w, h)
         val size = descriptor.chooseSize(long, short, profile.fps) ?: descriptor.sizes.firstOrNull() ?: return
         val fps = minOf(profile.fps, descriptor.maxFps(size))
+        cameraFps = fps
+        compositor.setFrameRate(encoderFps(profile))
         currentInputSize = size
         applyInputTransform()
         camera.open(descriptor, compositor.inputSurface, size, fps, stabilization())
     }
 
     private var currentInputSize = Size(1920, 1080)
+    private var cameraFps = 0
+
+    private fun encoderFps(profile: StreamProfile) = if (cameraFps > 0) minOf(profile.fps, cameraFps) else profile.fps
+
+    private fun openUvc(descriptor: CameraDescriptor, compositor: VideoCompositor) {
+        val generation = cameraGeneration
+        val device = uvcDevices.list().firstOrNull { UVC_PREFIX + it.deviceName == descriptor.id } ?: return
+        val profile = liveProfile ?: settings.settings.value.selectedProfile
+        val (w, h) = outputSize(profile)
+        uvcDevices.requestPermission(device) { granted ->
+            if (!granted) {
+                _ui.update { it.copy(error = "USB camera permission denied") }
+                return@requestPermission
+            }
+            ioScope.launch {
+                val uvc = try {
+                    UvcCamera.open(context, device)
+                } catch (e: Exception) {
+                    Log.e(TAG, "USB camera open failed", e)
+                    _ui.update { it.copy(error = "USB camera: ${e.message}") }
+                    return@launch
+                }
+                val format = uvc.formats.closest(maxOf(w, h), minOf(w, h), profile.fps)
+                synchronized(this@StreamEngine) {
+                    if (generation != cameraGeneration || format == null) {
+                        uvc.close()
+                        if (format == null) _ui.update { it.copy(error = "USB camera has no usable format") }
+                        return@launch
+                    }
+                    uvcCamera = uvc
+                    cameraFps = format.fps
+                    compositor.setFrameRate(encoderFps(profile))
+                    currentInputSize = Size(format.width, format.height)
+                    applyInputTransform()
+                    val surface = compositor.newInputSurface().also { uvcSurface = it }
+                    uvc.onError = { message -> onUvcError(generation, message) }
+                    try {
+                        uvc.start(format, surface)
+                        _ui.update { it.copy(cameraState = CameraState.Streaming) }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "USB camera start failed", e)
+                        onUvcError(generation, e.message ?: "start failed")
+                    }
+                }
+            }
+        }
+    }
+
+    private fun onUvcError(generation: Int, message: String) {
+        scope.launch {
+            synchronized(this@StreamEngine) {
+                if (generation != cameraGeneration) return@launch
+                _ui.update { it.copy(error = "USB camera: $message") }
+                closeSources()
+            }
+            delay(1000)
+            onUsbChanged(attached = false)
+        }
+    }
 
     private fun applyInputTransform() {
         val descriptor = _ui.value.camera ?: return
@@ -385,6 +571,8 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
 
     private companion object {
         const val TAG = "StreamEngine"
+        const val UVC_PREFIX = "uvc:"
+        const val ADAPTIVE_BITRATE_START_BPS = 1_000_000L
     }
 }
 

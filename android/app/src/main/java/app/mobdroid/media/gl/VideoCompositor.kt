@@ -76,6 +76,8 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         ready.await()
     }
 
+    fun newInputSurface(): Surface = Surface(surfaceTexture)
+
     fun setInput(width: Int, height: Int, rotationDegrees: Int, mirror: Boolean) = runBlockingOnThread {
         inputWidth = width
         inputHeight = height

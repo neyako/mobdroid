@@ -45,7 +45,7 @@ class VideoEncoder(
             setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
             setInteger(MediaFormat.KEY_PRIORITY, 0)
             setInteger(MediaFormat.KEY_PREPEND_HEADER_TO_SYNC_FRAMES, 1)
-            setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 2_000_000L / fps)
+            setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 500_000L)
             setInteger(
                 MediaFormat.KEY_BITRATE_MODE,
                 if (info.supportsCbr) {

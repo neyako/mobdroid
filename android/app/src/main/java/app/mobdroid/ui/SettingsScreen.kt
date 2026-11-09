@@ -67,6 +67,7 @@ import app.mobdroid.settings.Resolution
 import app.mobdroid.settings.SettingsStore
 import app.mobdroid.settings.StabilizationSetting
 import app.mobdroid.settings.StreamProfile
+import app.mobdroid.settings.allowedCodecs
 import app.mobdroid.settings.fpsChoices
 import app.mobdroid.stream.outputSize
 
@@ -142,7 +143,7 @@ private fun SettingsHome(store: SettingsStore, live: Boolean, onClose: () -> Uni
                 supportingContent = {
                     val codec = CodecCatalog.choose(
                         profile.codec,
-                        profile.platform.codecs,
+                        profile.allowedCodecs,
                         outputSize(profile).first,
                         outputSize(profile).second,
                         profile.fps,
@@ -256,12 +257,12 @@ private fun ProfileEditor(store: SettingsStore, id: String, live: Boolean, onBac
         SectionLabel("Video")
         val (w, h) = outputSize(profile)
         Text("Codec", style = MaterialTheme.typography.bodyMedium)
-        val codecs = listOf<VideoCodec?>(null) + profile.platform.codecs.reversed()
+        val codecs = listOf<VideoCodec?>(null) + profile.allowedCodecs.reversed()
         Choices(
             codecs,
             profile.codec,
             label = { codec ->
-                codec?.label ?: "Auto ${CodecCatalog.choose(null, profile.platform.codecs, w, h, profile.fps).label}"
+                codec?.label ?: "Auto ${CodecCatalog.choose(null, profile.allowedCodecs, w, h, profile.fps).label}"
             },
             isEnabled = { it == null || CodecCatalog.available(it, w, h, profile.fps) },
             enabled = editable,

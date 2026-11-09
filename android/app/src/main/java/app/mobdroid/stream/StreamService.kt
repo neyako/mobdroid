@@ -40,7 +40,12 @@ class StreamService : Service() {
         startForeground(
             1,
             notification,
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                if (intent?.getBooleanExtra(EXTRA_USB, false) == true) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                } else {
+                    0
+                },
         )
         if (wakeLock == null) {
             wakeLock = getSystemService(PowerManager::class.java)
@@ -64,7 +69,8 @@ class StreamService : Service() {
         super.onDestroy()
     }
 
-    private companion object {
-        const val CHANNEL = "live"
+    companion object {
+        const val EXTRA_USB = "usb"
+        private const val CHANNEL = "live"
     }
 }
