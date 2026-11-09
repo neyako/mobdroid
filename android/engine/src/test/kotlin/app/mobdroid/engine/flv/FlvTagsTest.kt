@@ -54,6 +54,17 @@ class FlvTagsTest {
     }
 
     @Test
+    fun av1KeyFramesWithoutInBandSequenceHeaderGetOneFromTheConfig() {
+        val tags = video(VideoCodec.AV1, sequenceHeader)
+        val frameObu = hex("320300aabb")
+        assertEquals(
+            "91" + "61763031" + sequenceHeader.toHex() + frameObu.toHex(),
+            frameOf(tags, concat(hex("1200"), frameObu), true),
+        )
+        assertEquals("a1" + "61763031" + frameObu.toHex(), frameOf(tags, frameObu, false))
+    }
+
+    @Test
     fun av1FrameObuWithoutSizeFieldGetsOne() {
         val tags = video(VideoCodec.AV1, sequenceHeader)
         assertEquals("a1" + "61763031" + "3203" + "aabbcc", frameOf(tags, hex("30aabbcc"), false))

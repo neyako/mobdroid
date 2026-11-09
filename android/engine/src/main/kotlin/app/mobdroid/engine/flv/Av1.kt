@@ -36,6 +36,16 @@ internal inline fun forEachObu(
     }
 }
 
+internal fun containsObuOfType(data: ByteArray, wanted: Int): Boolean {
+    var found = false
+    forEachObu(data, 0, data.size) { type, _, _, _ ->
+        if (type == wanted) {
+            found = true
+        }
+    }
+    return found
+}
+
 internal fun writeObuWithSizeField(
     out: ByteWriter,
     data: ByteArray,

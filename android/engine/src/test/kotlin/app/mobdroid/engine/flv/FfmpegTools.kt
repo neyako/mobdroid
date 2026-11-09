@@ -16,11 +16,13 @@ object FfmpegTools {
     private val workDirectory: File by lazy {
         File(System.getProperty("java.io.tmpdir"), "mobdroid-engine-test-${ProcessHandle.current().pid()}").apply {
             mkdirs()
-            deleteOnExit()
+            if (System.getenv("KEEP_TEST_FILES") == null) deleteOnExit()
         }
     }
 
-    fun file(name: String): File = File(workDirectory, name).apply { deleteOnExit() }
+    fun file(name: String): File = File(workDirectory, name).apply {
+        if (System.getenv("KEEP_TEST_FILES") == null) deleteOnExit()
+    }
 
     fun run(command: List<String>, timeoutSeconds: Long): ProcessResult {
         val log = File.createTempFile("process", ".log", workDirectory)

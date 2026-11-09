@@ -33,12 +33,22 @@ internal class FlvVideoTags(format: VideoFormat) {
             VideoCodec.AV1 -> "av01"
         }
 
-    private val record: ByteArray =
-        when (format.codec) {
-            VideoCodec.H264 -> AvcConfig.record(format.config)
-            VideoCodec.HEVC -> HevcConfig.record(format.config)
-            VideoCodec.AV1 -> Av1Config.from(format.config).record
+    private val av1: Av1Config?
+    private val record: ByteArray
+
+    init {
+        try {
+            av1 = if (format.codec == VideoCodec.AV1) Av1Config.from(format.config) else null
+            record =
+                when (format.codec) {
+                    VideoCodec.H264 -> AvcConfig.record(format.config)
+                    VideoCodec.HEVC -> HevcConfig.record(format.config)
+                    VideoCodec.AV1 -> requireNotNull(av1).record
+                }
+        } catch (error: IllegalArgumentException) {
+            throw IllegalArgumentException("Invalid ${format.codec} config: ${error.message}", error)
         }
+    }
 
     fun writeSequenceHeader(out: ByteWriter) {
         when (codec) {
@@ -72,6 +82,10 @@ internal class FlvVideoTags(format: VideoFormat) {
             VideoCodec.AV1 -> {
                 out.u8(EX_HEADER or (frameType shl 4) or PACKET_CODED_FRAMES)
                 out.u32(FOURCC_AV1)
+                val sequenceHeader = av1?.sequenceHeaderObu
+                if (frame.isKeyFrame && sequenceHeader != null && !containsObuOfType(frame.data, OBU_SEQUENCE_HEADER)) {
+                    out.put(sequenceHeader)
+                }
                 forEachObu(frame.data, 0, frame.data.size) { type, start, payloadStart, end ->
                     if (type != OBU_TEMPORAL_DELIMITER) {
                         writeObuWithSizeField(out, frame.data, start, payloadStart, end)

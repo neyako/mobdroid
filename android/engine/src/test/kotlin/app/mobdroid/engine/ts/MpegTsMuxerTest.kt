@@ -196,6 +196,16 @@ class MpegTsMuxerTest {
     }
 
     @Test
+    fun emptyFramesProduceNoOutput() {
+        val collector = Collector()
+        collector.muxer.setVideoFormat(h264Format())
+        collector.muxer.setAudioFormat(audioFormat)
+        collector.muxer.writeVideo(frame(ByteArray(0), 0, true))
+        collector.muxer.writeAudio(frame(ByteArray(0), 0))
+        assertTrue(collector.calls.isEmpty())
+    }
+
+    @Test
     fun framesWrittenBeforeTheirFormatAreIgnored() {
         val collector = Collector()
         collector.muxer.writeVideo(frame(annexB(payload(50)), 0, true))

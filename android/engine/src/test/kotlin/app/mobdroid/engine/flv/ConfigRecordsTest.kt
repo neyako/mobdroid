@@ -27,6 +27,40 @@ class ConfigRecordsTest {
     }
 
     @Test
+    fun avcRecordCarriesChromaFormatAndBitDepthForHigh10High422AndHigh444() {
+        val cases = listOf(
+            Triple("676e000da6cb40a0fd8088000003000800000301e078a155", "68ce0fc8", "fdfafa00"),
+            Triple("677a000dbcb40a0fd80880000003008000001e078a1550", "68ce0fc8", "fef8f800"),
+            Triple("67f4000d91968141fb0110000003001000000303c0f142aa", "68ce0f1920", "fff8f800"),
+        )
+        for ((sps, pps, extension) in cases) {
+            val expected = "01" + sps.substring(2, 8) + "ffe1" + "%04x".format(sps.length / 2) + sps + "01" +
+                "%04x".format(pps.length / 2) + pps + extension
+            assertEquals(expected, AvcConfig.record(annexB(hex(sps), hex(pps))).toHex(), sps)
+        }
+    }
+
+    @Test
+    fun hevcRecordCarriesRangeExtensionProfilesChromaAndBitDepth() {
+        val cases = listOf(
+            Triple(
+                "40010c01ffff0408000003009d0800000300003cba0240",
+                "4201010408000003009d0800000300003cb00a080f1365ba4a4c2f016808000003000800000300f040",
+                "0104080000009d08000000003cf000fcfefafa00000f03",
+            ),
+            Triple(
+                "40010c01ffff0408000003009e0800000300003cba0240",
+                "4201010408000003009e0800000300003c90014101e2cb7494985e02d010000003001000000301e080",
+                "0104080000009e08000000003cf000fcfff8f800000f03",
+            ),
+        )
+        for ((vps, sps, header) in cases) {
+            val record = HevcConfig.record(annexB(hex(vps), hex(sps), hex("4401c073c189")))
+            assertEquals(header, record.toHex().substring(0, header.length), sps)
+        }
+    }
+
+    @Test
     fun avcBaselineProfileRecordHasNoExtension() {
         val record = AvcConfig.record(annexB(baselineSps, baselinePps))
         assertEquals(
@@ -76,6 +110,46 @@ class ConfigRecordsTest {
         assertEquals(true, info.temporalIdNested)
     }
 
+    private class BitWriter {
+        private val bits = StringBuilder()
+
+        fun put(value: Long, count: Int) = apply {
+            for (i in count - 1 downTo 0) bits.append(if ((value shr i) and 1L == 1L) '1' else '0')
+        }
+
+        fun ue(value: Int) = apply {
+            val code = value + 1
+            val length = 32 - Integer.numberOfLeadingZeros(code)
+            put(0, length - 1)
+            put(code.toLong(), length)
+        }
+
+        fun bytes(): ByteArray {
+            val padded = bits.toString() + "1" + "0".repeat((8 - (bits.length + 1) % 8) % 8)
+            return ByteArray(padded.length / 8) { padded.substring(it * 8, it * 8 + 8).toInt(2).toByte() }
+        }
+    }
+
+    @Test
+    fun hevcSpsWithSubLayersStillYieldsChromaAndBitDepth() {
+        val writer = BitWriter()
+        writer.put(0, 4).put(2, 3).put(1, 1)
+        writer.put(0, 2).put(0, 1).put(1, 5).put(0x60000000, 32).put(0x900000000000L, 48).put(93, 8)
+        writer.put(1, 1).put(1, 1).put(0, 1).put(1, 1)
+        writer.put(0, 12)
+        writer.put(0x2AAAAAAAAAAAAAAL, 56).put(0x2AAAAAAAL, 32).put(90, 8)
+        writer.put(60, 8)
+        writer.ue(0).ue(1).ue(320).ue(240).put(0, 1).ue(0).ue(0)
+        val info = HevcConfig.parseSps(concat(hex("4201"), writer.bytes()))
+        assertEquals(1, info.profileIdc)
+        assertEquals(93, info.levelIdc)
+        assertEquals(3, info.maxSubLayers)
+        assertEquals(true, info.temporalIdNested)
+        assertEquals(1, info.chromaFormat)
+        assertEquals(8, info.bitDepthLuma)
+        assertEquals(8, info.bitDepthChroma)
+    }
+
     @Test
     fun hevcRecordRequiresVps() {
         assertFailsWith<IllegalArgumentException> { HevcConfig.record(annexB(hevcSps, hevcPps)) }
@@ -91,6 +165,18 @@ class ConfigRecordsTest {
     fun av1RecordFromTenBitSequenceHeaderSetsHighBitdepth() {
         val obu = hex("0a0b000000043cffbc02f84040")
         assertEquals("81004c00" + obu.toHex(), Av1Config.from(obu).record.toHex())
+    }
+
+    @Test
+    fun av1RecordParsesThroughTimingInfoAndDecoderModelFields() {
+        val headers = listOf(
+            "0a0b000000043cffbcdaf90040",
+            "0a1404000000040000007b400000bc3cffbcdaf90040",
+            "0a1e040000000400000079780000000a530000035f915f90bc3cffbcdaf90040",
+        )
+        for (header in headers) {
+            assertEquals("81000c00$header", Av1Config.from(hex(header)).record.toHex(), header)
+        }
     }
 
     @Test

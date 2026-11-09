@@ -11,6 +11,7 @@ import app.mobdroid.engine.flv.HEVC_VPS
 import app.mobdroid.engine.flv.OBU_SEQUENCE_HEADER
 import app.mobdroid.engine.flv.OBU_TEMPORAL_DELIMITER
 import app.mobdroid.engine.flv.annexBParameterSets
+import app.mobdroid.engine.flv.containsObuOfType
 import app.mobdroid.engine.flv.forEachObu
 import app.mobdroid.engine.flv.h264NaluType
 import app.mobdroid.engine.flv.hevcNaluType
@@ -145,6 +146,9 @@ class MpegTsMuxer(
 
     override fun writeVideo(frame: EncodedFrame) {
         val stream = video ?: return
+        if (frame.data.isEmpty()) {
+            return
+        }
         val ticks = ticksOf(frame.ptsUs)
         writeTablesIfDue(ticks, frame.isKeyFrame)
         val pcr = pcrFor(true, ticks)
@@ -168,7 +172,7 @@ class MpegTsMuxer(
 
     override fun writeAudio(frame: EncodedFrame) {
         val stream = audio ?: return
-        if (frame.data.size > AacConfig.MAX_RAW_LENGTH) {
+        if (frame.data.isEmpty() || frame.data.size > AacConfig.MAX_RAW_LENGTH) {
             return
         }
         val ticks = ticksOf(frame.ptsUs)
@@ -263,14 +267,8 @@ class MpegTsMuxer(
         val out = av1Payload
         out.clear()
         if (frame.isKeyFrame) {
-            var hasSequenceHeader = false
-            forEachObu(frame.data, 0, frame.data.size) { type, _, _, _ ->
-                if (type == OBU_SEQUENCE_HEADER) {
-                    hasSequenceHeader = true
-                }
-            }
             val sequenceHeader = stream.av1?.sequenceHeaderObu
-            if (!hasSequenceHeader && sequenceHeader != null) {
+            if (sequenceHeader != null && !containsObuOfType(frame.data, OBU_SEQUENCE_HEADER)) {
                 writeObu(out, sequenceHeader, 0, sequenceHeader.size)
             }
         }
