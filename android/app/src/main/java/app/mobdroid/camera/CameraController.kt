@@ -472,6 +472,7 @@ class CameraController(context: Context) {
     private fun fail(message: String, recoverable: Boolean, reason: Reason) {
         Log.w(TAG, "$message (recoverable=$recoverable, reason=$reason)")
         val stable = streamingSince != 0L && SystemClock.elapsedRealtime() - streamingSince >= STABLE_MS
+        val starting = builder != null && !streaming
         teardown()
         if (request == null) return
         handler.removeCallbacks(retryRunnable)
@@ -483,9 +484,9 @@ class CameraController(context: Context) {
         }
         if (stable) failures = 0
         failures++
+        if (reason == Reason.CONFIGURE || (reason == Reason.FAULT && starting)) level = min(level + 1, MAX_LEVEL)
         if (reason == Reason.CONFIGURE) {
             configureFailures++
-            level = min(level + 1, MAX_LEVEL)
             if (configureFailures >= MAX_CONFIGURE_FAILURES) {
                 publish(CameraState.Error("Camera configuration failed", false))
                 return
