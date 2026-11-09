@@ -7,6 +7,7 @@ import app.mobdroid.engine.media.AudioFormat
 import app.mobdroid.engine.media.EncodedFrame
 import app.mobdroid.engine.media.VideoCodec
 import app.mobdroid.engine.media.VideoFormat
+import app.mobdroid.engine.net.PublisherListener
 import java.io.File
 import java.net.ServerSocket
 import java.nio.file.Files
@@ -340,6 +341,26 @@ class RtmpPublisherTest {
             val audioFrames = server.mediaOfType(MSG_AUDIO).drop(1)
             assertEquals(70 - firstAudioIndex, audioFrames.size)
             assertEquals(0L, frames.first().timestamp)
+            publisher.stop()
+        }
+    }
+
+    @Test
+    fun framesWrittenFromTheConnectedCallbackAreNotTrimmed() {
+        FakeRtmpServer().start().use { server ->
+            lateinit var publisher: RtmpPublisher
+            val listener = object : PublisherListener by RecordingListener() {
+                override fun onConnected() {
+                    for (i in 0 until 45) {
+                        publisher.writeVideo(video(i, i % 30 == 0))
+                    }
+                }
+            }
+            publisher = RtmpPublisher("rtmp://127.0.0.1:${server.port}/live", "mykey", listener, timeoutMs = 5000)
+            publisher.setVideoFormat(h264())
+            publisher.start()
+            assertTrue(waitUntil { server.mediaOfType(MSG_VIDEO).size == 46 })
+            assertEquals((0..44).toList(), server.mediaOfType(MSG_VIDEO).drop(1).map { indexOf(it) })
             publisher.stop()
         }
     }

@@ -210,13 +210,13 @@ class RtmpPublisher(
             if (stopRequested) {
                 throw RtmpException("Stopped")
             }
+            queue.trimToLatestKeyFrame()
             streaming = true
             listener.onConnected()
             readerThread = Thread(::runReader, "rtmp-reader").apply {
                 isDaemon = true
                 start()
             }
-            queue.trimToLatestKeyFrame()
             pump()
             if (stopRequested) {
                 goodbye()
