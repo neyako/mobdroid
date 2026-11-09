@@ -23,7 +23,16 @@ class AndroidNetworkLinks(context: Context) : NetworkLinkProvider {
     private class Link(val network: Network, override val type: LinkType, override val name: String) : NetworkLink {
         override val id = "${type.name}-$network"
 
-        override fun createDatagramSocket(): DatagramSocket = DatagramSocket().also { network.bindSocket(it) }
+        override fun createDatagramSocket(): DatagramSocket {
+            val socket = DatagramSocket()
+            try {
+                network.bindSocket(socket)
+            } catch (e: Exception) {
+                socket.close()
+                throw e
+            }
+            return socket
+        }
     }
 
     fun start() {

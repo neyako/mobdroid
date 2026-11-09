@@ -12,6 +12,8 @@ import app.mobdroid.engine.media.EncodedFrame
 import app.mobdroid.engine.media.MediaSink
 import app.mobdroid.engine.media.VideoCodec
 import app.mobdroid.engine.media.VideoFormat
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class VideoEncoder(
     private val codec: VideoCodec,
@@ -23,10 +25,10 @@ class VideoEncoder(
     private val sink: MediaSink,
     private val onError: (String) -> Unit,
 ) {
-    private val thread = HandlerThread("VideoEncoder").apply { start() }
-    private val handler = Handler(thread.looper)
     private val info = CodecCatalog.encoders[codec] ?: error("No hardware ${codec.label} encoder")
     private val mediaCodec = MediaCodec.createByCodecName(info.name)
+    private val thread = HandlerThread("VideoEncoder").apply { start() }
+    private val handler = Handler(thread.looper)
     val inputSurface: Surface
 
     @Volatile
@@ -63,19 +65,29 @@ class VideoEncoder(
                 VideoCodec.AV1 -> setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AV1ProfileMain8)
             }
         }
-        mediaCodec.setCallback(Callback(), handler)
+        var surface: Surface? = null
         try {
-            mediaCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        } catch (e: Exception) {
-            Log.w(TAG, "Configure with profile failed, retrying without", e)
-            format.removeKey(MediaFormat.KEY_PROFILE)
-            format.removeKey(MediaFormat.KEY_LEVEL)
-            mediaCodec.reset()
             mediaCodec.setCallback(Callback(), handler)
-            mediaCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            try {
+                mediaCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            } catch (e: Exception) {
+                Log.w(TAG, "Configure with profile failed, retrying without", e)
+                format.removeKey(MediaFormat.KEY_PROFILE)
+                format.removeKey(MediaFormat.KEY_LEVEL)
+                mediaCodec.reset()
+                mediaCodec.setCallback(Callback(), handler)
+                mediaCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            }
+            surface = mediaCodec.createInputSurface()
+            mediaCodec.start()
+        } catch (e: Exception) {
+            released = true
+            surface?.release()
+            mediaCodec.release()
+            thread.quitSafely()
+            throw e
         }
-        inputSurface = mediaCodec.createInputSurface()
-        mediaCodec.start()
+        inputSurface = surface
     }
 
     fun setBitrate(bps: Int) = handler.post {
@@ -91,14 +103,18 @@ class VideoEncoder(
     }
 
     fun release() {
-        handler.post {
-            if (released) return@post
-            released = true
-            runCatching { mediaCodec.stop() }
-            runCatching { mediaCodec.release() }
-            inputSurface.release()
+        val done = CountDownLatch(1)
+        val posted = handler.post {
+            if (!released) {
+                released = true
+                runCatching { mediaCodec.stop() }
+                runCatching { mediaCodec.release() }
+                inputSurface.release()
+            }
             thread.quitSafely()
+            done.countDown()
         }
+        if (posted && Thread.currentThread() != thread) done.await(2, TimeUnit.SECONDS)
     }
 
     private inner class Callback : MediaCodec.Callback() {

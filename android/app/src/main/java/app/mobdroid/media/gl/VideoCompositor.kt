@@ -14,7 +14,6 @@ import android.view.Surface
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.CountDownLatch
-import kotlin.math.abs
 
 class VideoCompositor(outputWidth: Int, outputHeight: Int) {
     private val thread = HandlerThread("Compositor", Process.THREAD_PRIORITY_DISPLAY).apply { start() }
@@ -44,6 +43,7 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
     private var inputHeight = 1080
     private var rotation = 0
     private var mirrorPreview = false
+    private var boottimeTimestamps = false
     private var previewSurface: EGLSurface? = null
     private var encoderSurface: EGLSurface? = null
     private var frameIntervalNs = 1_000_000_000L / 30
@@ -78,7 +78,8 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
 
     fun newInputSurface(): Surface = Surface(surfaceTexture)
 
-    fun setInput(width: Int, height: Int, rotationDegrees: Int, mirror: Boolean) = runBlockingOnThread {
+    fun setInput(width: Int, height: Int, rotationDegrees: Int, mirror: Boolean, boottimeTimestamps: Boolean) = runBlockingOnThread {
+        this.boottimeTimestamps = boottimeTimestamps
         inputWidth = width
         inputHeight = height
         rotation = rotationDegrees
@@ -213,11 +214,8 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         }
     }
 
-    private fun toMonotonic(ts: Long): Long {
-        val mono = System.nanoTime()
-        val boot = SystemClock.elapsedRealtimeNanos()
-        return if (abs(boot - ts) < abs(mono - ts)) ts - (boot - mono) else ts
-    }
+    private fun toMonotonic(ts: Long): Long =
+        if (boottimeTimestamps) ts - (SystemClock.elapsedRealtimeNanos() - System.nanoTime()) else ts
 
     private fun updateSourceMatrix() {
         val swapped = rotation % 180 != 0

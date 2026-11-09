@@ -47,8 +47,15 @@ class AudioEncoder(
         )
     }
 
+    private val record = try {
+        createRecord()
+    } catch (e: Exception) {
+        codec.release()
+        throw e
+    }
+
     @SuppressLint("MissingPermission")
-    private val record = AudioRecord.Builder()
+    private fun createRecord() = AudioRecord.Builder()
         .setAudioSource(MediaRecorder.AudioSource.CAMCORDER)
         .setAudioFormat(
             AndroidAudioFormat.Builder()
@@ -72,10 +79,16 @@ class AudioEncoder(
     private val thread = Thread(::run, "AudioEncoder")
 
     init {
-        check(record.state == AudioRecord.STATE_INITIALIZED) { "Microphone unavailable" }
-        codec.start()
-        record.startRecording()
-        thread.start()
+        try {
+            check(record.state == AudioRecord.STATE_INITIALIZED) { "Microphone unavailable" }
+            codec.start()
+            record.startRecording()
+            thread.start()
+        } catch (e: Exception) {
+            record.release()
+            codec.release()
+            throw e
+        }
     }
 
     fun release() {

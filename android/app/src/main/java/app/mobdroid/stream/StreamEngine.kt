@@ -94,6 +94,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private var uvcCamera: UvcCamera? = null
     private var uvcSurface: Surface? = null
     private var cameraGeneration = 0
+    private var uvcFailures = 0
     private val _ui = MutableStateFlow(UiState())
     val ui: StateFlow<UiState> = _ui.asStateFlow()
     private val _stats = MutableStateFlow(LiveStats())
@@ -417,7 +418,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
 
     private suspend fun runAdaptiveBitrate(session: StreamSession, profile: StreamProfile) {
         val max = profile.bitrateKbps * 1000L
-        val min = profile.minBitrateKbps * 1000L
+        val min = minOf(profile.minBitrateKbps * 1000L, max)
         var abr: AdaptiveBitrate? = null
         var owner: Any? = null
         while (true) {
@@ -526,6 +527,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                     uvc.onError = { message -> onUvcError(generation, message) }
                     try {
                         uvc.start(format, surface)
+                        uvcFailures = 0
                         _ui.update { it.copy(cameraState = CameraState.Streaming) }
                     } catch (e: Exception) {
                         Log.e(TAG, "USB camera start failed", e)
@@ -538,13 +540,22 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
 
     private fun onUvcError(generation: Int, message: String) {
         scope.launch {
+            val key: String?
+            val closedGeneration: Int
             synchronized(this@StreamEngine) {
                 if (generation != cameraGeneration) return@launch
                 _ui.update { it.copy(error = "USB camera: $message") }
                 closeSources()
+                key = _ui.value.camera?.key
+                closedGeneration = cameraGeneration
+                uvcFailures++
             }
-            delay(1000)
-            onUsbChanged(attached = false)
+            delay(minOf(1000L shl minOf(uvcFailures - 1, 3), 5000L))
+            val cameras = listCameras()
+            synchronized(this@StreamEngine) {
+                if (!previewActive || closedGeneration != cameraGeneration || _ui.value.camera?.key != key) return@launch
+                if (cameras.any { it.key == key }) openCamera() else onUsbChanged(attached = false)
+            }
         }
     }
 
@@ -556,7 +567,13 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             Facing.BACK -> (descriptor.sensorOrientation - displayRotation + 360) % 360
             Facing.EXTERNAL -> 0
         }
-        compositor?.setInput(size.width, size.height, rotation, descriptor.facing == Facing.FRONT)
+        compositor?.setInput(
+            size.width,
+            size.height,
+            rotation,
+            descriptor.facing == Facing.FRONT,
+            boottimeTimestamps = uvcCamera == null && descriptor.realtimeTimestamps,
+        )
     }
 
     private fun stabilization(): Stabilization {

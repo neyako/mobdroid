@@ -46,22 +46,31 @@ class StreamSession(
             var attempt = 0
             while (true) {
                 val events = Channel<String?>(Channel.UNLIMITED)
-                val next = createPublisher(object : PublisherListener {
-                    override fun onConnected() {
-                        events.trySend(null)
-                    }
+                val next = try {
+                    createPublisher(object : PublisherListener {
+                        override fun onConnected() {
+                            events.trySend(null)
+                        }
 
-                    override fun onDisconnected(reason: String) {
-                        events.trySend(reason)
-                    }
-                })
-                videoFormat?.let(next::setVideoFormat)
-                audioFormat?.let(next::setAudioFormat)
-                waitingForKeyFrame = true
-                publisher = next
-                next.start()
-                requestKeyFrame()
+                        override fun onDisconnected(reason: String) {
+                            events.trySend(reason)
+                        }
+                    })
+                } catch (e: Exception) {
+                    _lastError.value = describeError(e.message ?: e.toString())
+                    _state.value = LiveState.RECONNECTING
+                    delay(BACKOFF_MS.last())
+                    continue
+                }
                 try {
+                    synchronized(formatLock) {
+                        videoFormat?.let(next::setVideoFormat)
+                        audioFormat?.let(next::setAudioFormat)
+                        waitingForKeyFrame = true
+                        publisher = next
+                    }
+                    next.start()
+                    requestKeyFrame()
                     var reason = events.receive()
                     if (reason == null) {
                         attempt = 0
@@ -71,9 +80,12 @@ class StreamSession(
                         reason = events.receive()
                     }
                     _lastError.value = reason?.let(::describeError)
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    _lastError.value = describeError(e.message ?: e.toString())
                 } finally {
-                    publisher = null
-                    next.stop()
+                    synchronized(formatLock) { publisher = null }
+                    runCatching { next.stop() }
                 }
                 _state.value = LiveState.RECONNECTING
                 delay(BACKOFF_MS[minOf(attempt++, BACKOFF_MS.lastIndex)])
@@ -89,12 +101,14 @@ class StreamSession(
 
     fun stats(): PublisherStats = publisher?.stats() ?: PublisherStats()
 
-    override fun setVideoFormat(format: VideoFormat) {
+    private val formatLock = Any()
+
+    override fun setVideoFormat(format: VideoFormat): Unit = synchronized(formatLock) {
         videoFormat = format
         publisher?.setVideoFormat(format)
     }
 
-    override fun setAudioFormat(format: AudioFormat) {
+    override fun setAudioFormat(format: AudioFormat): Unit = synchronized(formatLock) {
         audioFormat = format
         publisher?.setAudioFormat(format)
     }

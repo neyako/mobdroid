@@ -28,8 +28,7 @@ data class VideoEncoderInfo(
     private val capabilities: MediaCodecInfo.VideoCapabilities,
 ) {
     fun supports(width: Int, height: Int, fps: Int): Boolean =
-        capabilities.areSizeAndRateSupported(width, height, fps.toDouble()) ||
-            capabilities.areSizeAndRateSupported(height, width, fps.toDouble())
+        capabilities.areSizeAndRateSupported(width, height, fps.toDouble())
 }
 
 object CodecCatalog {
