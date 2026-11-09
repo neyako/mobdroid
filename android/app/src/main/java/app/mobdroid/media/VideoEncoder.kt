@@ -37,6 +37,7 @@ class VideoEncoder(
 
     @Volatile
     private var released = false
+    private var lastKeyFrameUs = 0L
 
     init {
         val format = MediaFormat.createVideoFormat(codec.mime, width, height).apply {
@@ -131,9 +132,14 @@ class VideoEncoder(
                     sink.setVideoFormat(VideoFormat(this@VideoEncoder.codec, width, height, fps, data))
                 } else {
                     lastOutputNanos = System.nanoTime()
-                    sink.writeVideo(
-                        EncodedFrame(data, info.presentationTimeUs, info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0),
-                    )
+                    val keyFrame = info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
+                    if (keyFrame) {
+                        lastKeyFrameUs = info.presentationTimeUs
+                    } else if (info.presentationTimeUs - lastKeyFrameUs > keyFrameIntervalSeconds * 1_250_000L) {
+                        lastKeyFrameUs = info.presentationTimeUs
+                        requestKeyFrame()
+                    }
+                    sink.writeVideo(EncodedFrame(data, info.presentationTimeUs, keyFrame))
                 }
             }
             codec.releaseOutputBuffer(index, false)

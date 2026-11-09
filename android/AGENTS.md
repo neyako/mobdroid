@@ -62,7 +62,7 @@ them, not code style.
   hide auxiliary cameras), filters depth, secure, monochrome and low resolution sensors, dedupes lenses
   and derives zoom stops from field of view. It blocks for tens of milliseconds; call it off the main
   thread. `CameraController` reopens with backoff on errors, stalls and availability changes and steps
-  down session options on configuration failures. Call `SurfaceTexture.setDefaultBufferSize` before
+  down session options on configuration failures and on faults before the first frame. Call `SurfaceTexture.setDefaultBufferSize` before
   `open`; `open` resets zoom, torch, exposure and locks.
 - Samsung does not advertise 60 fps in the Camera2 AE ranges on most models. Its vendor table
   `samsung.android.scaler.availableVideoConfigurations` (6 ints per entry: width, height, min fps, max fps
@@ -72,6 +72,9 @@ them, not code style.
   range, and drops them at the last fallback level. The ultra wide lens still delivers 30 fps, and the
   camera takes a few seconds to return to 60 after zooming back from it. Elsewhere the encoder runs at
   `min(profile fps, camera max fps)`.
+- The encoder's key frame interval counts frames at its configured rate, so `VideoEncoder` requests a key
+  frame when one is 25% overdue. That keeps the interval near the profile's when the camera delivers
+  fewer frames than the encoder's rate.
 - `uvc/`: userspace UVC for phones without an external camera HAL. libusb, libuvc and libjpeg-turbo are
   fetched by CMake at configure time with pinned hashes. MJPEG or YUYV frames are decoded into the
   compositor's `SurfaceTexture` through their own `Surface`, released after `stop()`. USB permission
