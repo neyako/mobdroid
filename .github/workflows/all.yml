@@ -52,8 +52,8 @@ jobs:
       - name: Install NDK, CMake and ffmpeg
         run: |
           sdkmanager --install "ndk;29.0.14206865" "cmake;3.22.1" "platforms;android-37.0"
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          curl -sL https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz | tar xJ -C "$RUNNER_TEMP"
+          echo "$(ls -d "$RUNNER_TEMP"/ffmpeg-n8.1*/bin)" >> "$GITHUB_PATH"
       - name: Engine tests
         run: |
           ./gradlew :engine:test
