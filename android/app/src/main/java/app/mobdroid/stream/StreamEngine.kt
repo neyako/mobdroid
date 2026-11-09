@@ -228,7 +228,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     @Synchronized
     fun setPreviewSurface(surface: Surface?) {
         previewSurface = surface
-        compositor?.setPreview(surface)
+        compositor?.setPreview(if (previewEnabled) surface else null)
     }
 
     @Synchronized
@@ -279,6 +279,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         liveProfile = profile
         liveCodec = codec
         targetBitrate = profile.bitrateKbps * 1000
+        liveMaxBitrate = targetBitrate.toLong()
         context.startForegroundService(
             Intent(context, StreamService::class.java).putExtra(StreamService.EXTRA_USB, uvcCamera != null),
         )
@@ -336,6 +337,29 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     }
 
     fun clearError() = _ui.update { it.copy(error = null) }
+
+    @Volatile
+    private var liveMaxBitrate = 0L
+    private var previewEnabled = true
+
+    fun setMaxBitrate(kbps: Int) {
+        val profile = settings.settings.value.selectedProfile
+        settings.updateProfile(profile.copy(bitrateKbps = kbps))
+        synchronized(this) {
+            val live = liveProfile ?: return
+            liveMaxBitrate = kbps * 1000L
+            if (!live.adaptiveBitrate) {
+                targetBitrate = kbps * 1000
+                videoEncoder?.setBitrate(targetBitrate)
+            }
+        }
+    }
+
+    @Synchronized
+    fun setPreviewEnabled(enabled: Boolean) {
+        previewEnabled = enabled
+        compositor?.setPreview(if (enabled) previewSurface else null)
+    }
 
     private fun createPublisher(profile: StreamProfile, listener: PublisherListener): Publisher {
         val url = profile.url.trim()
@@ -422,16 +446,22 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private val transportMeter = TransportBitrateMeter(ADAPTIVE_BITRATE_START_BPS)
 
     private suspend fun runAdaptiveBitrate(session: StreamSession, profile: StreamProfile) {
-        val max = profile.bitrateKbps * 1000L
-        val min = minOf(profile.minBitrateKbps * 1000L, max)
+        var max = liveMaxBitrate
         var abr: AdaptiveBitrate? = null
         var owner: Any? = null
         while (true) {
             delay(ADAPTIVE_BITRATE_UPDATE_INTERVAL_MS)
             val publisher = session.publisher
             if (publisher == null || session.state.value != LiveState.LIVE) continue
+            val min = minOf(profile.minBitrateKbps * 1000L, liveMaxBitrate)
+            if (liveMaxBitrate != max && abr != null) {
+                max = liveMaxBitrate
+                abr.setMinimumBitrate(min)
+                abr.setTargetBitrate(max)
+            }
             if (owner !== publisher) {
                 owner = publisher
+                max = liveMaxBitrate
                 abr = if (publisher is SrtPublisher) {
                     BelaboxAdaptiveBitrate(max, min)
                 } else {
@@ -456,7 +486,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         val (w, h) = outputSize(profile)
         compositor = VideoCompositor(w, h).also {
             it.setFrameRate(profile.fps)
-            it.setPreview(previewSurface)
+            it.setPreview(if (previewEnabled) previewSurface else null)
         }
     }
 

@@ -12,6 +12,23 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.rounded.BatteryAlert
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Thermostat
+import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.Dp
+import app.mobdroid.stream.outputSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -45,7 +62,6 @@ import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.IconToggleButton
@@ -53,6 +69,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.ToggleButton
@@ -63,7 +80,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -103,57 +119,100 @@ private val statusStyle = TextStyle(
     shadow = Shadow(Color.Black, blurRadius = 6f),
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
     val ui by engine.ui.collectAsStateWithLifecycle()
     val stats by engine.stats.collectAsStateWithLifecycle()
     val appSettings by settings.settings.collectAsStateWithLifecycle()
+    val profile = appSettings.selectedProfile
     var showSettings by remember { mutableStateOf(false) }
     var showCameras by remember { mutableStateOf(false) }
+    var showBitrate by remember { mutableStateOf(false) }
+    var stealth by remember { mutableStateOf(false) }
     var confirmStop by remember { mutableStateOf(false) }
+    val (outW, outH) = outputSize(profile)
+    val onLive = {
+        when {
+            ui.live == LiveState.OFFLINE -> engine.goLive()
+            confirmStop -> {
+                confirmStop = false
+                engine.stopLive()
+            }
+            else -> confirmStop = true
+        }
+    }
+    val buttons = quickButtons(
+        ui,
+        onSettings = { showSettings = true },
+        onBitrate = { showBitrate = true },
+        onCameras = { showCameras = true },
+        onStealth = { stealth = true },
+        onMute = { engine.setMuted(!ui.muted) },
+        onTorch = { engine.setTorch(!ui.torch) },
+    )
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
-        Preview(engine, ui)
-        BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-            val landscape = maxWidth > maxHeight
-            StatusOverlay(
-                ui,
-                stats,
-                appSettings.selectedProfile.name,
-                appSettings.selectedProfile.bitrateKbps * 1000,
-                onDismissError = engine::clearError,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(12.dp)
-                    .padding(end = if (landscape) 96.dp else 0.dp),
-            )
-            ZoomStops(
-                ui,
-                onZoom = engine::setZoom,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = if (landscape) 16.dp else 132.dp),
-            )
-            Controls(
-                ui = ui,
-                landscape = landscape,
-                confirmStop = confirmStop,
-                onLive = {
-                    when {
-                        ui.live == LiveState.OFFLINE -> engine.goLive()
-                        confirmStop -> {
-                            confirmStop = false
-                            engine.stopLive()
-                        }
-                        else -> confirmStop = true
+    Surface(color = Color.Black, contentColor = Color.White) {
+    BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+        val banded = maxWidth / maxHeight < 1.5f
+        if (banded) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    Modifier.fillMaxWidth().weight(1f).padding(horizontal = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Status(ui, stats, profile.name, engine::clearError, Modifier.weight(1f))
+                    if (buttons.none { it.label == "Settings" && it.inRow }) {
+                        IconButton({ showSettings = true }) { Icon(Icons.Rounded.Settings, "Settings") }
                     }
-                },
-                onSettings = { showSettings = true },
-                onCameras = { showCameras = true },
-                onMute = { engine.setMuted(!ui.muted) },
-                onTorch = { engine.setTorch(!ui.torch) },
-                modifier = Modifier.align(if (landscape) Alignment.CenterEnd else Alignment.BottomCenter),
+                }
+                Box(Modifier.fillMaxWidth().aspectRatio(outW.toFloat() / outH)) {
+                    Preview(engine, ui)
+                    ZoomStops(ui, engine::setZoom, Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp))
+                }
+                Row(
+                    Modifier.fillMaxWidth().weight(1f).padding(start = 16.dp, end = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        buttons.filter { it.inRow }.forEach { QuickButtonView(it) }
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    LiveButton(ui.live, confirmStop, onLive, size = 60.dp)
+                }
+            }
+        } else {
+            Row(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1f).fillMaxHeight()) {
+                    Preview(engine, ui)
+                    Status(ui, stats, profile.name, engine::clearError, Modifier.align(Alignment.TopStart).padding(16.dp))
+                    ZoomStops(ui, engine::setZoom, Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp))
+                }
+                Column(
+                    Modifier.width(140.dp).fillMaxHeight().padding(vertical = 12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    FlowRow(
+                        Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        maxItemsInEachRow = 2,
+                    ) {
+                        buttons.forEach { QuickButtonView(it) }
+                    }
+                    LiveButton(ui.live, confirmStop, onLive, size = 72.dp)
+                }
+            }
+        }
+        if (stealth) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+                    .clickable(interactionSource = null, indication = null) { stealth = false },
             )
         }
         AnimatedVisibility(
@@ -166,7 +225,9 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
             SettingsScreen(settings, engine.isLive, onClose = { showSettings = false })
         }
     }
+    }
 
+    LaunchedEffect(stealth) { engine.setPreviewEnabled(!stealth) }
     LaunchedEffect(confirmStop) {
         if (confirmStop) {
             delay(3000)
@@ -174,16 +235,126 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
         }
     }
     BackHandler(showSettings) { showSettings = false }
+    BackHandler(stealth) { stealth = false }
 
     if (showCameras) {
-        ModalBottomSheet(onDismissRequest = { showCameras = false }, containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+        ModalBottomSheet(
+            onDismissRequest = { showCameras = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ) {
             CameraList(ui.cameras, ui.camera) {
                 engine.selectCamera(it)
                 showCameras = false
             }
         }
     }
+    if (showBitrate) {
+        ModalBottomSheet(
+            onDismissRequest = { showBitrate = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ) {
+            BitratePresets(profile.bitrateKbps) {
+                engine.setMaxBitrate(it)
+                showBitrate = false
+            }
+        }
+    }
 }
+
+private class QuickButton(
+    val label: String,
+    val icon: ImageVector,
+    val checked: Boolean?,
+    val inRow: Boolean,
+    val onClick: () -> Unit,
+)
+
+private fun quickButtons(
+    ui: UiState,
+    onSettings: () -> Unit,
+    onBitrate: () -> Unit,
+    onCameras: () -> Unit,
+    onStealth: () -> Unit,
+    onMute: () -> Unit,
+    onTorch: () -> Unit,
+) = buildList {
+    add(QuickButton("Settings", Icons.Rounded.Settings, null, inRow = false, onSettings))
+    add(QuickButton("Bitrate", Icons.Rounded.Speed, null, inRow = true, onBitrate))
+    add(QuickButton("Mic", if (ui.muted) Icons.Rounded.MicOff else Icons.Rounded.Mic, ui.muted, inRow = true, onMute))
+    add(
+        QuickButton(
+            "Camera",
+            if (ui.camera?.facing == Facing.EXTERNAL) Icons.Rounded.Usb else Icons.Rounded.Cameraswitch,
+            null,
+            inRow = true,
+            onCameras,
+        ),
+    )
+    add(QuickButton("Stealth", Icons.Rounded.VisibilityOff, null, inRow = true, onStealth))
+    if (ui.camera?.hasFlash == true) {
+        add(
+            QuickButton(
+                "Torch",
+                if (ui.torch) Icons.Rounded.FlashlightOn else Icons.Rounded.FlashlightOff,
+                ui.torch,
+                inRow = true,
+                onTorch,
+            ),
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun QuickButtonView(button: QuickButton) {
+    Column(Modifier.width(60.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        val colors = IconButtonDefaults.iconToggleButtonColors(
+            containerColor = Color(0xFF2A2A2A),
+            contentColor = Color.White,
+            checkedContainerColor = Color.White,
+            checkedContentColor = Color.Black,
+        )
+        IconToggleButton(
+            checked = button.checked == true,
+            onCheckedChange = { button.onClick() },
+            shapes = IconButtonDefaults.toggleableShapes(),
+            colors = colors,
+            modifier = Modifier.size(44.dp),
+        ) { Icon(button.icon, button.label) }
+        Text(button.label, style = MaterialTheme.typography.labelSmall, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalLayoutApi::class)
+@Composable
+private fun BitratePresets(currentKbps: Int, onSelect: (Int) -> Unit) {
+    Text(
+        "Bitrate, Mbps",
+        style = MaterialTheme.typography.titleMedium,
+        modifier = Modifier.padding(start = 20.dp, bottom = 12.dp),
+    )
+    FlowRow(
+        Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        maxItemsInEachRow = 4,
+    ) {
+        BITRATE_PRESETS_KBPS.forEach { kbps ->
+            ToggleButton(
+                checked = kbps == currentKbps,
+                onCheckedChange = { onSelect(kbps) },
+                colors = ToggleButtonDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(formatBitrate(kbps * 1000L).removeSuffix(" Mbps").removeSuffix(".0"), maxLines = 1)
+            }
+        }
+    }
+}
+
+private val BITRATE_PRESETS_KBPS = listOf(1000, 2500, 4000, 6000, 8000, 10000, 15000, 20000)
 
 @Composable
 private fun Preview(engine: StreamEngine, ui: UiState) {
@@ -219,59 +390,39 @@ private fun Preview(engine: StreamEngine, ui: UiState) {
 }
 
 @Composable
-private fun StatusOverlay(
-    ui: UiState,
-    stats: LiveStats,
-    profileName: String,
-    maxBitrateBps: Int,
-    onDismissError: () -> Unit,
-    modifier: Modifier,
-) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            val (label, color) = when (ui.live) {
-                LiveState.OFFLINE -> profileName to Color.White
-                LiveState.CONNECTING -> "Connecting" to Color(0xFFFFCC00)
-                LiveState.LIVE -> formatUptime(stats.uptimeSeconds) to LiveRed
-                LiveState.RECONNECTING -> "Reconnecting" to Color(0xFFFFCC00)
+private fun Status(ui: UiState, stats: LiveStats, profileName: String, onDismissError: () -> Unit, modifier: Modifier) {
+    Column(modifier) {
+        if (ui.live == LiveState.OFFLINE) {
+            Text(profileName, style = statusStyle.copy(fontSize = 16.sp, fontWeight = FontWeight.SemiBold), maxLines = 1)
+        } else {
+            Text(formatBitrate(stats.bitrateBps), style = statusStyle.copy(fontSize = 20.sp, fontWeight = FontWeight.Bold))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val (label, color) = when (ui.live) {
+                    LiveState.LIVE -> formatUptime(stats.uptimeSeconds) to LiveRed
+                    LiveState.RECONNECTING -> "Reconnecting" to Color(0xFFFFCC00)
+                    else -> "Connecting" to Color(0xFFFFCC00)
+                }
+                Box(Modifier.size(7.dp).clip(CircleShape).background(color))
+                Spacer(Modifier.width(5.dp))
+                Text(label, style = statusStyle)
+                if (ui.thermal >= PowerManager.THERMAL_STATUS_SEVERE) {
+                    Spacer(Modifier.width(8.dp))
+                    Icon(Icons.Rounded.Thermostat, "Phone is hot", tint = Color(0xFFFF9500), modifier = Modifier.size(14.dp))
+                }
+                if (ui.battery <= 15) {
+                    Spacer(Modifier.width(6.dp))
+                    Icon(Icons.Rounded.BatteryAlert, "Battery low", tint = Color(0xFFFF9500), modifier = Modifier.size(14.dp))
+                }
             }
-            if (ui.live != LiveState.OFFLINE) {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(color))
-                Spacer(Modifier.width(6.dp))
-            }
-            Text(label, style = statusStyle.copy(fontWeight = FontWeight.SemiBold))
         }
-        if (ui.live != LiveState.OFFLINE) {
-            Text(
-                buildString {
-                    append(formatBitrate(stats.bitrateBps))
-                    if (stats.targetBitrateBps in 1 until maxBitrateBps) append("  ABR ${formatBitrate(stats.targetBitrateBps.toLong())}")
-                    append("  ")
-                    append("%.0f fps".format(stats.fps))
-                    if (stats.rttMs > 0) append("  %.0f ms".format(stats.rttMs))
-                    stats.codec?.let { append("  ").append(it.label) }
-                    if (stats.links > 0) append(if (stats.links == 1) "  1 link" else "  ${stats.links} links")
-                },
-                style = statusStyle,
-            )
-        }
-        val alerts = buildList {
-            if (ui.battery <= 20) add("Battery ${ui.battery}%")
-            if (ui.thermal >= PowerManager.THERMAL_STATUS_SEVERE) add("Hot")
-            else if (ui.thermal >= PowerManager.THERMAL_STATUS_MODERATE) add("Warm")
-            if (ui.muted) add("Muted")
-            (ui.cameraState as? CameraState.Error)?.let { add(it.message) }
-        }
-        if (alerts.isNotEmpty()) {
-            Text(alerts.joinToString("  "), style = statusStyle.copy(color = Color(0xFFFFCC00)))
-        }
-        ui.error?.let { error ->
+        val error = ui.error ?: (ui.cameraState as? CameraState.Error)?.message
+        if (error != null) {
             Text(
                 error,
-                style = statusStyle.copy(color = Color(0xFFFF8A80)),
-                maxLines = 2,
+                style = statusStyle.copy(color = Color(0xFFFF8A80), fontSize = 12.sp),
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.pointerInput(Unit) { detectTapGestures { onDismissError() } },
+                modifier = Modifier.clickable(interactionSource = null, indication = null) { onDismissError() },
             )
         }
     }
@@ -314,57 +465,18 @@ private fun ZoomStops(ui: UiState, onZoom: (Float) -> Unit, modifier: Modifier) 
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun Controls(
-    ui: UiState,
-    landscape: Boolean,
-    confirmStop: Boolean,
-    onLive: () -> Unit,
-    onSettings: () -> Unit,
-    onCameras: () -> Unit,
-    onMute: () -> Unit,
-    onTorch: () -> Unit,
-    modifier: Modifier,
-) {
-    val content: @Composable () -> Unit = {
-        RailButton(onSettings) { Icon(Icons.Rounded.Settings, "Settings") }
-        RailButton(onCameras) {
-            Icon(if (ui.camera?.facing == Facing.EXTERNAL) Icons.Rounded.Usb else Icons.Rounded.Cameraswitch, "Camera")
-        }
-        LiveButton(ui.live, confirmStop, onLive)
-        RailToggle(ui.muted, onMute) { Icon(if (ui.muted) Icons.Rounded.MicOff else Icons.Rounded.Mic, "Mute") }
-        RailToggle(ui.torch, onTorch, enabled = ui.camera?.hasFlash == true) {
-            Icon(if (ui.torch) Icons.Rounded.FlashlightOn else Icons.Rounded.FlashlightOff, "Torch")
-        }
-    }
-    if (landscape) {
-        Column(
-            modifier.padding(end = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) { content() }
-    } else {
-        Row(
-            modifier.padding(bottom = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) { content() }
-    }
-}
-
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun LiveButton(state: LiveState, confirmStop: Boolean, onClick: () -> Unit) {
+private fun LiveButton(state: LiveState, confirmStop: Boolean, onClick: () -> Unit, size: Dp) {
     val live = state != LiveState.OFFLINE
     val haptics = LocalHapticFeedback.current
     val corner by animateDpAsState(
-        if (live) 22.dp else 40.dp,
+        if (live) size * 0.28f else size / 2,
         MaterialTheme.motionScheme.fastSpatialSpec(),
     )
     val inner by animateDpAsState(
-        if (live) 26.dp else 58.dp,
+        if (live) size * 0.33f else size * 0.72f,
         MaterialTheme.motionScheme.defaultSpatialSpec(),
     )
-    val innerCorner by animateDpAsState(if (live) 7.dp else 29.dp, MaterialTheme.motionScheme.defaultSpatialSpec())
+    val innerCorner by animateDpAsState(if (live) size * 0.09f else size * 0.36f, MaterialTheme.motionScheme.defaultSpatialSpec())
     val pressScale by animateFloatAsState(if (confirmStop) 0.92f else 1f, MaterialTheme.motionScheme.fastSpatialSpec())
     Surface(
         onClick = {
@@ -375,7 +487,7 @@ private fun LiveButton(state: LiveState, confirmStop: Boolean, onClick: () -> Un
         color = Color.Black.copy(alpha = 0.35f),
         border = androidx.compose.foundation.BorderStroke(3.dp, Color.White),
         modifier = Modifier
-            .size(80.dp)
+            .size(size)
             .scale(pressScale)
             .semantics { contentDescription = if (confirmStop) "Confirm stop" else if (live) "Stop stream" else "Go live" },
     ) {
@@ -386,40 +498,6 @@ private fun LiveButton(state: LiveState, confirmStop: Boolean, onClick: () -> Un
             }
         }
     }
-}
-
-@Composable
-private fun RailButton(onClick: () -> Unit, content: @Composable () -> Unit) {
-    FilledIconButton(
-        onClick = onClick,
-        colors = IconButtonDefaults.filledIconButtonColors(
-            containerColor = Color.Black.copy(alpha = 0.55f),
-            contentColor = Color.White,
-        ),
-        modifier = Modifier.size(48.dp),
-        content = content,
-    )
-}
-
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun RailToggle(checked: Boolean, onClick: () -> Unit, enabled: Boolean = true, content: @Composable () -> Unit) {
-    IconToggleButton(
-        checked = checked,
-        onCheckedChange = { onClick() },
-        enabled = enabled,
-        shapes = IconButtonDefaults.toggleableShapes(),
-        colors = IconButtonDefaults.iconToggleButtonColors(
-            containerColor = Color.Black.copy(alpha = 0.55f),
-            contentColor = Color.White,
-            checkedContainerColor = Color.White,
-            checkedContentColor = Color.Black,
-            disabledContainerColor = Color.Black.copy(alpha = 0.3f),
-            disabledContentColor = Color.White.copy(alpha = 0.3f),
-        ),
-        modifier = Modifier.size(48.dp),
-        content = content,
-    )
 }
 
 @Composable
