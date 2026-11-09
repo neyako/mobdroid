@@ -373,7 +373,8 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         val released = videoEncoder?.release(timeoutMs = 5000) ?: true
         videoEncoder = null
         if (!released) {
-            onFatal("Video encoder stopped responding")
+            stopLive()
+            _ui.update { it.copy(error = "Video encoder stopped responding") }
             return
         }
         runCatching { startVideoEncoder() }.onFailure { onFatal("Video encoder: ${it.message}") }
