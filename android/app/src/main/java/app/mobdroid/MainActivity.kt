@@ -1,13 +1,99 @@
 package app.mobdroid
 
+import android.Manifest
+import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
+import android.hardware.display.DisplayManager
+import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
-import androidx.compose.material3.Text
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import app.mobdroid.settings.Orientation
+import app.mobdroid.ui.MainScreen
+import app.mobdroid.ui.MobdroidTheme
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    private val app get() = application as App
+    private var permissionsGranted = false
+
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = Unit
+
+        override fun onDisplayRemoved(displayId: Int) = Unit
+
+        override fun onDisplayChanged(displayId: Int) = updateRotation()
+    }
+
+    private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        permissionsGranted = hasPermissions()
+        if (permissionsGranted && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) app.engine.startPreview()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge(SystemBarStyle.dark(android.graphics.Color.BLACK), SystemBarStyle.dark(android.graphics.Color.BLACK))
         super.onCreate(savedInstanceState)
-        setContent { Text("Mobdroid") }
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            hide(WindowInsetsCompat.Type.systemBars())
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.CREATED) {
+                app.settings.settings.map { it.selectedProfile.orientation to it.keepScreenOn }.distinctUntilChanged()
+                    .collect { (orientation, keepOn) ->
+                        requestedOrientation = if (orientation == Orientation.LANDSCAPE) {
+                            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                        } else {
+                            ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                        }
+                        if (keepOn) {
+                            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                        } else {
+                            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                        }
+                    }
+            }
+        }
+        setContent { MobdroidTheme { MainScreen(app.engine, app.settings) } }
+        permissionsGranted = hasPermissions()
+        if (!permissionsGranted) permissionLauncher.launch(PERMISSIONS)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        getSystemService(DisplayManager::class.java).registerDisplayListener(displayListener, null)
+        updateRotation()
+        if (permissionsGranted) app.engine.startPreview()
+    }
+
+    override fun onStop() {
+        getSystemService(DisplayManager::class.java).unregisterDisplayListener(displayListener)
+        app.engine.stopPreviewIfIdle()
+        super.onStop()
+    }
+
+    private fun updateRotation() {
+        val rotation = display.rotation
+        app.engine.setDisplayRotation(rotation * 90)
+    }
+
+    private fun hasPermissions() = REQUIRED.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+
+    private companion object {
+        val REQUIRED = arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+        val PERMISSIONS = if (Build.VERSION.SDK_INT >= 33) REQUIRED + Manifest.permission.POST_NOTIFICATIONS else REQUIRED
     }
 }

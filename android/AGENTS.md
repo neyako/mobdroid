@@ -25,7 +25,10 @@ them, not code style.
   codec config buffer (`BUFFER_FLAG_CODEC_CONFIG`) is `VideoFormat.config`: Annex-B parameter sets for
   H264/HEVC; for AV1 either an `av1C` record (first byte `0x81`) or a bare sequence header OBU.
 - Audio is AAC-LC, raw frames without ADTS; `AudioFormat.config` is the AudioSpecificConfig.
-- Encoders run without B-frames, so DTS equals PTS. Timestamps are microseconds on one clock.
+- Encoders run without B-frames, so DTS equals PTS. Timestamps are microseconds on `CLOCK_MONOTONIC`
+  (`System.nanoTime`), shared by audio and video.
+- `setVideoFormat`/`setAudioFormat` can be called again with the same or a new config (AV1 encoders report
+  it both as a config buffer and as `csd-0`); sinks treat a repeat as idempotent.
 - `MediaSink` calls come from encoder threads and never block. A `Publisher` owns a bounded backlog;
   on overflow it drops video until the next key frame before it drops audio.
 - A `Publisher` is one-shot: after `stop()` or `onDisconnected` it is dead. The app's stream session
