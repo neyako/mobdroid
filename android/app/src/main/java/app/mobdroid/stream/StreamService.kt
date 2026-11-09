@@ -16,10 +16,35 @@ import app.mobdroid.R
 class StreamService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    private var foreground = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val stop = intent?.action == ACTION_STOP
+        if (!stop || !foreground) {
+            enterForeground(intent?.getBooleanExtra(EXTRA_USB, false) == true)
+            foreground = true
+        }
+        if (stop) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        if (wakeLock == null) {
+            wakeLock = getSystemService(PowerManager::class.java)
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "mobdroid:live")
+                .apply { acquire() }
+            wifiLock = getSystemService(WifiManager::class.java)
+                .createWifiLock(WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "mobdroid:live")
+                .apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+        }
+        return START_NOT_STICKY
+    }
+
+    private fun enterForeground(usb: Boolean) {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL, "Live stream", NotificationManager.IMPORTANCE_LOW),
@@ -41,24 +66,8 @@ class StreamService : Service() {
             1,
             notification,
             ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-                if (intent?.getBooleanExtra(EXTRA_USB, false) == true) {
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-                } else {
-                    0
-                },
+                if (usb) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0,
         )
-        if (wakeLock == null) {
-            wakeLock = getSystemService(PowerManager::class.java)
-                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "mobdroid:live")
-                .apply { acquire() }
-            wifiLock = getSystemService(WifiManager::class.java)
-                .createWifiLock(WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "mobdroid:live")
-                .apply {
-                    setReferenceCounted(false)
-                    acquire()
-                }
-        }
-        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
@@ -71,6 +80,7 @@ class StreamService : Service() {
 
     companion object {
         const val EXTRA_USB = "usb"
+        const val ACTION_STOP = "app.mobdroid.STOP"
         private const val CHANNEL = "live"
     }
 }

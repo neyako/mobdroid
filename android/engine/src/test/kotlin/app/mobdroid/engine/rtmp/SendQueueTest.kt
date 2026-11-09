@@ -69,15 +69,16 @@ class SendQueueTest {
     }
 
     @Test
-    fun aKeyFrameDuringOverflowFlushesStaleVideoAndKeepsAudio() {
+    fun aKeyFrameDuringOverflowFlushesVideoAndAudioOlderThanTheLimit() {
         queue.addVideo(frame(100, key = true))
         queue.addAudio(frame(10))
         queue.addVideo(frame(100))
         advanceSeconds(3.5)
+        queue.addAudio(frame(20))
         assertFalse(queue.addVideo(frame(100)))
         assertTrue(queue.addVideo(frame(200, key = true)))
         assertEquals(3L, queue.droppedVideoFrames)
-        assertEquals(listOf("a10", "v200k"), drain())
+        assertEquals(listOf("a20", "v200k"), drain())
         assertTrue(queue.addVideo(frame(100)))
     }
 

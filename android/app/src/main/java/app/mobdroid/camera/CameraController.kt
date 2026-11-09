@@ -611,10 +611,11 @@ class CameraController(context: Context) {
         val current = request ?: return
         val hw = hardware ?: return
         if (session == null || hw.activeArray.width <= 0 || hw.activeArray.height <= 0) return
-        val zoom = currentZoom(current)
+        val zoom = if (hw.zoomRatio) 1f else currentZoom(current)
+        val aspect = current.size.width.toFloat() / current.size.height
         controls.tap = Tap(
-            meteringRect(hw.activeArray, zoom, x, y, AF_REGION_FRACTION).toMetering(),
-            meteringRect(hw.activeArray, zoom, x, y, AE_REGION_FRACTION).toMetering(),
+            meteringRect(hw.activeArray, zoom, aspect, x, y, AF_REGION_FRACTION).toMetering(),
+            meteringRect(hw.activeArray, zoom, aspect, x, y, AE_REGION_FRACTION).toMetering(),
         )
         if (hw.autoFocus) pendingTrigger = CameraMetadata.CONTROL_AF_TRIGGER_START
         handler.removeCallbacks(tapExpiryRunnable)

@@ -36,13 +36,21 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
     private val drawMatrix = FloatArray(16)
     private val previewMatrix = FloatArray(16)
     private val scratch = FloatArray(16)
+    private val point = FloatArray(8)
+    private var previewWidth = 0
+    private var previewHeight = 0
+    private var viewX = 0
+    private var viewY = 0
+    private var viewWidth = 0
+    private var viewHeight = 0
 
     private var outputWidth = outputWidth
     private var outputHeight = outputHeight
     private var inputWidth = 1920
     private var inputHeight = 1080
-    private var rotation = 0
-    private var mirrorPreview = false
+    private var swapped = false
+    private var displayRotation = 0
+    private var mirror = false
     private var boottimeTimestamps = false
     private var previewSurface: EGLSurface? = null
     private var encoderSurface: EGLSurface? = null
@@ -78,12 +86,20 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
 
     fun newInputSurface(): Surface = Surface(surfaceTexture)
 
-    fun setInput(width: Int, height: Int, rotationDegrees: Int, mirror: Boolean, boottimeTimestamps: Boolean) = runBlockingOnThread {
+    fun setInput(
+        width: Int,
+        height: Int,
+        sensorOrientation: Int,
+        displayRotation: Int,
+        mirror: Boolean,
+        boottimeTimestamps: Boolean,
+    ) = runBlockingOnThread {
         this.boottimeTimestamps = boottimeTimestamps
         inputWidth = width
         inputHeight = height
-        rotation = rotationDegrees
-        mirrorPreview = mirror
+        swapped = (sensorOrientation + displayRotation) % 180 != 0
+        this.displayRotation = displayRotation
+        this.mirror = mirror
         surfaceTexture.setDefaultBufferSize(width, height)
         updateSourceMatrix()
     }
@@ -98,10 +114,22 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         frameIntervalNs = 1_000_000_000L / fps
     }
 
+    fun previewToInput(x: Float, y: Float, block: (Float, Float) -> Unit) = handler.post {
+        if (released || previewSurface == null || viewWidth <= 0 || viewHeight <= 0) return@post
+        point[0] = (x * previewWidth - viewX) / viewWidth
+        point[1] = ((1 - y) * previewHeight - viewY) / viewHeight
+        point[2] = 0f
+        point[3] = 1f
+        if (point[0] !in 0f..1f || point[1] !in 0f..1f) return@post
+        Matrix.multiplyMV(point, 4, if (mirror) previewMatrix else drawMatrix, 0, point, 0)
+        block(point[4], point[5])
+    }
+
     fun setPreview(surface: Surface?) = runBlockingOnThread {
         previewSurface?.let { egl.makeNothingCurrent(); egl.releaseSurface(it) }
         previewSurface = surface?.let { runCatching { egl.createWindowSurface(it) }.getOrNull() }
             ?.takeIf { it != EGL14.EGL_NO_SURFACE }
+        viewWidth = 0
     }
 
     fun setEncoder(surface: Surface?) = runBlockingOnThread {
@@ -162,9 +190,8 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         }
         previewSurface?.let { surface ->
             if (egl.makeCurrent(surface)) {
-                val (w, h) = egl.surfaceSize(surface)
-                fitViewport(w, h)
-                if (mirrorPreview) {
+                fitViewport(egl.surfaceWidth(surface), egl.surfaceHeight(surface))
+                if (mirror) {
                     Matrix.setIdentityM(scratch, 0)
                     Matrix.translateM(scratch, 0, 1f, 0f, 0f)
                     Matrix.scaleM(scratch, 0, -1f, 1f, 1f)
@@ -193,13 +220,18 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         GLES20.glClearColor(0f, 0f, 0f, 1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
         val outAspect = outputWidth.toFloat() / outputHeight
+        previewWidth = w
+        previewHeight = h
         if (w.toFloat() / h > outAspect) {
-            val vw = (h * outAspect).toInt()
-            GLES20.glViewport((w - vw) / 2, 0, vw, h)
+            viewWidth = (h * outAspect).toInt()
+            viewHeight = h
         } else {
-            val vh = (w / outAspect).toInt()
-            GLES20.glViewport(0, (h - vh) / 2, w, vh)
+            viewWidth = w
+            viewHeight = (w / outAspect).toInt()
         }
+        viewX = (w - viewWidth) / 2
+        viewY = (h - viewHeight) / 2
+        GLES20.glViewport(viewX, viewY, viewWidth, viewHeight)
     }
 
     private fun countFps() {
@@ -218,15 +250,14 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         if (boottimeTimestamps) ts - (SystemClock.elapsedRealtimeNanos() - System.nanoTime()) else ts
 
     private fun updateSourceMatrix() {
-        val swapped = rotation % 180 != 0
         val srcAspect = if (swapped) inputHeight.toFloat() / inputWidth else inputWidth.toFloat() / inputHeight
         val outAspect = outputWidth.toFloat() / outputHeight
         val sx = if (srcAspect > outAspect) outAspect / srcAspect else 1f
         val sy = if (srcAspect > outAspect) 1f else srcAspect / outAspect
         Matrix.setIdentityM(sourceMatrix, 0)
         Matrix.translateM(sourceMatrix, 0, 0.5f, 0.5f, 0f)
-        Matrix.rotateM(sourceMatrix, 0, rotation.toFloat(), 0f, 0f, 1f)
-        Matrix.scaleM(sourceMatrix, 0, sx, sy, 1f)
+        Matrix.rotateM(sourceMatrix, 0, -displayRotation.toFloat(), 0f, 0f, 1f)
+        Matrix.scaleM(sourceMatrix, 0, if (mirror) -sx else sx, sy, 1f)
         Matrix.translateM(sourceMatrix, 0, -0.5f, -0.5f, 0f)
     }
 

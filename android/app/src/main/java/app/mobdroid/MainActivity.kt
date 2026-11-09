@@ -25,7 +25,6 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val app get() = application as App
-    private var permissionsGranted = false
 
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) = Unit
@@ -36,8 +35,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        permissionsGranted = hasPermissions()
-        if (permissionsGranted && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) app.engine.startPreview()
+        if (hasPermissions() && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) app.engine.startPreview()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -61,15 +59,14 @@ class MainActivity : ComponentActivity() {
             }
         }
         setContent { MobdroidTheme { MainScreen(app.engine, app.settings) } }
-        permissionsGranted = hasPermissions()
-        if (!permissionsGranted) permissionLauncher.launch(PERMISSIONS)
+        if (!hasPermissions()) permissionLauncher.launch(PERMISSIONS)
     }
 
     override fun onStart() {
         super.onStart()
         getSystemService(DisplayManager::class.java).registerDisplayListener(displayListener, null)
         updateRotation()
-        if (permissionsGranted) app.engine.startPreview()
+        if (hasPermissions()) app.engine.startPreview()
     }
 
     override fun onStop() {

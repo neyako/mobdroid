@@ -47,14 +47,18 @@ class TransportBitrateMeter(initialBitrate: Long) {
     private var previousNanos = 0L
 
     fun update(totalBytesSent: Long, nowNanos: Long): Long {
-        if (previousBytes >= 0 && nowNanos > previousNanos) {
+        if (previousBytes in 0..totalBytesSent && nowNanos > previousNanos) {
             val seconds = (nowNanos - previousNanos) / 1e9
-            val latest = 8 * maxOf(totalBytesSent - previousBytes, 0) / seconds
+            val latest = 8 * (totalBytesSent - previousBytes) / seconds
             bitrate = (bitrate * 0.7 + latest * 0.3).toLong()
         }
         previousBytes = totalBytesSent
         previousNanos = nowNanos
         return bitrate
+    }
+
+    fun pause() {
+        previousBytes = -1
     }
 }
 

@@ -1,5 +1,6 @@
 package app.mobdroid.stream
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.os.BatteryManager
@@ -37,10 +38,12 @@ import app.mobdroid.uvc.UvcDevices
 import app.mobdroid.uvc.closest
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.util.Range
 import androidx.core.content.ContextCompat
+import androidx.core.content.IntentCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -135,7 +138,11 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             context,
             object : BroadcastReceiver() {
                 override fun onReceive(context: Context, intent: Intent) {
-                    onUsbChanged(intent.action == UsbManager.ACTION_USB_DEVICE_ATTACHED)
+                    val device = IntentCompat.getParcelableExtra(intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+                    onUsbChanged(
+                        device?.takeIf { intent.action == UsbManager.ACTION_USB_DEVICE_ATTACHED }
+                            ?.let { UVC_PREFIX + it.deviceName },
+                    )
                 }
             },
             IntentFilter().apply {
@@ -169,14 +176,14 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         hasFlash = false,
     )
 
-    private fun onUsbChanged(attached: Boolean) {
+    private fun onUsbChanged(attachedId: String?) {
         scope.launch {
             val cameras = listCameras()
             synchronized(this@StreamEngine) {
                 val current = _ui.value.camera
-                val newUvc = cameras.firstOrNull { it.id.startsWith(UVC_PREFIX) && it.key != current?.key }
+                val attached = cameras.firstOrNull { it.id == attachedId }
                 val next = when {
-                    attached && newUvc != null -> newUvc
+                    attached != null -> attached
                     current != null && cameras.none { it.key == current.key } -> defaultCamera(cameras)
                     else -> current
                 }
@@ -261,13 +268,20 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         _ui.update { it.copy(muted = muted) }
     }
 
-    fun tapToFocus(x: Float, y: Float) = camera.tapToFocus(x, y)
+    @Synchronized
+    fun tapToFocus(x: Float, y: Float) {
+        compositor?.previewToInput(x, y, camera::tapToFocus)
+    }
 
     fun setExposureCompensation(ev: Float) = camera.setExposureCompensation(ev)
 
     @Synchronized
     fun goLive() {
         if (isLive) return
+        if (LIVE_PERMISSIONS.any { context.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }) {
+            _ui.update { it.copy(error = "Allow camera and microphone access to go live") }
+            return
+        }
         val profile = settings.settings.value.selectedProfile
         val (w, h) = outputSize(profile)
         val codec = CodecCatalog.choose(profile.codec, profile.allowedCodecs, w, h, profile.fps)
@@ -279,9 +293,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         liveCodec = codec
         targetBitrate = profile.bitrateKbps * 1000
         liveMaxBitrate = targetBitrate.toLong()
-        context.startForegroundService(
-            Intent(context, StreamService::class.java).putExtra(StreamService.EXTRA_USB, uvcCamera != null),
-        )
+        transportMeter = TransportBitrateMeter(ADAPTIVE_BITRATE_START_BPS)
         ensureCompositor()
         if (!previewActive) startPreview()
         compositor!!.setOutputSize(w, h)
@@ -302,6 +314,10 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             _ui.update { it.copy(error = e.message ?: "Encoder failed") }
             return
         }
+        context.startForegroundService(
+            Intent(context, StreamService::class.java).putExtra(StreamService.EXTRA_USB, uvcCamera != null),
+        )
+        serviceStarted = true
         newSession.start()
         liveStartedAt = System.nanoTime()
         _ui.update { it.copy(error = null) }
@@ -331,7 +347,16 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         liveProfile = null
         _ui.update { it.copy(live = LiveState.OFFLINE, error = null) }
         _stats.value = LiveStats()
-        context.stopService(Intent(context, StreamService::class.java))
+        if (serviceStarted) {
+            serviceStarted = false
+            val service = Intent(context, StreamService::class.java)
+            try {
+                context.startService(service.setAction(StreamService.ACTION_STOP))
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, "Stopping the stream service directly", e)
+                context.stopService(service)
+            }
+        }
         if (previewSurface == null) stopPreviewIfIdle()
     }
 
@@ -426,7 +451,11 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         ) {
             restartVideoEncoder("no output for 5 s")
         }
-        transportMeter.update(stats.bytesSent, System.nanoTime())
+        if (session.state.value == LiveState.LIVE) {
+            transportMeter.update(stats.bytesSent, System.nanoTime())
+        } else {
+            transportMeter.pause()
+        }
         _stats.value = LiveStats(
             bitrateBps = stats.sendBitrateBps,
             targetBitrateBps = targetBitrate,
@@ -442,7 +471,9 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         _ui.update { it.copy(battery = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)) }
     }
 
-    private val transportMeter = TransportBitrateMeter(ADAPTIVE_BITRATE_START_BPS)
+    @Volatile
+    private var transportMeter = TransportBitrateMeter(ADAPTIVE_BITRATE_START_BPS)
+    private var serviceStarted = false
 
     private suspend fun runAdaptiveBitrate(session: StreamSession, profile: StreamProfile) {
         var max = 0L
@@ -496,6 +527,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             uvcCamera = null
             uvc.onError = null
             uvc.close()
+            _ui.update { it.copy(cameraState = CameraState.Closed) }
         }
         uvcSurface?.release()
         uvcSurface = null
@@ -546,7 +578,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                     return@launch
                 }
                 val format = uvc.formats.closest(maxOf(w, h), minOf(w, h), profile.fps)
-                synchronized(this@StreamEngine) {
+                val surface = synchronized(this@StreamEngine) {
                     if (generation != cameraGeneration || format == null) {
                         uvc.close()
                         if (format == null) _ui.update { it.copy(error = "USB camera has no usable format") }
@@ -557,16 +589,20 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                     compositor.setFrameRate(encoderFps(profile))
                     currentInputSize = Size(format.width, format.height)
                     applyInputTransform()
-                    val surface = compositor.newInputSurface().also { uvcSurface = it }
                     uvc.onError = { message -> onUvcError(generation, message) }
-                    try {
-                        uvc.start(format, surface)
-                        uvcFailures = 0
-                        _ui.update { it.copy(cameraState = CameraState.Streaming) }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "USB camera start failed", e)
-                        onUvcError(generation, e.message ?: "start failed")
-                    }
+                    compositor.newInputSurface().also { uvcSurface = it }
+                }
+                try {
+                    uvc.start(format!!, surface)
+                } catch (e: Exception) {
+                    Log.e(TAG, "USB camera start failed", e)
+                    onUvcError(generation, e.message ?: "start failed")
+                    return@launch
+                }
+                synchronized(this@StreamEngine) {
+                    if (generation != cameraGeneration) return@launch
+                    uvcFailures = 0
+                    _ui.update { it.copy(cameraState = CameraState.Streaming) }
                 }
             }
         }
@@ -588,7 +624,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             val cameras = listCameras()
             synchronized(this@StreamEngine) {
                 if (!previewActive || closedGeneration != cameraGeneration || _ui.value.camera?.key != key) return@launch
-                if (cameras.any { it.key == key }) openCamera() else onUsbChanged(attached = false)
+                if (cameras.any { it.key == key }) openCamera() else onUsbChanged(null)
             }
         }
     }
@@ -596,15 +632,11 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private fun applyInputTransform() {
         val descriptor = _ui.value.camera ?: return
         val size = currentInputSize
-        val rotation = when (descriptor.facing) {
-            Facing.FRONT -> (descriptor.sensorOrientation + displayRotation) % 360
-            Facing.BACK -> (descriptor.sensorOrientation - displayRotation + 360) % 360
-            Facing.EXTERNAL -> 0
-        }
         compositor?.setInput(
             size.width,
             size.height,
-            rotation,
+            descriptor.sensorOrientation,
+            if (descriptor.facing == Facing.EXTERNAL) 0 else displayRotation,
             descriptor.facing == Facing.FRONT,
             boottimeTimestamps = uvcCamera == null && descriptor.realtimeTimestamps,
         )
@@ -624,6 +656,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         const val TAG = "StreamEngine"
         const val UVC_PREFIX = "uvc:"
         const val ADAPTIVE_BITRATE_START_BPS = 1_000_000L
+        val LIVE_PERMISSIONS = arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
     }
 }
 

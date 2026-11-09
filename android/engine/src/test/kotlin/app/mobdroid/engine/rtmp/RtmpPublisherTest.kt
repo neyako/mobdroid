@@ -388,7 +388,7 @@ class RtmpPublisherTest {
     }
 
     @Test
-    fun aStalledReceiverMakesTheBacklogDropVideoUntilAKeyFrameWhileAudioSurvives() {
+    fun aStalledReceiverMakesTheBacklogDropVideoUntilAKeyFrameAndAudioOlderThanTheLimit() {
         val gate = CountDownLatch(1)
         FakeRtmpServer(behavior = Behavior(readGate = gate)).start().use { server ->
             val listener = RecordingListener()
@@ -414,7 +414,9 @@ class RtmpPublisherTest {
             Thread.sleep(300)
             val videos = server.mediaOfType(MSG_VIDEO).drop(1)
             val audios = server.mediaOfType(MSG_AUDIO).drop(1)
-            assertEquals(audioFrames, audios.size)
+            assertTrue(audios.size < audioFrames)
+            assertEquals((audioFrames - 1) * 21_333L / 1000, audios.last().timestamp)
+            audios.zipWithNext().forEach { (previous, next) -> assertTrue(next.timestamp > previous.timestamp) }
             assertEquals(videoFrames.toLong(), videos.size + publisher.stats().droppedVideoFrames)
             videos.zipWithNext().forEach { (previous, next) ->
                 if (indexOf(next) != indexOf(previous) + 1) {

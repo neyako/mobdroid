@@ -40,7 +40,8 @@ them, not code style.
   path); with an empty key, the last path segment of `url` is the key. Default ports 1935/443. It keeps
   `EncodedFrame.data` until sent, so never reuse a frame's array. It waits up to 2 s for
   `setVideoFormat` before `connect` so it can declare the Enhanced RTMP `fourCcList`, and always starts
-  at a key frame. Backlog limit is 3 s of media or 16 MiB.
+  at a key frame. Backlog limit is 3 s of media or 16 MiB. The key frame that ends an overflow also
+  drops audio queued for longer than the limit, so audio never trails video by seconds afterwards.
 - `SrtPublisher(url, listener, links)`: `srt://host:port?streamid=&latency=` or `srtla://host:port?streamid=`
   (bonded over `links`). No encryption: a passphrase is rejected. Frames before `onConnected` are
   dropped, so the session requests a key frame on connect. `NetworkLink.createDatagramSocket()` must
@@ -54,7 +55,8 @@ them, not code style.
   never used.
 - ABR: `BelaboxAdaptiveBitrate` for SRT, `QueueAdaptiveBitrate` for RTMP, ticked every
   `ADAPTIVE_BITRATE_UPDATE_INTERVAL_MS` (20 ms) with the transport bitrate measured once a second.
-  Both cap the target near the measured transport bitrate, as Moblin does.
+  Both cap the target near the measured transport bitrate, as Moblin does. `TransportBitrateMeter` is
+  new for each session and pauses while reconnecting, so time offline does not pull the cap down.
 
 ## Cameras
 
@@ -75,11 +77,21 @@ them, not code style.
 - The encoder's key frame interval counts frames at its configured rate, so `VideoEncoder` requests a key
   frame when one is 25% overdue. That keeps the interval near the profile's when the camera delivers
   fewer frames than the encoder's rate.
+- The camera service puts the sensor rotation, and a mirror for front cameras, in the `SurfaceTexture`
+  transform, which makes the picture upright for the display's natural orientation. `VideoCompositor`
+  applies that transform, then rotates by the display rotation only, undoes the mirror for the stream
+  (the preview keeps it) and center-crops to the output aspect. Never add the sensor orientation again.
+  On the Flip cover screen the sensor's long side is vertical, so the stream is the middle third of it.
+- Tap to focus: `VideoCompositor.previewToInput` maps a preview point through the matrices it draws
+  with to camera buffer coordinates and ignores the letterbox bars. `meteringRect` maps those into the
+  part of the active array the buffer shows (a center crop at the buffer's aspect), at zoom 1 when the
+  camera uses `CONTROL_ZOOM_RATIO`, whose metering regions are relative to the zoomed view.
 - `uvc/`: userspace UVC for phones without an external camera HAL. libusb, libuvc and libjpeg-turbo are
   fetched by CMake at configure time with pinned hashes. MJPEG or YUYV frames are decoded into the
   compositor's `SurfaceTexture` through their own `Surface`, released after `stop()`. USB permission
   needs runtime CAMERA permission first. Cameras the OS exposes through Camera2 `LENS_FACING_EXTERNAL`
-  go through `camera/` instead.
+  go through `camera/` instead. `UvcCamera.start` blocks on USB negotiation, so `StreamEngine` calls it
+  outside its lock. A USB attach selects the attached camera only, never another one already plugged in.
 
 ## Commands
 
@@ -94,6 +106,14 @@ Run from `android/`. `local.properties` (gitignored) needs `sdk.dir=$HOME/Androi
 Engine tests that talk to a real server use the system `ffmpeg`/`ffprobe` as the receiver and are
 skipped when they are missing. The SRTLA end-to-end tests also need `SRTLA_REC` pointing at a built
 `srtla_rec` from https://github.com/BELABOX/srtla.
+
+## Stream service
+
+- `StreamEngine.goLive` needs CAMERA and RECORD_AUDIO and reports an error without them. It starts
+  `StreamService` only after the encoders have started.
+- `stopLive` sends `StreamService.ACTION_STOP` instead of calling `stopService`: a service started with
+  `startForegroundService` that is stopped before it calls `startForeground` crashes the app. The
+  service enters the foreground first when it has not yet, then stops itself.
 
 ## Conventions
 

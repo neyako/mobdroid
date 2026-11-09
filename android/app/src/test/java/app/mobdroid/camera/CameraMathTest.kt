@@ -139,16 +139,19 @@ class CameraMathTest {
 
     @ParameterizedTest
     @CsvSource(
-        "1, 0.5, 0.5, 0.15, 1700, 1275, 2300, 1725",
-        "1, 0, 0, 0.15, 0, 0, 600, 450",
-        "1, 1, 1, 0.15, 3400, 2550, 4000, 3000",
-        "1, 2, -1, 0.15, 3400, 0, 4000, 450",
-        "2, 0.5, 0.5, 0.3, 1700, 1275, 2300, 1725",
-        "2, 0, 0, 0.3, 700, 525, 1300, 975",
-        "0.5, 0, 0, 0.15, 0, 0, 600, 450",
+        "1, 1.3333334, 0.5, 0.5, 0.15, 1700, 1275, 2300, 1725",
+        "1, 1.3333334, 0, 0, 0.15, 0, 0, 600, 450",
+        "1, 1.3333334, 1, 1, 0.15, 3400, 2550, 4000, 3000",
+        "1, 1.3333334, 2, -1, 0.15, 3400, 0, 4000, 450",
+        "2, 1.3333334, 0.5, 0.5, 0.3, 1700, 1275, 2300, 1725",
+        "2, 1.3333334, 0, 0, 0.3, 700, 525, 1300, 975",
+        "0.5, 1.3333334, 0, 0, 0.15, 0, 0, 600, 450",
+        "1, 1.7777778, 0.5, 0, 0.15, 1700, 206, 2300, 544",
+        "1, 1, 0, 0.5, 0.15, 275, 1275, 725, 1725",
     )
     fun `tap region follows the visible frame`(
         zoom: Float,
+        aspect: Float,
         x: Float,
         y: Float,
         fraction: Float,
@@ -157,7 +160,7 @@ class CameraMathTest {
         right: Int,
         bottom: Int,
     ) {
-        assertEquals(IRect(left, top, right, bottom), meteringRect(active, zoom, x, y, fraction))
+        assertEquals(IRect(left, top, right, bottom), meteringRect(active, zoom, aspect, x, y, fraction))
     }
 
     @ParameterizedTest

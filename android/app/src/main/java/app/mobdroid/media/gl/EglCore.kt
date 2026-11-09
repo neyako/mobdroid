@@ -13,6 +13,7 @@ class EglCore {
     private val config: EGLConfig
     val context: EGLContext
     private val pbuffer: EGLSurface
+    private val queried = IntArray(1)
 
     init {
         val version = IntArray(2)
@@ -61,12 +62,13 @@ class EglCore {
 
     fun swap(surface: EGLSurface): Boolean = EGL14.eglSwapBuffers(display, surface)
 
-    fun surfaceSize(surface: EGLSurface): Pair<Int, Int> {
-        val v = IntArray(1)
-        EGL14.eglQuerySurface(display, surface, EGL14.EGL_WIDTH, v, 0)
-        val w = v[0]
-        EGL14.eglQuerySurface(display, surface, EGL14.EGL_HEIGHT, v, 0)
-        return w to v[0]
+    fun surfaceWidth(surface: EGLSurface): Int = query(surface, EGL14.EGL_WIDTH)
+
+    fun surfaceHeight(surface: EGLSurface): Int = query(surface, EGL14.EGL_HEIGHT)
+
+    private fun query(surface: EGLSurface, attribute: Int): Int {
+        EGL14.eglQuerySurface(display, surface, attribute, queried, 0)
+        return queried[0]
     }
 
     fun releaseSurface(surface: EGLSurface) {

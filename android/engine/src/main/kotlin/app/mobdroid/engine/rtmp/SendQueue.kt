@@ -56,7 +56,7 @@ internal class SendQueue(
                     dropped++
                     return false
                 }
-                removeVideoBefore(count, countAsDropped = true)
+                removeBefore(count, now - maxBacklogNanos, countAsDropped = true)
             }
             dropUntilKeyFrame = false
             push(frame, true, now)
@@ -91,7 +91,7 @@ internal class SendQueue(
                     break
                 }
             }
-            removeVideoBefore(limit, countAsDropped = false)
+            removeBefore(limit, Long.MIN_VALUE, countAsDropped = false)
         }
     }
 
@@ -172,16 +172,20 @@ internal class SendQueue(
         head = 0
     }
 
-    private fun removeVideoBefore(limit: Int, countAsDropped: Boolean) {
+    private fun removeBefore(videoLimit: Int, audioEnqueuedBefore: Long, countAsDropped: Boolean) {
         val size = frames.size
         var kept = 0
         for (i in 0 until count) {
             val source = (head + i) % size
             val frame = frames[source]!!
-            if (video[source] && i < limit) {
+            if (video[source] && i < videoLimit) {
                 if (countAsDropped) {
                     dropped++
                 }
+                bytes -= frame.data.size
+                continue
+            }
+            if (!video[source] && enqueuedAt[source] < audioEnqueuedBefore) {
                 bytes -= frame.data.size
                 continue
             }

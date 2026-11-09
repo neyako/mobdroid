@@ -27,8 +27,16 @@ internal fun cropRegion(active: IRect, zoom: Float): IRect {
     return IRect(left, top, left + w, top + h)
 }
 
-internal fun meteringRect(active: IRect, zoom: Float, x: Float, y: Float, fraction: Float): IRect {
-    val view = cropRegion(active, zoom)
+internal fun streamRegion(region: IRect, aspect: Float): IRect {
+    val w = min(region.width, (region.height * aspect).roundToInt()).coerceAtLeast(1)
+    val h = min(region.height, (region.width / aspect).roundToInt()).coerceAtLeast(1)
+    val left = region.left + (region.width - w) / 2
+    val top = region.top + (region.height - h) / 2
+    return IRect(left, top, left + w, top + h)
+}
+
+internal fun meteringRect(active: IRect, zoom: Float, aspect: Float, x: Float, y: Float, fraction: Float): IRect {
+    val view = streamRegion(cropRegion(active, zoom), aspect)
     val w = (view.width * fraction).roundToInt().coerceIn(1, active.width)
     val h = (view.height * fraction).roundToInt().coerceIn(1, active.height)
     val cx = view.left + (x.coerceIn(0f, 1f) * view.width).roundToInt()

@@ -221,4 +221,14 @@ class StreamStatsTest {
         assertEquals(2_470_000, meter.update(375_000, ms(3000)))
         assertEquals(2_470_000, meter.bitrate)
     }
+
+    @Test
+    fun transportBitrateMeterSkipsTheGapAcrossAPauseAndACounterRestart() {
+        val meter = TransportBitrateMeter(4_000_000)
+        meter.update(500_000, 0)
+        meter.pause()
+        assertEquals(4_000_000, meter.update(900_000, ms(10_000)))
+        assertEquals(4_000_000, meter.update(0, ms(11_000)))
+        assertEquals(3_100_000, meter.update(125_000, ms(12_000)))
+    }
 }
