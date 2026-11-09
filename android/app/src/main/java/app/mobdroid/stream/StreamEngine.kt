@@ -446,27 +446,27 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private val transportMeter = TransportBitrateMeter(ADAPTIVE_BITRATE_START_BPS)
 
     private suspend fun runAdaptiveBitrate(session: StreamSession, profile: StreamProfile) {
-        var max = liveMaxBitrate
+        var max = 0L
         var abr: AdaptiveBitrate? = null
         var owner: Any? = null
         while (true) {
             delay(ADAPTIVE_BITRATE_UPDATE_INTERVAL_MS)
             val publisher = session.publisher
             if (publisher == null || session.state.value != LiveState.LIVE) continue
-            val min = minOf(profile.minBitrateKbps * 1000L, liveMaxBitrate)
-            if (liveMaxBitrate != max && abr != null) {
-                max = liveMaxBitrate
-                abr.setMinimumBitrate(min)
-                abr.setTargetBitrate(max)
-            }
+            val cap = liveMaxBitrate
+            val min = minOf(profile.minBitrateKbps * 1000L, cap)
             if (owner !== publisher) {
                 owner = publisher
-                max = liveMaxBitrate
                 abr = if (publisher is SrtPublisher) {
-                    BelaboxAdaptiveBitrate(max, min)
+                    BelaboxAdaptiveBitrate(cap, min)
                 } else {
-                    QueueAdaptiveBitrate(max, min)
+                    QueueAdaptiveBitrate(cap, min)
                 }
+                max = cap
+            } else if (cap != max) {
+                max = cap
+                abr!!.setMinimumBitrate(min)
+                abr.setTargetBitrate(cap)
             }
             val stats = publisher.stats().toStreamStats(
                 latencyMs = (publisher as? SrtPublisher)?.latencyMs,

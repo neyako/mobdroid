@@ -15,7 +15,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.rememberScrollState
@@ -156,6 +155,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
     BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         val banded = maxWidth / maxHeight < 1.5f
         if (banded) {
+            val previewHeight = minOf(maxWidth * outH.toFloat() / outW, maxHeight - 132.dp)
             Column(Modifier.fillMaxSize()) {
                 Row(
                     Modifier.fillMaxWidth().weight(1f).padding(horizontal = 20.dp),
@@ -166,7 +166,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                         IconButton({ showSettings = true }) { Icon(Icons.Rounded.Settings, "Settings") }
                     }
                 }
-                Box(Modifier.fillMaxWidth().aspectRatio(outW.toFloat() / outH)) {
+                Box(Modifier.fillMaxWidth().height(previewHeight)) {
                     Preview(engine, ui)
                     ZoomStops(ui, engine::setZoom, Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp))
                 }
