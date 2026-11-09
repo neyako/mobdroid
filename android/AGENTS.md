@@ -88,6 +88,9 @@ skipped when they are missing. The SRTLA end-to-end tests also need `SRTLA_REC` 
 
 ## Conventions
 
+- Landscape only (`sensorLandscape` in the manifest). Vertical streaming for TikTok or Shorts belongs in
+  the platforms' own apps, so there is no portrait output.
+
 - No comments or docstrings in code, same as the iOS project. Contracts live in this file.
 - Performance matters more than abstraction: the phone's budget belongs to the encoder. No per-frame
   allocations in hot paths that can reuse a buffer, no polling loops, no continuously repainting UI.

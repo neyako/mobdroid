@@ -1,7 +1,6 @@
 package app.mobdroid
 
 import android.Manifest
-import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.hardware.display.DisplayManager
 import android.os.Build
@@ -18,7 +17,6 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import app.mobdroid.settings.Orientation
 import app.mobdroid.ui.MainScreen
 import app.mobdroid.ui.MobdroidTheme
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -52,13 +50,8 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.CREATED) {
-                app.settings.settings.map { it.selectedProfile.orientation to it.keepScreenOn }.distinctUntilChanged()
-                    .collect { (orientation, keepOn) ->
-                        requestedOrientation = if (orientation == Orientation.LANDSCAPE) {
-                            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                        } else {
-                            ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
-                        }
+                app.settings.settings.map { it.keepScreenOn }.distinctUntilChanged()
+                    .collect { keepOn ->
                         if (keepOn) {
                             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                         } else {

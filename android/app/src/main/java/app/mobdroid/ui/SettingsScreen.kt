@@ -60,7 +60,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.mobdroid.engine.media.VideoCodec
 import app.mobdroid.media.CodecCatalog
 import app.mobdroid.media.label
-import app.mobdroid.settings.Orientation
 import app.mobdroid.settings.Platform
 import app.mobdroid.settings.Resolution
 import app.mobdroid.settings.SettingsStore
@@ -272,10 +271,6 @@ private fun ProfileEditor(store: SettingsStore, id: String, live: Boolean, onBac
         }
         Text("Frame rate", style = MaterialTheme.typography.bodyMedium)
         Choices(fpsChoices, profile.fps, label = { "$it" }, enabled = editable) { update(profile.copy(fps = it)) }
-        Text("Orientation", style = MaterialTheme.typography.bodyMedium)
-        Choices(Orientation.entries, profile.orientation, label = { it.name.lowercase().replaceFirstChar(Char::uppercase) }, enabled = editable) {
-            update(profile.copy(orientation = it))
-        }
         BitrateSlider("Bitrate", profile.bitrateKbps, 1000..20000, editable) { update(profile.copy(bitrateKbps = it)) }
         SwitchRow("Adaptive bitrate", profile.adaptiveBitrate, editable) { update(profile.copy(adaptiveBitrate = it)) }
         if (profile.adaptiveBitrate) {

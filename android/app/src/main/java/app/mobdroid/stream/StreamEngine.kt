@@ -29,7 +29,6 @@ import app.mobdroid.media.AudioEncoder
 import app.mobdroid.media.CodecCatalog
 import app.mobdroid.media.VideoEncoder
 import app.mobdroid.media.gl.VideoCompositor
-import app.mobdroid.settings.Orientation
 import app.mobdroid.settings.SettingsStore
 import app.mobdroid.settings.StabilizationSetting
 import app.mobdroid.settings.StreamProfile
@@ -117,7 +116,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         scope.launch { camera.state.collect { s -> _ui.update { it.copy(cameraState = s) } } }
         scope.launch {
             settings.settings
-                .map { s -> listOf(s.selectedProfile.resolution, s.selectedProfile.orientation, s.selectedProfile.fps, s.stabilization) }
+                .map { s -> listOf(s.selectedProfile.resolution, s.selectedProfile.fps, s.stabilization) }
                 .distinctUntilChanged()
                 .drop(1)
                 .collect {
@@ -631,6 +630,5 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
 val CameraDescriptor.key: String get() = "$id:${physicalId.orEmpty()}"
 
 fun outputSize(profile: StreamProfile): Pair<Int, Int> {
-    val r = profile.resolution
-    return if (profile.orientation == Orientation.LANDSCAPE) r.width to r.height else r.height to r.width
+    return profile.resolution.width to profile.resolution.height
 }

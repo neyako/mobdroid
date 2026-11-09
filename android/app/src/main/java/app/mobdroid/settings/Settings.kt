@@ -28,9 +28,6 @@ enum class Resolution(val label: String, val width: Int, val height: Int) {
 }
 
 @Serializable
-enum class Orientation { LANDSCAPE, PORTRAIT }
-
-@Serializable
 enum class StabilizationSetting { OFF, STANDARD, PREVIEW }
 
 @Serializable
@@ -48,7 +45,6 @@ data class StreamProfile(
     val minBitrateKbps: Int = 500,
     val audioBitrateKbps: Int = 128,
     val keyFrameIntervalSeconds: Int = 2,
-    val orientation: Orientation = Orientation.LANDSCAPE,
 )
 
 @Serializable
