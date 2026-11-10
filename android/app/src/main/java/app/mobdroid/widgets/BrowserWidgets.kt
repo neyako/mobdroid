@@ -10,6 +10,7 @@ import android.hardware.display.VirtualDisplay
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import app.mobdroid.media.gl.BrowserPage
@@ -66,7 +67,13 @@ class BrowserWidgets(private val context: Context) {
             val presentation = Presentation(context, display.display, android.R.style.Theme_Translucent_NoTitleBar)
             val webView = WebView(presentation.context).apply {
                 setBackgroundColor(Color.TRANSPARENT)
-                webViewClient = WebViewClient()
+                webViewClient = object : WebViewClient() {
+                    override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                        Log.w(TAG, "Browser widget renderer gone, crashed: ${detail.didCrash()}")
+                        handler.post { close(id) }
+                        return true
+                    }
+                }
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.mediaPlaybackRequiresUserGesture = false

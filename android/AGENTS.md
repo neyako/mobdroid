@@ -213,7 +213,10 @@ them, not code style.
   bitmap copies. Its `Overlay` has no bitmap and carries the `BrowserPage` (URL and size in CSS pixels);
   `StreamEngine.syncBrowsers` opens and closes pages to match the overlays and the current compositor, so
   a page lives only while its widget is in the selected scene and the preview runs. A URL change is loaded
-  after 800 ms. The page's sound plays on the phone and is not in the stream. Cleartext HTTP is allowed
+  after 800 ms. The sync always runs on the main thread and reads the compositor then, never one captured
+  earlier; a compositor call after release returns at once instead of waiting on its dead thread. A page
+  is not drawn before its first frame, and a page whose renderer process dies is closed (it would
+  otherwise take the app down) and reopens at the next change. The page's sound plays on the phone and is not in the stream. Cleartext HTTP is allowed
   (`usesCleartextTraffic`) because overlay pages are often served from a computer on the local network.
 - `VideoCompositor.setOverlays` draws them over the camera with premultiplied alpha blending: all of them
   on the preview, the ones that are not preview only on the encoder and recorder surfaces and in snapshots.

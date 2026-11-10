@@ -43,6 +43,7 @@ import app.mobdroid.media.AUDIO_LEVEL_FLOOR_DB
 import app.mobdroid.media.AudioEncoder
 import app.mobdroid.media.CodecCatalog
 import app.mobdroid.media.VideoEncoder
+import app.mobdroid.media.gl.BrowserPage
 import app.mobdroid.media.gl.Overlay
 import app.mobdroid.media.gl.VideoCompositor
 import app.mobdroid.scenes.defaultScenes
@@ -1004,13 +1005,17 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     }
 
     private fun syncBrowsers() {
-        val pages = overlays.mapNotNull { overlay -> overlay.browser?.let { overlay.id to it } }.toMap()
-        val target = compositor
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            browsers.sync(pages, target)
-        } else {
-            mainHandler.post { browsers.sync(pages, target) }
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post(::syncBrowsers)
+            return
         }
+        val target: VideoCompositor?
+        val pages: Map<String, BrowserPage>
+        synchronized(this) {
+            target = compositor
+            pages = overlays.mapNotNull { overlay -> overlay.browser?.let { overlay.id to it } }.toMap()
+        }
+        browsers.sync(pages, target)
     }
 
     private fun closeSources() {

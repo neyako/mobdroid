@@ -35,6 +35,7 @@ private class OverlayTexture(val id: Int, var bitmap: Bitmap?)
 private class SurfaceOverlay(val texture: Int, val surfaceTexture: SurfaceTexture, val surface: Surface) {
     @Volatile
     var dirty = false
+    var ready = false
     val matrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
 }
 
@@ -282,14 +283,14 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
             return
         }
         val done = CountDownLatch(1)
-        handler.post {
+        val posted = handler.post {
             try {
                 if (!released) block()
             } finally {
                 done.countDown()
             }
         }
-        done.await()
+        if (posted) done.await()
     }
 
     private fun render() {
@@ -301,6 +302,7 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
             val overlay = surfaceOverlayList[index]
             if (overlay.dirty) {
                 overlay.dirty = false
+                overlay.ready = true
                 overlay.surfaceTexture.updateTexImage()
                 overlay.surfaceTexture.getTransformMatrix(overlay.matrix)
             }
@@ -459,7 +461,8 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
                 GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture.id)
                 GLES20.glUniform4f(overlayRect, overlay.x, overlay.y, overlay.width, overlay.height)
             } else {
-                val surface = surfaceOverlays[overlay.id] ?: continue
+                val surface = surfaceOverlays[overlay.id]
+                if (surface == null || !surface.ready) continue
                 GLES20.glUseProgram(surfaceProgram)
                 GLES20.glVertexAttribPointer(surfacePos, 2, GLES20.GL_FLOAT, false, 16, quad)
                 GLES20.glEnableVertexAttribArray(surfacePos)
