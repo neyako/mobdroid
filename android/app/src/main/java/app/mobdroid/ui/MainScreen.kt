@@ -69,8 +69,21 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
     var side by remember { mutableStateOf<Side?>(null) }
     var shownSide by remember { mutableStateOf(Side.SETTINGS) }
     side?.let { shownSide = it }
+    var panelHidden by remember { mutableStateOf(false) }
     val showSettings = side == Side.SETTINGS
-    val toggle = { target: Side -> side = if (side == target) null else target }
+    val toggle = { target: Side ->
+        side = if (side == target && !panelHidden) null else target
+        panelHidden = false
+    }
+    val closePanel = {
+        side = null
+        panelHidden = false
+    }
+    val floatingButtons: @Composable (Modifier) -> Unit = { modifier ->
+        if (side != null && panelHidden) {
+            PanelButtons(hidden = true, onHide = { panelHidden = false }, onClose = closePanel, modifier)
+        }
+    }
     var showBitrate by remember { mutableStateOf(false) }
     var stealth by remember { mutableStateOf(false) }
     var confirmStop by remember { mutableStateOf(false) }
@@ -91,7 +104,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
     val buttons = quickButtons(
         ui,
         appSettings.hiddenQuickButtons,
-        chatOpen = side == Side.CHAT,
+        chatOpen = side == Side.CHAT && !panelHidden,
         recording = recording != null,
         confirmRecordStop = confirmRecordStop,
         onChat = { toggle(Side.CHAT) },
@@ -115,7 +128,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
     val banded = window.width < window.height * 1.5f
     val motion = MaterialTheme.motionScheme
     val panel = remember { MutableTransitionState(false) }
-    panel.targetState = side != null
+    panel.targetState = side != null && !panelHidden
 
     Surface(color = Color.Black, contentColor = Color.White) {
         BoxWithConstraints(
@@ -146,7 +159,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                         )
                         MoblinLogo()
                         Spacer(Modifier.width(8.dp))
-                        SettingsButton(showSettings) { toggle(Side.SETTINGS) }
+                        SettingsButton(showSettings && !panelHidden) { toggle(Side.SETTINGS) }
                     }
                     Box(Modifier.size(previewHeight * aspect, previewHeight)) {
                         Preview(engine, ui, 14.dp)
@@ -158,6 +171,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                                 Modifier.align(Alignment.BottomStart).fillMaxWidth(0.8f).padding(start = 10.dp, bottom = 48.dp),
                             )
                         }
+                        floatingButtons(Modifier.align(Alignment.TopEnd).padding(6.dp))
                         Row(
                             Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(8.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -175,16 +189,20 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                             Modifier.weight(1f).horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            buttons.forEach { QuickButtonView(it) }
+                            buttons.forEach { QuickButtonView(it, 44.dp, 46.dp) }
                         }
                         Spacer(Modifier.width(8.dp))
                         LiveButton(ui.live, confirmStop, onLive, Modifier.size(96.dp, 52.dp))
                     }
                 }
             } else {
-                val barWidth = (maxWidth - (maxHeight - 12.dp) * aspect - 12.dp).coerceIn(104.dp, 200.dp)
-                val wideBar = barWidth >= 150.dp
-                val panelWidth = minOf(350.dp, (maxWidth - barWidth) * 0.5f)
+                val panelShown = panel.currentState || panel.targetState
+                val barWidth = if (panelShown) {
+                    100.dp
+                } else {
+                    (maxWidth - (maxHeight - 12.dp) * aspect - 12.dp).coerceIn(100.dp, 250.dp)
+                }
+                val panelWidth = minOf(350.dp, (maxWidth - 100.dp) * 0.5f)
                 Row(Modifier.fillMaxSize()) {
                     BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().padding(6.dp)) {
                         val width = minOf(maxWidth, maxHeight * aspect)
@@ -204,8 +222,9 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                                     appSettings.hiddenStatusItems,
                                     engine::clearError,
                                     compact = false,
-                                    Modifier.align(Alignment.TopEnd).padding(12.dp),
+                                    Modifier.align(Alignment.TopEnd).padding(12.dp).padding(top = if (panelHidden) 36.dp else 0.dp),
                                 )
+                                floatingButtons(Modifier.align(Alignment.TopEnd).padding(8.dp))
                                 if (!below) {
                                     CameraControls(ui, engine, Modifier.align(Alignment.BottomEnd).padding(10.dp))
                                 }
@@ -213,7 +232,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                             if (below) CameraControls(ui, engine, Modifier.width(width).padding(top = 8.dp))
                         }
                     }
-                    if (panel.currentState || panel.targetState) {
+                    if (panelShown) {
                         Box(Modifier.width(panelWidth).fillMaxHeight()) {
                             androidx.compose.animation.AnimatedVisibility(
                                 visibleState = panel,
@@ -223,9 +242,9 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                                     fadeOut(motion.fastEffectsSpec()),
                             ) {
                                 if (shownSide == Side.CHAT) {
-                                    ChatPanel(engine, appSettings, onClose = { side = null })
+                                    ChatPanel(engine, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
                                 } else {
-                                    SettingsPanel(settings, engine, busy, onClose = { side = null })
+                                    SettingsPanel(settings, engine, busy, onHide = { panelHidden = true }, onClose = closePanel)
                                 }
                             }
                         }
@@ -234,23 +253,23 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                         Modifier.width(barWidth).fillMaxHeight().padding(vertical = 8.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(if (wideBar) 12.dp else 8.dp)) {
-                            MoblinLogo(if (wideBar) 52.dp else 40.dp)
-                            SettingsButton(showSettings, if (wideBar) 52.dp else 40.dp) { toggle(Side.SETTINGS) }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            MoblinLogo()
+                            SettingsButton(showSettings && !panelHidden) { toggle(Side.SETTINGS) }
                         }
                         FlowRow(
                             Modifier.weight(1f).padding(top = 8.dp).verticalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(if (wideBar) 8.dp else 4.dp, Alignment.CenterHorizontally),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterHorizontally),
                             verticalArrangement = Arrangement.spacedBy(6.dp),
-                            maxItemsInEachRow = 2,
+                            maxItemsInEachRow = (barWidth / 50.dp).toInt(),
                         ) {
-                            buttons.forEach { QuickButtonView(it, if (wideBar) 52.dp else 44.dp) }
+                            buttons.forEach { QuickButtonView(it, 40.dp, 48.dp) }
                         }
                         LiveButton(
                             ui.live,
                             confirmStop,
                             onLive,
-                            Modifier.padding(horizontal = 8.dp).fillMaxWidth().height(if (wideBar) 48.dp else 44.dp),
+                            Modifier.padding(horizontal = 8.dp).fillMaxWidth().height(40.dp),
                         )
                     }
                 }
@@ -265,12 +284,12 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
             }
             if (banded) {
                 AnimatedVisibility(
-                    visible = side != null,
+                    visible = side != null && !panelHidden,
                     enter = slideInVertically(motion.defaultSpatialSpec()) { it / 6 } + fadeIn(motion.defaultEffectsSpec()),
                     exit = slideOutVertically(motion.fastSpatialSpec()) { it / 6 } + fadeOut(motion.fastEffectsSpec()),
                 ) {
                     if (shownSide == Side.CHAT) {
-                        ChatPanel(engine, appSettings, onClose = { side = null }) {
+                        ChatPanel(engine, appSettings, onHide = { panelHidden = true }, onClose = closePanel) {
                             Status(
                                 ui,
                                 stats,
@@ -283,7 +302,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                             )
                         }
                     } else {
-                        SettingsPanel(settings, engine, busy, onClose = { side = null })
+                        SettingsPanel(settings, engine, busy, onHide = { panelHidden = true }, onClose = closePanel)
                     }
                 }
             }
@@ -291,7 +310,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
         }
     }
 
-    val chatOnly = banded && side == Side.CHAT
+    val chatOnly = banded && side == Side.CHAT && !panelHidden
     LaunchedEffect(stealth, chatOnly) { engine.setPreviewEnabled(!stealth && !chatOnly) }
     LaunchedEffect(confirmStop) {
         if (confirmStop) {
@@ -307,7 +326,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
             confirmRecordStop = false
         }
     }
-    BackHandler(side != null) { side = null }
+    BackHandler(side != null) { closePanel() }
     BackHandler(stealth) { stealth = false }
 
     if (showBitrate) {

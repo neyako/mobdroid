@@ -37,6 +37,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BatteryAlert
 import androidx.compose.material.icons.rounded.ChatBubble
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.FiberManualRecord
 import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.material.icons.rounded.Stop
@@ -57,6 +59,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.ToggleButtonDefaults
@@ -192,8 +195,8 @@ private fun BarButton(icon: ImageVector, label: String, checked: Boolean, size: 
 }
 
 @Composable
-fun QuickButtonView(button: QuickButton, size: Dp = 44.dp) {
-    Column(Modifier.width(size + 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+fun QuickButtonView(button: QuickButton, size: Dp, width: Dp) {
+    Column(Modifier.width(width), horizontalAlignment = Alignment.CenterHorizontally) {
         BarButton(button.icon, button.label, button.checked, size, button.color, button.onClick)
         Text(button.label, fontSize = 10.sp, lineHeight = 12.sp, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
     }
@@ -202,6 +205,26 @@ fun QuickButtonView(button: QuickButton, size: Dp = 44.dp) {
 @Composable
 fun SettingsButton(open: Boolean, size: Dp = 40.dp, onChange: (Boolean) -> Unit) {
     BarButton(Icons.Rounded.Settings, "Settings", open, size, onClick = { onChange(!open) })
+}
+
+@Composable
+fun PanelButtons(hidden: Boolean, onHide: () -> Unit, onClose: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = IconButtonDefaults.outlinedIconButtonColors(
+        containerColor = Color.Black.copy(alpha = if (hidden) 0.5f else 0f),
+        contentColor = Color.White,
+    )
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        OutlinedIconButton(onHide, Modifier.size(32.dp), colors = colors) {
+            Icon(
+                if (hidden) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
+                if (hidden) "Show panel" else "Hide panel",
+                Modifier.size(18.dp),
+            )
+        }
+        OutlinedIconButton(onClose, Modifier.size(32.dp), colors = colors) {
+            Icon(Icons.Rounded.Close, "Close", Modifier.size(18.dp))
+        }
+    }
 }
 
 @Composable
