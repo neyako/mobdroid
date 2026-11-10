@@ -45,6 +45,7 @@ fun defaultPlacement(widget: Widget): SceneWidget = when (widget.type) {
     WidgetType.TEXT -> SceneWidget(widget.id)
     WidgetType.IMAGE -> SceneWidget(widget.id, corner = Corner.TOP_RIGHT, size = 15)
     WidgetType.CHAT -> SceneWidget(widget.id, corner = Corner.BOTTOM_LEFT, size = 35)
+    WidgetType.BROWSER -> SceneWidget(widget.id, x = 0, y = 0, size = 100)
 }
 
 fun Scene.placement(widget: Widget): SceneWidget =

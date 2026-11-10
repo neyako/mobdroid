@@ -205,7 +205,15 @@ fun SwitchNavRow(shapes: ListItemShapes, title: String, checked: Boolean, onChan
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun SliderRow(shapes: ListItemShapes, title: String, value: Int, range: IntRange, label: String, onChange: (Int) -> Unit) {
+fun SliderRow(
+    shapes: ListItemShapes,
+    title: String,
+    value: Int,
+    range: IntRange,
+    label: String,
+    step: Int = 1,
+    onChange: (Int) -> Unit,
+) {
     SegmentedListItem(shapes = shapes, contentPadding = RowPadding, colors = rowColors()) {
         Column {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -218,7 +226,7 @@ fun SliderRow(shapes: ListItemShapes, title: String, value: Int, range: IntRange
             }
             Slider(
                 value = value.toFloat().coerceIn(range.first.toFloat(), range.last.toFloat()),
-                onValueChange = { onChange(it.toInt().coerceIn(range)) },
+                onValueChange = { onChange((it.toInt() / step * step).coerceIn(range)) },
                 valueRange = range.first.toFloat()..range.last.toFloat(),
             )
         }

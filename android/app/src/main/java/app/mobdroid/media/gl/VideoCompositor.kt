@@ -17,17 +17,26 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.CountDownLatch
 
+data class BrowserPage(val url: String, val width: Int, val height: Int)
+
 class Overlay(
     val id: String,
-    val bitmap: Bitmap,
+    val bitmap: Bitmap?,
     val x: Float,
     val y: Float,
     val width: Float,
     val height: Float,
     val previewOnly: Boolean,
+    val browser: BrowserPage? = null,
 )
 
 private class OverlayTexture(val id: Int, var bitmap: Bitmap?)
+
+private class SurfaceOverlay(val texture: Int, val surfaceTexture: SurfaceTexture, val surface: Surface) {
+    @Volatile
+    var dirty = false
+    val matrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
+}
 
 class VideoCompositor(outputWidth: Int, outputHeight: Int) {
     private val thread = HandlerThread("Compositor", Process.THREAD_PRIORITY_DISPLAY).apply { start() }
@@ -76,6 +85,12 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
     private var overlayRect = 0
     private var overlays = emptyList<Overlay>()
     private val overlayTextures = HashMap<String, OverlayTexture>()
+    private var surfaceProgram = 0
+    private var surfacePos = 0
+    private var surfaceRect = 0
+    private var surfaceSt = 0
+    private val surfaceOverlays = HashMap<String, SurfaceOverlay>()
+    private val surfaceOverlayList = ArrayList<SurfaceOverlay>()
     private var frameIntervalNs = 1_000_000_000L / 30
     private var nextEncodeNs = 0L
     private var released = false
@@ -177,6 +192,7 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
             GLES20.glDeleteTextures(1, ids, 0)
         }
         for (overlay in next) {
+            val bitmap = overlay.bitmap ?: continue
             val texture = overlayTextures.getOrPut(overlay.id) {
                 GLES20.glGenTextures(1, ids, 0)
                 GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, ids[0])
@@ -186,13 +202,48 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
                 GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
                 OverlayTexture(ids[0], null)
             }
-            if (texture.bitmap !== overlay.bitmap) {
+            if (texture.bitmap !== bitmap) {
                 GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture.id)
-                GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, overlay.bitmap, 0)
-                texture.bitmap = overlay.bitmap
+                GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+                texture.bitmap = bitmap
             }
         }
         overlays = next
+    }
+
+    fun openSurfaceOverlay(id: String, width: Int, height: Int): Surface? {
+        var surface: Surface? = null
+        runBlockingOnThread {
+            closeSurface(id)
+            egl.makeNothingCurrent()
+            val ids = IntArray(1)
+            GLES20.glGenTextures(1, ids, 0)
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, ids[0])
+            GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+            val texture = SurfaceTexture(ids[0]).apply { setDefaultBufferSize(width, height) }
+            val overlay = SurfaceOverlay(ids[0], texture, Surface(texture))
+            texture.setOnFrameAvailableListener({ overlay.dirty = true }, handler)
+            surfaceOverlays[id] = overlay
+            surfaceOverlayList += overlay
+            surface = overlay.surface
+        }
+        return surface
+    }
+
+    fun closeSurfaceOverlay(id: String) = handler.post {
+        if (!released) closeSurface(id)
+    }
+
+    private fun closeSurface(id: String) {
+        val overlay = surfaceOverlays.remove(id) ?: return
+        surfaceOverlayList -= overlay
+        overlay.surfaceTexture.setOnFrameAvailableListener(null)
+        overlay.surface.release()
+        overlay.surfaceTexture.release()
+        GLES20.glDeleteTextures(1, intArrayOf(overlay.texture), 0)
     }
 
     fun takeSnapshot(onResult: (Bitmap?) -> Unit) = handler.post {
@@ -217,6 +268,8 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
             GLES20.glDeleteProgram(overlayProgram)
             overlayTextures.values.forEach { GLES20.glDeleteTextures(1, intArrayOf(it.id), 0) }
             overlayTextures.clear()
+            surfaceOverlays.keys.toList().forEach(::closeSurface)
+            GLES20.glDeleteProgram(surfaceProgram)
             GLES20.glDeleteTextures(1, intArrayOf(texture), 0)
             egl.release()
         }
@@ -244,6 +297,14 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         egl.makeNothingCurrent()
         surfaceTexture.updateTexImage()
         surfaceTexture.getTransformMatrix(stMatrix)
+        for (index in surfaceOverlayList.indices) {
+            val overlay = surfaceOverlayList[index]
+            if (overlay.dirty) {
+                overlay.dirty = false
+                overlay.surfaceTexture.updateTexImage()
+                overlay.surfaceTexture.getTransformMatrix(overlay.matrix)
+            }
+        }
         val ts = toMonotonic(surfaceTexture.timestamp)
         lastFrameNanos = SystemClock.elapsedRealtimeNanos()
         countFps()
@@ -385,17 +446,27 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         if (overlays.isEmpty()) return
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
-        GLES20.glUseProgram(overlayProgram)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         quad.position(2)
-        GLES20.glVertexAttribPointer(overlayPos, 2, GLES20.GL_FLOAT, false, 16, quad)
-        GLES20.glEnableVertexAttribArray(overlayPos)
         for (index in overlays.indices) {
             val overlay = overlays[index]
-            val texture = overlayTextures[overlay.id]
-            if (texture == null || (overlay.previewOnly && !preview)) continue
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture.id)
-            GLES20.glUniform4f(overlayRect, overlay.x, overlay.y, overlay.width, overlay.height)
+            if (overlay.previewOnly && !preview) continue
+            if (overlay.bitmap != null) {
+                val texture = overlayTextures[overlay.id] ?: continue
+                GLES20.glUseProgram(overlayProgram)
+                GLES20.glVertexAttribPointer(overlayPos, 2, GLES20.GL_FLOAT, false, 16, quad)
+                GLES20.glEnableVertexAttribArray(overlayPos)
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture.id)
+                GLES20.glUniform4f(overlayRect, overlay.x, overlay.y, overlay.width, overlay.height)
+            } else {
+                val surface = surfaceOverlays[overlay.id] ?: continue
+                GLES20.glUseProgram(surfaceProgram)
+                GLES20.glVertexAttribPointer(surfacePos, 2, GLES20.GL_FLOAT, false, 16, quad)
+                GLES20.glEnableVertexAttribArray(surfacePos)
+                GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, surface.texture)
+                GLES20.glUniform4f(surfaceRect, overlay.x, overlay.y, overlay.width, overlay.height)
+                GLES20.glUniformMatrix4fv(surfaceSt, 1, false, surface.matrix, 0)
+            }
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
         }
         GLES20.glDisable(GLES20.GL_BLEND)
@@ -405,6 +476,10 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         overlayProgram = linkProgram(OVERLAY_VERTEX, OVERLAY_FRAGMENT)
         overlayPos = GLES20.glGetAttribLocation(overlayProgram, "aUnit")
         overlayRect = GLES20.glGetUniformLocation(overlayProgram, "uRect")
+        surfaceProgram = linkProgram(SURFACE_VERTEX, SURFACE_FRAGMENT)
+        surfacePos = GLES20.glGetAttribLocation(surfaceProgram, "aUnit")
+        surfaceRect = GLES20.glGetUniformLocation(surfaceProgram, "uRect")
+        surfaceSt = GLES20.glGetUniformLocation(surfaceProgram, "uSt")
         program = linkProgram(VERTEX, FRAGMENT)
         aPos = GLES20.glGetAttribLocation(program, "aPos")
         aTex = GLES20.glGetAttribLocation(program, "aTex")
@@ -466,6 +541,29 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
             precision mediump float;
             varying vec2 vTex;
             uniform sampler2D sTex;
+            void main() {
+                gl_FragColor = texture2D(sTex, vTex);
+            }
+        """
+        const val SURFACE_VERTEX = """
+            attribute vec2 aUnit;
+            uniform vec4 uRect;
+            uniform mat4 uSt;
+            varying vec2 vTex;
+            void main() {
+                gl_Position = vec4(
+                    (uRect.x + aUnit.x * uRect.z) * 2.0 - 1.0,
+                    1.0 - (uRect.y + (1.0 - aUnit.y) * uRect.w) * 2.0,
+                    0.0,
+                    1.0);
+                vTex = (uSt * vec4(aUnit, 0.0, 1.0)).xy;
+            }
+        """
+        const val SURFACE_FRAGMENT = """
+            #extension GL_OES_EGL_image_external : require
+            precision mediump float;
+            varying vec2 vTex;
+            uniform samplerExternalOES sTex;
             void main() {
                 gl_FragColor = texture2D(sTex, vTex);
             }

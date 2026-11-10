@@ -71,7 +71,7 @@ data class RecordingSettings(
 val RECORDING_CODECS = listOf(VideoCodec.HEVC, VideoCodec.H264, VideoCodec.AV1)
 
 @Serializable
-enum class WidgetType(val label: String) { TEXT("Text"), IMAGE("Image"), CHAT("Chat") }
+enum class WidgetType(val label: String) { TEXT("Text"), IMAGE("Image"), CHAT("Chat"), BROWSER("Browser") }
 
 @Serializable
 enum class Corner(val label: String, val left: Boolean, val top: Boolean) {
@@ -89,6 +89,9 @@ data class Widget(
     val text: String = "",
     val textSize: Int = 15,
     val image: String? = null,
+    val url: String = "",
+    val browserWidth: Int = 1280,
+    val browserHeight: Int = 720,
     val previewOnly: Boolean = false,
 )
 

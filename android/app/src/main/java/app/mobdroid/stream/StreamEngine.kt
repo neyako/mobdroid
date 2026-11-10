@@ -6,6 +6,8 @@ import android.content.Intent
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.BatteryManager
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -45,6 +47,7 @@ import app.mobdroid.media.gl.Overlay
 import app.mobdroid.media.gl.VideoCompositor
 import app.mobdroid.scenes.defaultScenes
 import app.mobdroid.scenes.sceneCamera
+import app.mobdroid.widgets.BrowserWidgets
 import app.mobdroid.widgets.WidgetRenderer
 import app.mobdroid.settings.LoginStore
 import app.mobdroid.settings.MicSource
@@ -162,6 +165,8 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private var compositor: VideoCompositor? = null
     private var overlays = emptyList<Overlay>()
     private var widgetRenderer: WidgetRenderer? = null
+    private val browsers = BrowserWidgets(context)
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var previewSurface: Surface? = null
     private var displayRotation = 0
     private var videoEncoder: VideoEncoder? = null
@@ -473,8 +478,10 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         audioEncoder?.release()
         audioEncoder = null
         closeSources()
-        compositor?.release()
+        val closing = compositor
         compositor = null
+        syncBrowsers()
+        closing?.release()
     }
 
     @Synchronized
@@ -984,13 +991,25 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             it.setPreview(if (previewEnabled) previewSurface else null)
             it.setOverlays(overlays)
         }
+        syncBrowsers()
         if (widgetRenderer == null) {
             widgetRenderer = WidgetRenderer(File(context.filesDir, "widgets"), scope, settings.settings, chat.lines) { next ->
                 synchronized(this) {
                     overlays = next
                     compositor?.setOverlays(next)
+                    syncBrowsers()
                 }
             }
+        }
+    }
+
+    private fun syncBrowsers() {
+        val pages = overlays.mapNotNull { overlay -> overlay.browser?.let { overlay.id to it } }.toMap()
+        val target = compositor
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            browsers.sync(pages, target)
+        } else {
+            mainHandler.post { browsers.sync(pages, target) }
         }
     }
 

@@ -16,6 +16,7 @@ import android.text.style.StyleSpan
 import app.mobdroid.chat.ChatLine
 import app.mobdroid.chat.chatNameColor
 import app.mobdroid.engine.chat.ChatSegment
+import app.mobdroid.media.gl.BrowserPage
 import app.mobdroid.media.gl.Overlay
 import app.mobdroid.scenes.expandText
 import app.mobdroid.scenes.overlayRect
@@ -85,6 +86,12 @@ class WidgetRenderer(
     private fun render(input: Inputs, lines: List<ChatLine>): List<Overlay> {
         cache.keys.retainAll(input.placed.map { it.widget.id }.toSet())
         return input.placed.mapNotNull { (widget, placement) ->
+            if (widget.type == WidgetType.BROWSER) {
+                val page = BrowserPage(widget.url, widget.browserWidth, widget.browserHeight)
+                val width = placement.size / 100f
+                val rect = overlayRect(placement, width, width * input.width / input.height * page.height / page.width)
+                return@mapNotNull Overlay(widget.id, null, rect.x, rect.y, rect.width, rect.height, widget.previewOnly, page)
+            }
             val bitmap = runCatching {
                 when (widget.type) {
                     WidgetType.TEXT -> {
@@ -103,6 +110,7 @@ class WidgetRenderer(
                             chat(shown, width, input.chatTextSize * input.height / 400f, input.height)
                         }
                     }
+                    WidgetType.BROWSER -> null
                 }
             }.getOrNull() ?: return@mapNotNull null
             val width = if (widget.type == WidgetType.IMAGE) placement.size / 100f else bitmap.width.toFloat() / input.width
