@@ -65,7 +65,11 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
     val stats by engine.stats.collectAsStateWithLifecycle()
     val appSettings by settings.settings.collectAsStateWithLifecycle()
     val profile = appSettings.selectedProfile
-    var showSettings by remember { mutableStateOf(false) }
+    var side by remember { mutableStateOf<Side?>(null) }
+    var shownSide by remember { mutableStateOf(Side.SETTINGS) }
+    side?.let { shownSide = it }
+    val showSettings = side == Side.SETTINGS
+    val toggle = { target: Side -> side = if (side == target) null else target }
     var showBitrate by remember { mutableStateOf(false) }
     var stealth by remember { mutableStateOf(false) }
     var confirmStop by remember { mutableStateOf(false) }
@@ -84,6 +88,8 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
     val buttons = quickButtons(
         ui,
         appSettings.hiddenQuickButtons,
+        chatOpen = side == Side.CHAT,
+        onChat = { toggle(Side.CHAT) },
         onBitrate = { showBitrate = true },
         onStealth = { stealth = true },
         onMute = { engine.setMuted(!ui.muted) },
@@ -93,7 +99,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
     val banded = window.width < window.height * 1.5f
     val motion = MaterialTheme.motionScheme
     val panel = remember { MutableTransitionState(false) }
-    panel.targetState = showSettings
+    panel.targetState = side != null
 
     Surface(color = Color.Black, contentColor = Color.White) {
         BoxWithConstraints(
@@ -115,10 +121,18 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                         Status(ui, stats, engine.audioLevel, appSettings.hiddenStatusItems, engine::clearError, compact = true, Modifier.weight(1f))
                         MoblinLogo()
                         Spacer(Modifier.width(8.dp))
-                        SettingsButton(showSettings) { showSettings = it }
+                        SettingsButton(showSettings) { toggle(Side.SETTINGS) }
                     }
                     Box(Modifier.size(previewHeight * aspect, previewHeight)) {
                         Preview(engine, ui, 14.dp)
+                        if (appSettings.chatOnPreview) {
+                            ChatOverlay(
+                                engine,
+                                appSettings.chatTextSize.sp - 1,
+                                3,
+                                Modifier.align(Alignment.BottomStart).fillMaxWidth(0.8f).padding(start = 10.dp, bottom = 48.dp),
+                            )
+                        }
                         Row(
                             Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(8.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -182,7 +196,11 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                                 exit = slideOutHorizontally(motion.fastSpatialSpec()) { it / 4 } +
                                     fadeOut(motion.fastEffectsSpec()),
                             ) {
-                                SettingsPanel(settings, ui.live != LiveState.OFFLINE, onClose = { showSettings = false })
+                                if (shownSide == Side.CHAT) {
+                                    ChatPanel(engine, appSettings, onClose = { side = null })
+                                } else {
+                                    SettingsPanel(settings, ui.live != LiveState.OFFLINE, onClose = { side = null })
+                                }
                             }
                         }
                     }
@@ -192,7 +210,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                     ) {
                         Row(horizontalArrangement = Arrangement.spacedBy(if (wideBar) 12.dp else 8.dp)) {
                             MoblinLogo(if (wideBar) 52.dp else 40.dp)
-                            SettingsButton(showSettings, if (wideBar) 52.dp else 40.dp) { showSettings = it }
+                            SettingsButton(showSettings, if (wideBar) 52.dp else 40.dp) { toggle(Side.SETTINGS) }
                         }
                         FlowRow(
                             Modifier.weight(1f).padding(top = 8.dp).verticalScroll(rememberScrollState()),
@@ -219,26 +237,34 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                         .clickable(interactionSource = null, indication = null) { stealth = false },
                 )
             }
+            AlertBanner(engine, Modifier.align(Alignment.TopCenter))
             if (banded) {
                 AnimatedVisibility(
-                    visible = showSettings,
+                    visible = side != null,
                     enter = slideInVertically(motion.defaultSpatialSpec()) { it / 6 } + fadeIn(motion.defaultEffectsSpec()),
                     exit = slideOutVertically(motion.fastSpatialSpec()) { it / 6 } + fadeOut(motion.fastEffectsSpec()),
                 ) {
-                    SettingsPanel(settings, ui.live != LiveState.OFFLINE, onClose = { showSettings = false })
+                    if (shownSide == Side.CHAT) {
+                        ChatPanel(engine, appSettings, onClose = { side = null }) {
+                            Status(ui, stats, engine.audioLevel, appSettings.hiddenStatusItems, engine::clearError, compact = true, Modifier)
+                        }
+                    } else {
+                        SettingsPanel(settings, ui.live != LiveState.OFFLINE, onClose = { side = null })
+                    }
                 }
             }
         }
     }
 
-    LaunchedEffect(stealth) { engine.setPreviewEnabled(!stealth) }
+    val chatOnly = banded && side == Side.CHAT
+    LaunchedEffect(stealth, chatOnly) { engine.setPreviewEnabled(!stealth && !chatOnly) }
     LaunchedEffect(confirmStop) {
         if (confirmStop) {
             delay(3000)
             confirmStop = false
         }
     }
-    BackHandler(showSettings) { showSettings = false }
+    BackHandler(side != null) { side = null }
     BackHandler(stealth) { stealth = false }
 
     if (showBitrate) {
@@ -254,6 +280,8 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
         }
     }
 }
+
+private enum class Side { SETTINGS, CHAT }
 
 fun formatBitrate(bps: Long): String = if (bps >= 1_000_000) "%.1f Mbps".format(bps / 1e6) else "${bps / 1000} kbps"
 

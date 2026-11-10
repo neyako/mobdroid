@@ -24,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
@@ -72,6 +73,7 @@ import app.mobdroid.media.CodecCatalog
 import app.mobdroid.media.label
 import app.mobdroid.settings.AppSettings
 import app.mobdroid.settings.BONDING_NETWORKS
+import app.mobdroid.settings.ChatTextSize
 import app.mobdroid.settings.MicSource
 import app.mobdroid.settings.Platform
 import app.mobdroid.settings.QuickButtonId
@@ -99,6 +101,10 @@ private sealed interface Route {
     data class StreamAudio(val id: String) : Route
 
     data class StreamTransport(val id: String) : Route
+
+    data class StreamChat(val id: String) : Route
+
+    data object Chat : Route
 
     data object Display : Route
 
@@ -133,6 +139,8 @@ private fun title(route: Route, settings: AppSettings) = when (route) {
     is Route.StreamVideo -> "Video"
     is Route.StreamAudio -> "Audio"
     is Route.StreamTransport -> settings.profile(route.id)?.let(::transportName).orEmpty()
+    is Route.StreamChat -> "Chat"
+    Route.Chat -> "Chat"
     Route.Display -> "Display"
     Route.StatusItems -> "Status"
     Route.QuickButtons -> "Quick buttons"
@@ -211,6 +219,47 @@ fun SettingsPanel(store: SettingsStore, live: Boolean, onClose: () -> Unit) {
                         is Route.StreamTransport -> settings.profile(route.id)?.let {
                             StreamTransport(store, it, editable(settings, it, live))
                         }
+                        is Route.StreamChat -> settings.profile(route.id)?.let { profile ->
+                            Group {
+                                row { shapes ->
+                                    TextRow(shapes, "Twitch channel", profile.twitchChannel) {
+                                        store.updateProfile(profile.copy(twitchChannel = it.trim()))
+                                    }
+                                }
+                                row { shapes ->
+                                    TextRow(shapes, "YouTube handle or video ID", profile.youtubeChannel) {
+                                        store.updateProfile(profile.copy(youtubeChannel = it.trim()))
+                                    }
+                                }
+                                row { shapes ->
+                                    TextRow(shapes, "Kick channel", profile.kickChannel) {
+                                        store.updateProfile(profile.copy(kickChannel = it.trim()))
+                                    }
+                                }
+                            }
+                        }
+                        Route.Chat -> Group {
+                            row { shapes ->
+                                ChoiceRow(shapes, "Text size", ChatTextSize.entries, settings.chatTextSize, { it.label }) { size ->
+                                    store.update { it.copy(chatTextSize = size) }
+                                }
+                            }
+                            row { shapes ->
+                                SwitchRow(shapes, "Show on the preview on small screens", settings.chatOnPreview) { on ->
+                                    store.update { it.copy(chatOnPreview = on) }
+                                }
+                            }
+                            row { shapes ->
+                                SwitchRow(shapes, "Text to speech", settings.chatSpeech) { on -> store.update { it.copy(chatSpeech = on) } }
+                            }
+                            if (settings.chatSpeech) {
+                                row { shapes ->
+                                    SwitchRow(shapes, "Say who wrote the message", settings.chatSpeechNames) { on ->
+                                        store.update { it.copy(chatSpeechNames = on) }
+                                    }
+                                }
+                            }
+                        }
                         Route.Display -> Display(store, settings, push)
                         Route.StatusItems -> Group {
                             StatusItem.entries.forEach { item ->
@@ -268,6 +317,11 @@ private fun Home(settings: AppSettings, push: (Route) -> Unit) {
                 settings.selectedProfile.name,
                 Badge(Icons.Rounded.Sensors, Color(0xFFFF8A7A), MaterialShapes.Cookie9Sided),
             ) { push(Route.Streams) }
+        }
+        row {
+            NavRow(it, "Chat", badge = Badge(Icons.Rounded.ChatBubble, Color(0xFFFF9ECF), MaterialShapes.Pill)) {
+                push(Route.Chat)
+            }
         }
         row {
             NavRow(it, "Display", badge = Badge(Icons.Rounded.PictureInPictureAlt, Color(0xFF8AB4FF), MaterialShapes.Square)) {
@@ -365,6 +419,10 @@ private fun StreamPage(
             NavRow(shapes, transportName(profile), if (profile.adaptiveBitrate) "Adaptive bitrate" else "Fixed bitrate") {
                 push(Route.StreamTransport(profile.id))
             }
+        }
+        row { shapes ->
+            val channels = listOf(profile.twitchChannel, profile.youtubeChannel, profile.kickChannel).count { it.isNotBlank() }
+            NavRow(shapes, "Chat", if (channels == 0) "Off" else "$channels on") { push(Route.StreamChat(profile.id)) }
         }
     }
     Group {
@@ -513,6 +571,7 @@ private fun StreamTransport(store: SettingsStore, profile: StreamProfile, editab
 private fun Display(store: SettingsStore, settings: AppSettings, push: (Route) -> Unit) {
     Group {
         row { SwitchRow(it, "Keep screen on", settings.keepScreenOn) { on -> store.update { s -> s.copy(keepScreenOn = on) } } }
+        row { SwitchRow(it, "Vibrate on alerts", settings.alertHaptics) { on -> store.update { s -> s.copy(alertHaptics = on) } } }
     }
     Group {
         row { shapes ->
