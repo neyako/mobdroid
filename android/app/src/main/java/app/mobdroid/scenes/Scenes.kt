@@ -31,6 +31,16 @@ fun expandText(text: String, now: LocalDateTime): String =
 fun defaultScenes(cameras: List<Pair<String, String>>): List<Scene> =
     cameras.map { (key, label) -> Scene(name = label, cameraKey = key) }
 
+fun <T> sceneCamera(
+    cameras: List<T>,
+    currentKey: String?,
+    sceneKey: String?,
+    key: (T) -> String,
+    external: (T) -> Boolean,
+): T? = cameras.firstOrNull { external(it) && key(it) == currentKey }
+    ?: cameras.firstOrNull(external)
+    ?: cameras.firstOrNull { key(it) == sceneKey }
+
 fun defaultPlacement(widget: Widget): SceneWidget = when (widget.type) {
     WidgetType.TEXT -> SceneWidget(widget.id)
     WidgetType.IMAGE -> SceneWidget(widget.id, corner = Corner.TOP_RIGHT, size = 15)

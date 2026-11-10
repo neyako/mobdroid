@@ -44,6 +44,7 @@ import app.mobdroid.media.VideoEncoder
 import app.mobdroid.media.gl.Overlay
 import app.mobdroid.media.gl.VideoCompositor
 import app.mobdroid.scenes.defaultScenes
+import app.mobdroid.scenes.sceneCamera
 import app.mobdroid.widgets.WidgetRenderer
 import app.mobdroid.settings.LoginStore
 import app.mobdroid.settings.MicSource
@@ -397,12 +398,13 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private fun defaultCamera(cameras: List<CameraDescriptor>) =
         cameras.firstOrNull { it.facing == Facing.BACK } ?: cameras.firstOrNull()
 
-    private fun sceneCamera(cameras: List<CameraDescriptor>): CameraDescriptor? {
-        val key = settings.settings.value.selectedScene?.cameraKey
-        return cameras.firstOrNull { it.facing == Facing.EXTERNAL }
-            ?: cameras.firstOrNull { it.key == key }
-            ?: defaultCamera(cameras)
-    }
+    private fun sceneCamera(cameras: List<CameraDescriptor>): CameraDescriptor? = sceneCamera(
+        cameras,
+        _ui.value.camera?.key,
+        settings.settings.value.selectedScene?.cameraKey,
+        { it.key },
+        { it.facing == Facing.EXTERNAL },
+    ) ?: defaultCamera(cameras)
 
     fun selectScene(id: String) = settings.update { it.copy(selectedSceneId = id) }
 

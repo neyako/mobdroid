@@ -1,7 +1,7 @@
 package app.mobdroid.widgets
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -90,17 +90,17 @@ class WidgetRenderer(
                     WidgetType.TEXT -> {
                         val text = expandText(widget.text, LocalDateTime.now())
                         cached(widget.id, Triple(text, widget.textSize, input.height)) {
-                            text(text, widget.textSize * input.height / 400f)
+                            text(text, widget.textSize * input.height / 400f, input.width, input.height)
                         }
                     }
                     WidgetType.IMAGE -> cached(widget.id, widget.image to input.width) {
-                        image(widget.image, input.width)
+                        image(widget.image, input.width, input.height)
                     }
                     WidgetType.CHAT -> {
                         val shown = lines.takeLast(CHAT_LINES)
                         val width = input.width * placement.size / 100
                         cached(widget.id, Triple(shown.map { it.key }, width, input.chatTextSize * input.height)) {
-                            chat(shown, width, input.chatTextSize * input.height / 400f)
+                            chat(shown, width, input.chatTextSize * input.height / 400f, input.height)
                         }
                     }
                 }
@@ -119,7 +119,7 @@ class WidgetRenderer(
         return bitmap
     }
 
-    private fun text(text: String, size: Float): Bitmap? {
+    private fun text(text: String, size: Float, maxWidth: Int, maxHeight: Int): Bitmap? {
         if (text.isBlank()) return null
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
@@ -129,8 +129,8 @@ class WidgetRenderer(
         val lines = text.lines()
         val padding = size * 0.45f
         val lineHeight = paint.fontSpacing
-        val width = (lines.maxOf { paint.measureText(it) } + padding * 2).toInt().coerceAtLeast(1)
-        val height = (lineHeight * lines.size + padding).toInt().coerceAtLeast(1)
+        val width = (lines.maxOf { paint.measureText(it) } + padding * 2).toInt().coerceIn(1, maxWidth)
+        val height = (lineHeight * lines.size + padding).toInt().coerceIn(1, maxHeight)
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val background = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x73000000 }
@@ -141,18 +141,17 @@ class WidgetRenderer(
         return bitmap
     }
 
-    private fun image(name: String?, maxWidth: Int): Bitmap? {
+    private fun image(name: String?, maxWidth: Int, maxHeight: Int): Bitmap? {
         val file = File(imageDirectory, name ?: return null)
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(file.path, bounds)
-        if (bounds.outWidth <= 0) return null
-        val options = BitmapFactory.Options().apply {
-            inSampleSize = Integer.highestOneBit((bounds.outWidth / maxWidth).coerceAtLeast(1))
+        if (!file.isFile) return null
+        return ImageDecoder.decodeBitmap(ImageDecoder.createSource(file)) { decoder, info, _ ->
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            val scale = maxOf((info.size.width + maxWidth - 1) / maxWidth, (info.size.height + maxHeight - 1) / maxHeight)
+            decoder.setTargetSampleSize(Integer.highestOneBit(scale) * if (Integer.bitCount(scale) > 1) 2 else 1)
         }
-        return BitmapFactory.decodeFile(file.path, options)
     }
 
-    private fun chat(lines: List<ChatLine>, width: Int, size: Float): Bitmap? {
+    private fun chat(lines: List<ChatLine>, width: Int, size: Float, maxHeight: Int): Bitmap? {
         if (lines.isEmpty() || width <= 0) return null
         val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
@@ -180,8 +179,11 @@ class WidgetRenderer(
             .setAlignment(Layout.Alignment.ALIGN_NORMAL)
             .setLineSpacing(0f, 1.15f)
             .build()
-        val bitmap = Bitmap.createBitmap(width, layout.height.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
-        layout.draw(Canvas(bitmap))
+        val height = layout.height.coerceIn(1, maxHeight)
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.translate(0f, (height - layout.height).toFloat())
+        layout.draw(canvas)
         return bitmap
     }
 

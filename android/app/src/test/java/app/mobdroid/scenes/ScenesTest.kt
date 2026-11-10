@@ -21,6 +21,17 @@ class ScenesTest {
         assertEquals(listOf(60, 60, 30, 20), rect(Corner.BOTTOM_RIGHT))
     }
 
+    private fun camera(current: String?, scene: String?, vararg cameras: String) =
+        sceneCamera(cameras.toList(), current, scene, { it }, { it.startsWith("usb") })
+
+    @Test
+    fun aUsbCameraReplacesTheSceneCameraAndTheOneInUseIsKept() {
+        assertEquals("front", camera("back", "front", "back", "front"))
+        assertEquals("usb1", camera("back", "front", "back", "front", "usb1", "usb2"))
+        assertEquals("usb2", camera("usb2", "front", "back", "front", "usb1", "usb2"))
+        assertEquals(null, camera("back", "gone", "back", "front"))
+    }
+
     @Test
     fun timeAndDateAreFilledIn() {
         assertEquals("IRL 07:05 on 2026-11-10", expandText("IRL {time} on {date}", LocalDateTime.of(2026, 11, 10, 7, 5, 59)))

@@ -194,14 +194,17 @@ them, not code style.
   camera (`cameraKey`) and its widget placements. Whenever there are none (the first start, a settings reset),
   one scene per built-in camera is created, named after it, so the row reads Back and Front as the camera
   row did. An external camera (USB) is not a
-  scene: while one is attached it replaces the camera of every scene (`StreamEngine.sceneCamera`).
+  scene: while one is attached it replaces the camera of every scene (`sceneCamera`), and with several
+  attached the one in use stays in use.
 - `AppSettings.widgets` are global; a `SceneWidget` places one in a scene: on or off, a corner, X and Y
   offsets from that corner in percent of the picture, and a size in percent of its width. Text widgets
   ignore the size, their text size sets it. `Widget.previewOnly` keeps a widget out of the stream, the
   recording and snapshots.
 - `widgets/WidgetRenderer` turns the selected scene's widgets into `Overlay`s (a bitmap and a rectangle in
   picture coordinates, origin top left). Text fills in `{time}` and `{date}` and is redrawn each minute;
-  images are copies in `files/widgets/`; chat is the last six lines of `ChatController.lines`. A bitmap is
+  images are copies in `files/widgets/`, decoded upright (EXIF) and no larger than the picture; chat is
+  the last six lines of `ChatController.lines`. No bitmap is larger than the output picture: long text is
+  cut off and a tall chat keeps its newest lines. A bitmap is
   reused while its inputs are the same, and the compositor uploads a texture only when the bitmap object
   changed.
 - `VideoCompositor.setOverlays` draws them over the camera with premultiplied alpha blending: all of them
