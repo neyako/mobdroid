@@ -15,8 +15,11 @@ java {
 
 dependencies {
     api(libs.kotlinx.coroutines.core)
+    api(libs.okhttp)
+    implementation(libs.kotlinx.serialization.json)
 
     testImplementation(kotlin("test"))
+    testImplementation(libs.okhttp.mockwebserver)
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.launcher)
