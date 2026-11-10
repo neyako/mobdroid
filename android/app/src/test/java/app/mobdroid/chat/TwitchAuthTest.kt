@@ -12,4 +12,10 @@ class TwitchAuthTest {
         assertEquals(null, twitchAccessToken("error=access_denied&state=s1", "s1"))
         assertEquals(null, twitchAccessToken(null, "s1"))
     }
+
+    @Test
+    fun `no session token in the cookies means not logged in`() {
+        assertEquals(null, kickSessionToken("cf_clearance=abc; other=1"))
+        assertEquals(null, kickSessionToken(null))
+    }
 }

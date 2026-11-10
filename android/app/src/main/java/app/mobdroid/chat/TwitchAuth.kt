@@ -40,3 +40,18 @@ fun validateTwitchToken(http: OkHttpClient, accessToken: String): TwitchAccount?
         )
     }
 }.getOrNull()
+
+fun kickSessionToken(cookies: String?): String? = cookies.orEmpty().split(';')
+    .map { it.trim() }
+    .firstOrNull { it.startsWith("session_token=") }
+    ?.substringAfter('=')
+    ?.takeIf { it.isNotEmpty() }
+    ?.let(Uri::decode)
+
+fun kickUsername(http: OkHttpClient, sessionToken: String): String? = runCatching {
+    val request = Request.Builder().url("https://kick.com/api/v1/user").header("Authorization", "Bearer $sessionToken").build()
+    http.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) return null
+        Json.parseToJsonElement(response.body.string()).jsonObject.getValue("username").jsonPrimitive.content
+    }
+}.getOrNull()

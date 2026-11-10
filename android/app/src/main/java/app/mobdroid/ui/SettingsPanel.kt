@@ -109,6 +109,8 @@ private sealed interface Route {
 
     data object TwitchAccount : Route
 
+    data object KickAccount : Route
+
     data object Display : Route
 
     data object StatusItems : Route
@@ -145,6 +147,7 @@ private fun title(route: Route, settings: AppSettings) = when (route) {
     is Route.StreamChat -> "Chat"
     Route.Chat -> "Chat"
     Route.TwitchAccount -> "Twitch account"
+    Route.KickAccount -> "Kick account"
     Route.Display -> "Display"
     Route.StatusItems -> "Status"
     Route.QuickButtons -> "Quick buttons"
@@ -243,6 +246,7 @@ fun SettingsPanel(store: SettingsStore, engine: StreamEngine, live: Boolean, onC
                             }
                         }
                         Route.TwitchAccount -> TwitchAccountPage(engine)
+                        Route.KickAccount -> KickAccountPage(engine)
                         Route.Chat -> ChatPage(store, settings, engine, push)
                         Route.Display -> Display(store, settings, push)
                         Route.StatusItems -> Group {
@@ -315,11 +319,43 @@ private fun TwitchAccountPage(engine: StreamEngine) {
 }
 
 @Composable
+private fun KickAccountPage(engine: StreamEngine) {
+    val logins by engine.logins.logins.collectAsStateWithLifecycle()
+    var loggingIn by remember { mutableStateOf(false) }
+    val account = logins.kick
+    Group {
+        if (account != null) {
+            row { ValueRow(it, "Logged in as", account.username) }
+            row { shapes ->
+                ActionRow(shapes, "Log out", Icons.Rounded.Close, MaterialTheme.colorScheme.error) {
+                    engine.logins.update { it.copy(kick = null) }
+                }
+            }
+        } else {
+            row { ActionRow(it, "Log in", Icons.Rounded.Add) { loggingIn = true } }
+        }
+    }
+    if (loggingIn) {
+        KickLoginDialog(
+            engine.http,
+            onAccount = { added ->
+                engine.logins.update { it.copy(kick = added) }
+                loggingIn = false
+            },
+            onClose = { loggingIn = false },
+        )
+    }
+}
+
+@Composable
 private fun ChatPage(store: SettingsStore, settings: AppSettings, engine: StreamEngine, push: (Route) -> Unit) {
     val logins by engine.logins.logins.collectAsStateWithLifecycle()
     Group {
         row { shapes ->
             NavRow(shapes, "Twitch account", logins.twitch?.login ?: "Not logged in") { push(Route.TwitchAccount) }
+        }
+        row { shapes ->
+            NavRow(shapes, "Kick account", logins.kick?.username ?: "Not logged in") { push(Route.KickAccount) }
         }
     }
     Group {

@@ -11,7 +11,10 @@ import kotlinx.serialization.json.Json
 data class TwitchAccount(val login: String, val userId: String, val accessToken: String)
 
 @Serializable
-data class Logins(val twitch: TwitchAccount? = null)
+data class KickAccount(val username: String, val sessionToken: String)
+
+@Serializable
+data class Logins(val twitch: TwitchAccount? = null, val kick: KickAccount? = null)
 
 class LoginStore(private val file: File) {
     private val json = Json { ignoreUnknownKeys = true }
