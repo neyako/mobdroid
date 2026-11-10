@@ -66,6 +66,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -187,6 +188,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 .map { s -> s.selectedProfile.let { listOf(it.twitchChannel, it.kickChannel, it.youtubeChannel) } }
                 .distinctUntilChanged()
                 .drop(1)
+                .debounce(1000)
                 .collect { synchronized(this@StreamEngine) { if (previewActive || isLive) chat.start() } }
         }
         scope.launch {
@@ -517,8 +519,8 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         monitor = scope.launch {
             launch {
                 var wasLive = false
+                var previous = LiveState.CONNECTING
                 newSession.state.collect { s ->
-                    val previous = _ui.value.live
                     _ui.update { it.copy(live = s) }
                     if (s == LiveState.LIVE && previous != LiveState.LIVE) {
                         showAlert(AlertLevel.INFO, if (wasLive) "Stream reconnected" else "You are live")
@@ -528,6 +530,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                     } else if (s == LiveState.RECONNECTING && previous == LiveState.CONNECTING) {
                         showAlert(AlertLevel.ERROR, "Could not connect", newSession.lastError.value ?: "Retrying")
                     }
+                    previous = s
                 }
             }
             launch { newSession.lastError.collect { e -> if (e != null) _ui.update { it.copy(error = e) } } }

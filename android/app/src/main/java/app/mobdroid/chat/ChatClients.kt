@@ -18,15 +18,15 @@ fun createChatClients(
     http: OkHttpClient,
     listener: (ChatPlatform) -> ChatListener,
 ): List<Pair<ChatPlatform, ChatClient>> = buildList {
-    if (profile.twitchChannel.isNotBlank()) {
+    val create = { platform: ChatPlatform, channel: String, client: (ChatListener) -> ChatClient ->
+        if (channel.isNotBlank()) runCatching { client(listener(platform)) }.onSuccess { add(platform to it) }
+    }
+    create(ChatPlatform.TWITCH, profile.twitchChannel) {
         val login = logins.twitch?.let { TwitchLogin(it.login, it.accessToken, TWITCH_CLIENT_ID, it.userId) }
-        add(ChatPlatform.TWITCH to TwitchChatClient(profile.twitchChannel, login, listener(ChatPlatform.TWITCH), http))
+        TwitchChatClient(profile.twitchChannel, login, it, http)
     }
-    if (profile.youtubeChannel.isNotBlank()) {
-        add(ChatPlatform.YOUTUBE to YouTubeChatClient(profile.youtubeChannel, listener(ChatPlatform.YOUTUBE), http))
-    }
-    if (profile.kickChannel.isNotBlank()) {
-        val login = logins.kick?.let { KickLogin(it.sessionToken) }
-        add(ChatPlatform.KICK to KickChatClient(profile.kickChannel, login, listener(ChatPlatform.KICK), http))
+    create(ChatPlatform.YOUTUBE, profile.youtubeChannel) { YouTubeChatClient(profile.youtubeChannel, it, http) }
+    create(ChatPlatform.KICK, profile.kickChannel) {
+        KickChatClient(profile.kickChannel, logins.kick?.let { KickLogin(it.sessionToken) }, it, http)
     }
 }

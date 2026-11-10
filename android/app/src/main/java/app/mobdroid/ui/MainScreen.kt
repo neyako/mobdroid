@@ -237,7 +237,6 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                         .clickable(interactionSource = null, indication = null) { stealth = false },
                 )
             }
-            AlertBanner(engine, Modifier.align(Alignment.TopCenter))
             if (banded) {
                 AnimatedVisibility(
                     visible = side != null,
@@ -253,6 +252,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                     }
                 }
             }
+            AlertBanner(engine, Modifier.align(Alignment.TopCenter))
         }
     }
 
