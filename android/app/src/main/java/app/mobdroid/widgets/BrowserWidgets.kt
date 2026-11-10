@@ -70,7 +70,7 @@ class BrowserWidgets(private val context: Context) {
                 webViewClient = object : WebViewClient() {
                     override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
                         Log.w(TAG, "Browser widget renderer gone, crashed: ${detail.didCrash()}")
-                        handler.post { close(id) }
+                        handler.post { if (running[id]?.webView === view) close(id) }
                         return true
                     }
                 }
