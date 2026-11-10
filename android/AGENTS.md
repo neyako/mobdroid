@@ -201,10 +201,13 @@ them, not code style.
   `maxWidth / maxHeight < 1.5`): status, logo and settings button in a top band, the preview with zoom
   stops left and cameras right, quick buttons and Go Live in a bottom band.
 - The preview `SurfaceView` has exactly the output aspect, so the corner mask drawn over it rounds the
-  picture. Never animate its size: opening a panel resizes it and the bar once and only the panel slides.
+  picture. Never animate its size: it takes its final size the moment a panel opens or closes, and the
+  rest moves over it. The control bar's width and the quick buttons' positions follow one spring
+  (`QuickButtonGrid` places each button between its place in the wide and the two column layout), read in
+  the layout phase only, while the panel slides out from behind the bar or fades away over the preview.
 - Panels (settings, chat) sit between the preview and the control bar on wide screens (350 dp, Moblin's
   `settingsHalfWidth`) and fill the screen on near-square ones. Their header is 44 dp with `PanelButtons`:
-  hide and close. Hide keeps the panel's state but takes it off the screen; the two buttons then float in
+  hide and close, extra small filled icon buttons with the expressive shape morph. Hide keeps the panel's state but takes it off the screen; the two buttons then float in
   the preview's top right and the status moves under them. Settings pages follow Moblin's categories and
   drill down with a back stack. Rows are `SegmentedListItem`s built with `Group { row { ... } }` from
   `SettingsWidgets.kt`, capped at 44 dp (56 dp with a supporting line) with 15 sp titles. The cap is a

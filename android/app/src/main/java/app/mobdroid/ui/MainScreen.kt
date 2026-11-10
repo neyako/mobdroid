@@ -3,6 +3,7 @@ package app.mobdroid.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -27,11 +28,13 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -49,6 +52,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -197,14 +205,13 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                 }
             } else {
                 val panelShown = panel.currentState || panel.targetState
-                val barWidth = if (panelShown) {
-                    100.dp
-                } else {
-                    (maxWidth - (maxHeight - 12.dp) * aspect - 12.dp).coerceIn(100.dp, 250.dp)
-                }
+                val closedBar = (maxWidth - (maxHeight - 12.dp) * aspect - 12.dp).coerceIn(100.dp, 250.dp)
                 val panelWidth = minOf(350.dp, (maxWidth - 100.dp) * 0.5f)
+                val open = animateFloatAsState(if (panel.targetState) 1f else 0f, motion.defaultSpatialSpec(), label = "bar")
+                val barWidth: Density.() -> Int = { lerp(closedBar, 100.dp, open.value.coerceIn(0f, 1f)).roundToPx() }
+                val previewArea = if (panel.targetState) maxWidth - panelWidth - 100.dp else maxWidth - closedBar
                 Row(Modifier.fillMaxSize()) {
-                    BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().padding(6.dp)) {
+                    BoxWithConstraints(Modifier.width(previewArea).fillMaxHeight().padding(6.dp)) {
                         val width = minOf(maxWidth, maxHeight * aspect)
                         val height = width / aspect
                         val below = maxHeight - height >= 96.dp
@@ -232,8 +239,16 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                             if (below) CameraControls(ui, engine, Modifier.width(width).padding(top = 8.dp))
                         }
                     }
+                    Box(Modifier.weight(1f).fillMaxHeight()) {
                     if (panelShown) {
-                        Box(Modifier.width(panelWidth).fillMaxHeight()) {
+                        Box(
+                            Modifier
+                                .align(Alignment.CenterEnd)
+                                .offset { IntOffset(-barWidth(), 0) }
+                                .wrapContentWidth(Alignment.End, unbounded = true)
+                                .width(panelWidth)
+                                .fillMaxHeight(),
+                        ) {
                             androidx.compose.animation.AnimatedVisibility(
                                 visibleState = panel,
                                 enter = slideInHorizontally(motion.defaultSpatialSpec()) { it / 4 } +
@@ -250,27 +265,33 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                         }
                     }
                     Column(
-                        Modifier.width(barWidth).fillMaxHeight().padding(vertical = 8.dp),
+                        Modifier
+                            .align(Alignment.CenterEnd)
+                            .layout { measurable, constraints ->
+                                val placeable = measurable.measure(Constraints.fixed(barWidth(), constraints.maxHeight))
+                                layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+                            }
+                            .background(Color.Black)
+                            .padding(vertical = 8.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             MoblinLogo()
                             SettingsButton(showSettings && !panelHidden) { toggle(Side.SETTINGS) }
                         }
-                        FlowRow(
-                            Modifier.weight(1f).padding(top = 8.dp).verticalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterHorizontally),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                            maxItemsInEachRow = (barWidth / 50.dp).toInt(),
-                        ) {
-                            buttons.forEach { QuickButtonView(it, 40.dp, 48.dp) }
-                        }
+                        QuickButtonGrid(
+                            buttons,
+                            (closedBar / 50.dp).toInt(),
+                            { open.value },
+                            Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp).verticalScroll(rememberScrollState()),
+                        )
                         LiveButton(
                             ui.live,
                             confirmStop,
                             onLive,
                             Modifier.padding(horizontal = 8.dp).fillMaxWidth().height(40.dp),
                         )
+                    }
                     }
                 }
             }
