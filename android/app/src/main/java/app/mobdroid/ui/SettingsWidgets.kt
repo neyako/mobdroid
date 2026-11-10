@@ -54,8 +54,11 @@ import androidx.compose.ui.unit.dp
 import androidx.graphics.shapes.RoundedPolygon
 
 val RowPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp)
-val RowHeight = 44.dp
-val TwoLineRowHeight = 56.dp
+val RowHeight: Dp
+    @Composable get() = 44.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)
+
+val TwoLineRowHeight: Dp
+    @Composable get() = 56.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)
 val PanelHeaderHeight = 44.dp
 
 val RowTitle: TextStyle

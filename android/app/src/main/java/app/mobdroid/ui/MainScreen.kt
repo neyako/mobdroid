@@ -78,6 +78,8 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
     var shownSide by remember { mutableStateOf(Side.SETTINGS) }
     side?.let { shownSide = it }
     var panelHidden by remember { mutableStateOf(false) }
+    val settingsPages = remember { SettingsPages() }
+    val chatDraft = remember { mutableStateOf("") }
     val showSettings = side == Side.SETTINGS
     val toggle = { target: Side ->
         side = if (side == target && !panelHidden) null else target
@@ -257,9 +259,9 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                                     fadeOut(motion.fastEffectsSpec()),
                             ) {
                                 if (shownSide == Side.CHAT) {
-                                    ChatPanel(engine, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
+                                    ChatPanel(engine, appSettings, chatDraft, onHide = { panelHidden = true }, onClose = closePanel)
                                 } else {
-                                    SettingsPanel(settings, engine, busy, onHide = { panelHidden = true }, onClose = closePanel)
+                                    SettingsPanel(settings, engine, busy, settingsPages, onHide = { panelHidden = true }, onClose = closePanel)
                                 }
                             }
                         }
@@ -305,12 +307,12 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
             }
             if (banded) {
                 AnimatedVisibility(
-                    visible = side != null && !panelHidden,
+                    visibleState = panel,
                     enter = slideInVertically(motion.defaultSpatialSpec()) { it / 6 } + fadeIn(motion.defaultEffectsSpec()),
                     exit = slideOutVertically(motion.fastSpatialSpec()) { it / 6 } + fadeOut(motion.fastEffectsSpec()),
                 ) {
                     if (shownSide == Side.CHAT) {
-                        ChatPanel(engine, appSettings, onHide = { panelHidden = true }, onClose = closePanel) {
+                        ChatPanel(engine, appSettings, chatDraft, onHide = { panelHidden = true }, onClose = closePanel) {
                             Status(
                                 ui,
                                 stats,
@@ -323,7 +325,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                             )
                         }
                     } else {
-                        SettingsPanel(settings, engine, busy, onHide = { panelHidden = true }, onClose = closePanel)
+                        SettingsPanel(settings, engine, busy, settingsPages, onHide = { panelHidden = true }, onClose = closePanel)
                     }
                 }
             }
@@ -331,6 +333,8 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
         }
     }
 
+    val settingsLeft = side != Side.SETTINGS && (side != null || (panel.isIdle && !panel.currentState))
+    LaunchedEffect(settingsLeft) { if (settingsLeft) settingsPages.reset() }
     val chatOnly = banded && side == Side.CHAT && !panelHidden
     LaunchedEffect(stealth, chatOnly) { engine.setPreviewEnabled(!stealth && !chatOnly) }
     LaunchedEffect(confirmStop) {

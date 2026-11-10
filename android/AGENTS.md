@@ -207,10 +207,13 @@ them, not code style.
   the layout phase only, while the panel slides out from behind the bar or fades away over the preview.
 - Panels (settings, chat) sit between the preview and the control bar on wide screens (350 dp, Moblin's
   `settingsHalfWidth`) and fill the screen on near-square ones. Their header is 44 dp with `PanelButtons`:
-  hide and close, extra small filled icon buttons with the expressive shape morph. Hide keeps the panel's state but takes it off the screen; the two buttons then float in
-  the preview's top right and the status moves under them. Settings pages follow Moblin's categories and
-  drill down with a back stack. Rows are `SegmentedListItem`s built with `Group { row { ... } }` from
-  `SettingsWidgets.kt`, capped at 44 dp (56 dp with a supporting line) with 15 sp titles. The cap is a
+  hide and close, extra small filled icon buttons with the expressive shape morph. They are 32 dp with
+  16 dp between them, so their 48 dp touch targets do not overlap. Hide takes the panel off the screen and
+  keeps the settings page (`SettingsPages`, reset once the panel has closed) and the chat draft, which
+  live in `MainScreen`; the two buttons then float in the preview's top right and the status moves under
+  them. Settings pages follow Moblin's categories and drill down with a back stack. Rows are
+  `SegmentedListItem`s built with `Group { row { ... } }` from `SettingsWidgets.kt`, capped at 44 dp (56 dp
+  with a supporting line) times the font scale, with 15 sp titles. The cap is a
   `heightIn(max)`, because the list item's own minimum is 56 dp.
 - The microphone is open whenever the preview runs, so the audio meter works before going live: an
   `AudioEncoder` without a sink only reads and meters. It reports the peak level in dB about nine times a

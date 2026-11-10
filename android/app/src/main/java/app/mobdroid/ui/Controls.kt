@@ -219,7 +219,7 @@ fun PanelButtons(hidden: Boolean, onHide: () -> Unit, onClose: () -> Unit, modif
     )
     val size = Modifier.size(IconButtonDefaults.extraSmallContainerSize())
     val icon = Modifier.size(IconButtonDefaults.extraSmallIconSize)
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         FilledIconButton(onHide, IconButtonDefaults.shapes(), size, colors = colors) {
             Icon(
                 if (hidden) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,

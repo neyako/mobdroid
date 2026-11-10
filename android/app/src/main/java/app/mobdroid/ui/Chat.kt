@@ -32,6 +32,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -147,6 +148,7 @@ fun ChatOverlay(engine: StreamEngine, sizeSp: Int, count: Int, modifier: Modifie
 fun ChatPanel(
     engine: StreamEngine,
     settings: AppSettings,
+    draft: MutableState<String>,
     onHide: () -> Unit,
     onClose: () -> Unit,
     header: (@Composable () -> Unit)? = null,
@@ -200,14 +202,20 @@ fun ChatPanel(
                     ChatMessageText(it, settings.chatTextSize.sp, shadow = false, platformDot = connected.size > 1)
                 }
             }
-            if (canSend.isNotEmpty()) ChatInput(canSend) { platform, text, onResult -> engine.chat.send(platform, text, onResult) }
+            if (canSend.isNotEmpty()) {
+                ChatInput(canSend, draft) { platform, text, onResult -> engine.chat.send(platform, text, onResult) }
+            }
         }
     }
 }
 
 @Composable
-private fun ChatInput(platforms: List<ChatPlatform>, onSend: (ChatPlatform, String, (String?) -> Unit) -> Unit) {
-    var text by remember { mutableStateOf("") }
+private fun ChatInput(
+    platforms: List<ChatPlatform>,
+    draft: MutableState<String>,
+    onSend: (ChatPlatform, String, (String?) -> Unit) -> Unit,
+) {
+    var text by draft
     var error by remember { mutableStateOf<String?>(null) }
     var platform by remember(platforms) { mutableStateOf(platforms.first()) }
     val send = {

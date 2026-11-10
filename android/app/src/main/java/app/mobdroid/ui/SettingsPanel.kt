@@ -112,7 +112,15 @@ import app.mobdroid.stream.StreamEngine
 import app.mobdroid.stream.outputSize
 import java.util.UUID
 
-private sealed interface Route {
+class SettingsPages {
+    internal val stack = mutableStateListOf<Route>(Route.Home)
+
+    fun reset() {
+        if (stack.size > 1) stack.removeRange(1, stack.size)
+    }
+}
+
+internal sealed interface Route {
     data object Home : Route
 
     data object Streams : Route
@@ -196,9 +204,16 @@ private fun videoSummary(profile: StreamProfile): String {
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun SettingsPanel(store: SettingsStore, engine: StreamEngine, live: Boolean, onHide: () -> Unit, onClose: () -> Unit) {
+fun SettingsPanel(
+    store: SettingsStore,
+    engine: StreamEngine,
+    live: Boolean,
+    pages: SettingsPages,
+    onHide: () -> Unit,
+    onClose: () -> Unit,
+) {
     val settings by store.settings.collectAsStateWithLifecycle()
-    val stack = remember { mutableStateListOf<Route>(Route.Home) }
+    val stack = pages.stack
     val push: (Route) -> Unit = { stack += it }
     val pop = { if (stack.size > 1) stack.removeAt(stack.lastIndex) }
     BackHandler(stack.size > 1) { pop() }
