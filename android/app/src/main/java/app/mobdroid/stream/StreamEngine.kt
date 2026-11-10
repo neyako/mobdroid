@@ -685,10 +685,21 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         activeRecording = null
         tee.setRecorder(null, video = false)
         _recording.value = null
+        finishRecording(active, error)
         syncEncoders()
         end()
+    }
+
+    private fun finishRecording(active: ActiveRecording, error: String?) {
         ioScope.launch {
-            val summary = active.recorder.stop()
+            val summary = try {
+                active.recorder.stop()
+            } catch (e: Exception) {
+                Log.e(TAG, "Recording not finished", e)
+                active.file.close()
+                showAlert(AlertLevel.ERROR, "Recording not finished", "It is recovered when the app next starts")
+                return@launch
+            }
             active.file.close()
             if (summary == null) {
                 recordings.delete(active.file.uri)
@@ -840,7 +851,11 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     @Synchronized
     private fun fail(message: String) {
         val wasLive = session != null
-        stopRecording(message)
+        val active = activeRecording
+        activeRecording = null
+        tee.setRecorder(null, video = false)
+        _recording.value = null
+        active?.let { finishRecording(it, message) }
         stopLive()
         if (wasLive) showAlert(AlertLevel.ERROR, "Stream stopped", message)
         _ui.update { it.copy(error = message) }

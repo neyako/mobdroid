@@ -6,10 +6,12 @@ import app.mobdroid.engine.flv.GeneratedAudio
 import app.mobdroid.engine.flv.GeneratedVideo
 import app.mobdroid.engine.media.EncodedFrame
 import java.io.File
+import java.io.IOException
 import java.io.RandomAccessFile
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import org.junit.jupiter.api.Assumptions.assumeTrue
@@ -153,16 +155,42 @@ class Mp4RecorderTest {
     }
 
     @Test
-    fun aBacklogOverTheLimitStopsTheRecordingWithAnError() {
+    fun aBacklogOverTheLimitStopsTheRecordingAndKeepsWhatWasWritten() {
         val video = ElementaryStreams.h264(repeatHeaders = true)
+        val written = video.frames.take(31)
+        val limit = written.sumOf { it.data.size }
         val file = FfmpegTools.file("record-${files.incrementAndGet()}.mp4")
         val errors = ArrayList<String>()
         RandomAccessFile(file, "rw").use { raf ->
-            val recorder = Mp4Recorder(raf.channel, raf.channel, backlogLimitBytes = video.frames[0].data.size) { errors += it }
+            raf.setLength(0)
+            val recorder = Mp4Recorder(raf.channel, raf.channel, backlogLimitBytes = limit) { errors += it }
+            recorder.start()
             recorder.setVideoFormat(video.format)
-            video.frames.take(3).forEach(recorder::writeVideo)
-            recorder.stop()
+            written.forEach(recorder::writeVideo)
+            while (recorder.bytesWritten == 0L) Thread.sleep(5)
+            recorder.writeVideo(EncodedFrame(ByteArray(limit + 1), written.last().ptsUs + 33_333, false))
+            video.frames.drop(31).forEach(recorder::writeVideo)
+            assertNotNull(recorder.stop())
         }
         assertEquals(listOf("Storage is too slow"), errors)
+        val stream = FfmpegTools.probeStreams(file).single { it["codec_type"] == "video" }
+        assertEquals("${written.size}", stream["nb_read_frames"])
+    }
+
+    @Test
+    fun aRecordingThatCannotBeFinishedIsReportedAndCanBeFinishedLater() {
+        val video = ElementaryStreams.h264(repeatHeaders = true)
+        val audio = ElementaryStreams.aac()
+        val file = FfmpegTools.file("record-${files.incrementAndGet()}.mp4")
+        RandomAccessFile(file, "rw").use { raf ->
+            raf.setLength(0)
+            val unreadable = RandomAccessFile(file, "r").channel.also { it.close() }
+            val recorder = Mp4Recorder(unreadable, raf.channel) { error(it) }
+            recorder.start()
+            ElementaryStreams.feed(recorder, video, audio)
+            assertFailsWith<IOException> { recorder.stop() }
+        }
+        assertNotNull(finish(file))
+        assertDecodes(file, "h264", video.frames.size, audioFrames(video, audio))
     }
 }

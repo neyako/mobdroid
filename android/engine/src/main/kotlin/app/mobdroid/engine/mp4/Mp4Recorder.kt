@@ -13,6 +13,7 @@ import app.mobdroid.engine.media.EncodedFrame
 import app.mobdroid.engine.media.MediaSink
 import app.mobdroid.engine.media.VideoCodec
 import app.mobdroid.engine.media.VideoFormat
+import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.util.concurrent.locks.ReentrantLock
@@ -46,6 +47,9 @@ class Mp4Recorder(
 
     @Volatile
     private var summary: Mp4Summary? = null
+
+    @Volatile
+    private var finishError: Exception? = null
     private val thread = Thread(::run, "Mp4Recorder")
 
     private val head = ByteWriter(4096)
@@ -74,6 +78,7 @@ class Mp4Recorder(
             wake.signal()
         }
         thread.join()
+        finishError?.let { throw IOException("Could not finish the recording", it) }
         return summary
     }
 
@@ -136,15 +141,18 @@ class Mp4Recorder(
                 audio.clear()
                 if (last || videoData.size + audioData.size >= MAX_BLOCK_BYTES) flushBlock()
             }
-            summary = finishMp4(input, output)
         } catch (e: Exception) {
             lock.withLock {
                 stopping = true
                 pendingVideo.clear()
                 pendingAudio.clear()
             }
-            summary = runCatching { finishMp4(input, output) }.getOrNull()
             onError(e.message ?: e.toString())
+        }
+        try {
+            summary = finishMp4(input, output)
+        } catch (e: Exception) {
+            finishError = e
         }
     }
 

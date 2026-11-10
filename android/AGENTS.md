@@ -154,9 +154,10 @@ them, not code style.
 - `Mp4Recorder(input, output, onError)` is a `MediaSink` with its own writer thread and a bounded backlog
   (32 MiB). `input` and `output` are channels of the same file: Android hands out a file descriptor, whose
   read and write channels are separate, a JVM test passes one `RandomAccessFile` channel twice. On overflow
-  or an I/O error it stops taking frames, finishes what it wrote and calls `onError` once, on the writer
-  thread, so the handler must not call `stop()` from inside it. `stop()` blocks until the file is finished
-  and returns null when nothing was recorded.
+  or an I/O error it stops taking frames, finishes what it wrote and calls `onError` once, from the thread
+  that hit it, so the handler must not call `stop()` from inside it. `stop()` blocks until the file is
+  finished, returns null when nothing was recorded and throws when the file could not be finished. Such a
+  file still holds its blocks: the app leaves it pending and `recover()` finishes it at a later start.
 - File layout: `ftyp`, one `mdat`, and `moov` at the end. Inside `mdat` the media is written in blocks of
   about a second: a 16 byte header (magic `mdrb`, records length, data length, CRC32 of the records), the
   records (the formats, then one 13 byte record per video sample, then per audio sample: tag, size, pts),
@@ -182,7 +183,8 @@ them, not code style.
   formats to a sink attached later. `RecordingSettings.separate` adds a second video encoder
   (`VideoCompositor.setRecorder`) with its own codec and bitrate at the stream's resolution and frame rate;
   otherwise the recorder gets the stream's frames, at the profile's bitrate while not live. `syncEncoders`
-  is the one place that creates and releases encoders for the current state. The stream profile cannot
+  is the one place that creates and releases encoders for the current state. `fail` clears the recording
+  and the session before it reconciles, so a teardown never tries to create an encoder. The stream profile cannot
   change while busy. Recording stops with an alert when free storage falls under 300 MiB.
 - The foreground service runs while live or recording; its notification title says which.
 
