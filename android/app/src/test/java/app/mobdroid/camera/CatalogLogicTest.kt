@@ -72,7 +72,10 @@ class CatalogLogicTest {
     fun `flip5 result does not depend on probe order or hidden ids`() {
         val expected = buildCatalog(Flip5Fixture.cameras)
         assertEquals(expected, buildCatalog(Flip5Fixture.cameras.reversed()))
-        assertEquals(expected, buildCatalog(Flip5Fixture.cameras.filter { it.visible }))
+        assertEquals(
+            expected.map { it.copy(fallbackLenses = emptyList()) },
+            buildCatalog(Flip5Fixture.cameras.filter { it.visible }).map { it.copy(fallbackLenses = emptyList()) },
+        )
     }
 
     @Test
@@ -275,6 +278,7 @@ class CatalogLogicTest {
         val ultraWideLens = entries.first().lenses.single()
         assertEquals(0.4f, ultraWideLens.ratio)
         assertEquals("4" to null, ultraWideLens.entry.camera.id to ultraWideLens.entry.physicalId)
+        assertEquals(listOf(1f to "3", 2.5f to "5"), entries.first().fallbackLenses.map { it.ratio to it.entry.camera.id })
     }
 
     @Test

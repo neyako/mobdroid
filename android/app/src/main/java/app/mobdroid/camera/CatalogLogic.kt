@@ -50,6 +50,7 @@ internal data class CatalogEntry(
     val zoomRange: ClosedFloatingPointRange<Float>,
     val zoomStops: List<Float>,
     val lenses: List<CatalogLens> = emptyList(),
+    val fallbackLenses: List<CatalogLens> = emptyList(),
 )
 
 internal data class CatalogLens(val ratio: Float, val entry: CatalogEntry)
@@ -160,6 +161,7 @@ private class Draft(
     private val ownStops: List<Float>,
 ) {
     val lenses = ArrayList<Pair<Float, Draft>>()
+    val fallback = ArrayList<Pair<Float, Draft>>()
     val zoomStops: List<Float>
         get() = (ownStops + lenses.map { it.first }).distinct().sorted().takeIf { it.size >= 2 }.orEmpty()
 }
@@ -193,6 +195,14 @@ internal fun buildCatalog(cameras: List<RawCamera>): List<CatalogEntry> {
         drafts += draft
     }
     for ((candidate, draft) in accepted) {
+        for (reachable in candidate.reachable) {
+            val standalone = cameras.firstOrNull {
+                it.id == reachable.lens.id && it.id != candidate.camera.id &&
+                    !isJunk(it.facing, it.capabilities, it.monochromeSensor, it.sizes)
+            } ?: continue
+            draft.fallback += niceStop(reachable.ratio, candidate.camera.zoomRange) to
+                Draft(standalone, null, standalone.lens, standalone.zoomRange, emptyList())
+        }
         for (unreachable in candidate.ratios - candidate.reachable.toSet()) {
             if (!covered.add(lensKey(candidate.camera.facing, unreachable.lens))) continue
             val standalone = cameras.firstOrNull { it.id == unreachable.lens.id }
@@ -225,12 +235,14 @@ private fun label(drafts: List<Draft>): List<CatalogEntry> {
             label,
             draft.zoomRange,
             draft.zoomStops,
-            draft.lenses.map { (ratio, lens) ->
-                CatalogLens(ratio, CatalogEntry(lens.camera, lens.physicalId, label, lens.zoomRange, emptyList()))
-            },
+            draft.lenses.map { it.toLens(label) },
+            draft.fallback.map { it.toLens(label) },
         )
     }
 }
+
+private fun Pair<Float, Draft>.toLens(label: String) =
+    CatalogLens(first, CatalogEntry(second.camera, second.physicalId, label, second.zoomRange, emptyList()))
 
 private fun name(draft: Draft, reference: Map<Facing, Float>): String {
     val facing = draft.camera.facing

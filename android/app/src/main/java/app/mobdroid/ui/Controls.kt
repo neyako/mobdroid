@@ -443,7 +443,7 @@ private fun <T> Segments(values: List<T>, selected: T?, modifier: Modifier, labe
 fun ZoomStops(ui: UiState, onZoom: (Float) -> Unit) {
     val stops = ui.camera?.lensZoomStops.orEmpty()
     if (stops.size < 2) return
-    val selected = stops.lastOrNull { ui.zoom >= it - 0.01f }
+    val selected = ui.lens?.ratio ?: stops.lastOrNull { ui.zoom >= it - 0.01f }
     Segments(stops, selected, Modifier, { if (it == selected && ui.zoom != it) formatZoom(ui.zoom) else formatZoom(it) }, onZoom)
 }
 

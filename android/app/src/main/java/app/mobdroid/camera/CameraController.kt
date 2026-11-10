@@ -9,6 +9,7 @@ import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.camera2.params.OutputConfiguration
@@ -140,6 +141,10 @@ class CameraController(context: Context) {
     private var configureFailures = 0
     private var level = 0
     private var streaming = false
+    private var framesToLensCheck = 0
+
+    @Volatile
+    var onActiveLens: ((CameraDescriptor, String?) -> Unit)? = null
     private var streamingSince = 0L
     private var lastFrame = 0L
     private var lastOpenAttempt = 0L
@@ -176,6 +181,9 @@ class CameraController(context: Context) {
             if (session !== this@CameraController.session) return
             lastFrame = SystemClock.elapsedRealtime()
             if (!streaming) onFirstFrame()
+            if (framesToLensCheck > 0 && --framesToLensCheck == 0) {
+                request?.let { onActiveLens?.invoke(it.camera, result.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)) }
+            }
         }
     }
 
@@ -464,6 +472,7 @@ class CameraController(context: Context) {
 
     private fun onFirstFrame() {
         streaming = true
+        framesToLensCheck = 30
         streamingSince = lastFrame
         configureFailures = 0
         armWatchdog(STALL_MS)

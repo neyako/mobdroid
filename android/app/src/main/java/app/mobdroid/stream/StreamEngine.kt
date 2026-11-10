@@ -15,6 +15,7 @@ import app.mobdroid.camera.CameraController
 import app.mobdroid.camera.CameraDescriptor
 import app.mobdroid.camera.CameraState
 import app.mobdroid.camera.Facing
+import app.mobdroid.camera.LensCamera
 import app.mobdroid.camera.Stabilization
 import app.mobdroid.engine.abr.ADAPTIVE_BITRATE_UPDATE_INTERVAL_MS
 import app.mobdroid.engine.abr.AdaptiveBitrate
@@ -79,7 +80,7 @@ data class LiveStats(
 data class UiState(
     val cameras: List<CameraDescriptor> = emptyList(),
     val camera: CameraDescriptor? = null,
-    val lens: CameraDescriptor? = null,
+    val lens: LensCamera? = null,
     val cameraState: CameraState = CameraState.Closed,
     val zoom: Float = 1f,
     val torch: Boolean = false,
@@ -90,7 +91,7 @@ data class UiState(
     val battery: Int = 100,
     val temperature: Int = 0,
 ) {
-    val activeCamera: CameraDescriptor? get() = lens ?: camera
+    val activeCamera: CameraDescriptor? get() = lens?.camera ?: camera
 }
 
 class StreamEngine(private val context: Context, private val settings: SettingsStore) {
@@ -127,7 +128,13 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private var previewActive = false
 
     init {
-        scope.launch { camera.state.collect { s -> _ui.update { it.copy(cameraState = s) } } }
+        scope.launch {
+            camera.state.collect { s ->
+                _ui.update { it.copy(cameraState = s) }
+                if (s is CameraState.Error && !s.recoverable) dropFixedLenses()
+            }
+        }
+        camera.onActiveLens = ::onActiveLens
         scope.launch {
             settings.settings
                 .map { s -> listOf(s.selectedProfile.resolution, s.selectedProfile.fps, s.stabilization) }
@@ -223,11 +230,48 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 }
                 _ui.update { it.copy(cameras = cameras) }
                 if (next != null && next.key != current?.key) {
-                    _ui.update { it.copy(camera = next, lens = null, zoom = 1f, torch = false) }
+                    _ui.update { it.copy(camera = next, lens = defaultLens(next), zoom = 1f, torch = false) }
                     if (previewActive) openCamera()
                 }
             }
         }
+    }
+
+    private val unopenableLenses = HashSet<String>()
+
+    private fun lenses(main: CameraDescriptor): List<LensCamera> =
+        if (main.id in settings.settings.value.fixedLensCameras) main.lenses + main.fallbackLenses else main.lenses
+
+    private fun defaultLens(main: CameraDescriptor): LensCamera? =
+        lenses(main).firstOrNull { it.ratio == 1f && main.id in settings.settings.value.fixedLensCameras }
+
+    private fun onActiveLens(opened: CameraDescriptor, activeId: String?) {
+        scope.launch {
+            synchronized(this@StreamEngine) {
+                val state = _ui.value
+                val main = state.camera ?: return@launch
+                if (state.lens != null || opened.key != main.key || activeId == null) return@launch
+                if (main.id in unopenableLenses) return@launch
+                val expected = main.fallbackLenses.lastOrNull { it.ratio <= state.zoom + 0.01f } ?: return@launch
+                if (main.lenses.none { it.camera.id == activeId }) return@launch
+                Log.w(TAG, "Camera ${main.id} stays on lens $activeId, opening its lenses by their own ids")
+                settings.update { it.copy(fixedLensCameras = it.fixedLensCameras + main.id) }
+                _ui.update { it.copy(lens = expected, zoom = expected.ratio, torch = false) }
+                if (previewActive) openCamera()
+            }
+        }
+    }
+
+    @Synchronized
+    private fun dropFixedLenses() {
+        val state = _ui.value
+        val main = state.camera ?: return
+        if (state.lens == null || main.fallbackLenses.none { it.camera.key == state.lens.camera.key }) return
+        Log.w(TAG, "Lens camera ${state.lens.camera.id} cannot be opened, going back to camera ${main.id}")
+        unopenableLenses += main.id
+        settings.update { it.copy(fixedLensCameras = it.fixedLensCameras - main.id) }
+        _ui.update { it.copy(lens = null, zoom = 1f, torch = false) }
+        if (previewActive) openCamera()
     }
 
     private fun defaultCamera(cameras: List<CameraDescriptor>) =
@@ -246,7 +290,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 if (!previewActive) return@launch
                 val key = settings.settings.value.cameraKey
                 val selected = cameras.firstOrNull { it.key == key } ?: defaultCamera(cameras)
-                _ui.update { it.copy(cameras = cameras, camera = selected) }
+                _ui.update { it.copy(cameras = cameras, camera = selected, lens = selected?.let(::defaultLens)) }
                 ensureCompositor()
                 openCamera()
                 if (!isLive) startAudioMeter()
@@ -303,23 +347,19 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     @Synchronized
     fun selectCamera(descriptor: CameraDescriptor) {
         settings.update { it.copy(cameraKey = descriptor.key) }
-        _ui.update { it.copy(camera = descriptor, lens = null, zoom = 1f, torch = false) }
+        _ui.update { it.copy(camera = descriptor, lens = defaultLens(descriptor), zoom = 1f, torch = false) }
         if (previewActive) openCamera()
     }
 
     @Synchronized
     fun setZoom(ratio: Float, switchLens: Boolean = true) {
         val main = _ui.value.camera ?: return
-        val lens = if (switchLens) {
-            main.lenses.firstOrNull { it.ratio == ratio }
-        } else {
-            main.lenses.firstOrNull { it.camera.key == _ui.value.lens?.key }
-        }
+        val lens = if (switchLens) lenses(main).firstOrNull { it.ratio == ratio } else _ui.value.lens
         val descriptor = lens?.camera ?: main
         val base = lens?.ratio ?: 1f
         val zoom = (ratio / base).coerceIn(descriptor.zoomRatioRange.start, descriptor.zoomRatioRange.endInclusive)
         if (descriptor.key != _ui.value.activeCamera?.key) {
-            _ui.update { it.copy(lens = lens?.camera, torch = false) }
+            _ui.update { it.copy(lens = lens, torch = false) }
             if (previewActive) openCamera()
         }
         camera.setZoom(zoom)

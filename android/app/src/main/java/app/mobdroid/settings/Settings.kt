@@ -76,6 +76,7 @@ data class AppSettings(
     val mic: MicSource = MicSource.AUTO,
     val hiddenStatusItems: Set<StatusItem> = emptySet(),
     val hiddenQuickButtons: Set<QuickButtonId> = emptySet(),
+    val fixedLensCameras: Set<String> = emptySet(),
     val bitratePresetsKbps: List<Int> = listOf(1000, 2500, 4000, 6000, 8000, 10000, 15000, 20000),
 ) {
     val selectedProfile: StreamProfile

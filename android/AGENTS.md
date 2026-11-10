@@ -74,6 +74,14 @@ them, not code style.
   by its own camera id when that id can be probed, through a physical stream of the logical camera only
   otherwise. A physical stream crashes the vivo's Qualcomm camera provider
   (`ChiMcxStaticPolicy::ActivateAuxCameraStateAndMask`) at every fallback level.
+- The vivo's logical camera never leaves the ultra wide for a third party app: 1x and 2.5x are crops of
+  it, and `LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID` reports the ultra wide at every zoom ratio, with or
+  without stabilization. `CameraDescriptor.fallbackLenses` lists the lenses the zoom range reaches that
+  also have a camera id of their own. `CameraController` reports the active physical id once, 30 frames
+  after the stream starts; when it is a lens the zoom range cannot reach, `StreamEngine` adds the camera
+  to `AppSettings.fixedLensCameras` and from then on opens every stop by its own camera id (vivo: 0.4x
+  is camera 4, 1x camera 3, 2.5x the 85 mm camera 5). If such a lens camera cannot be opened, the camera
+  goes back to its logical id for the rest of the run.
 - `StreamEngine.setZoom` switches lens when the ratio is such a stop and reopens the camera;
   `UiState.lens` is the open lens and `UiState.zoom` the ratio relative to the main lens. Pinch zoom
   never switches lens.

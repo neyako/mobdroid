@@ -174,4 +174,5 @@ private fun CatalogEntry.toDescriptor(): CameraDescriptor = CameraDescriptor(
     realtimeTimestamps = camera.realtimeTimestamps,
     vendorFpsBySize = camera.vendorFps.mapKeys { Size(it.key.width, it.key.height) },
     lenses = lenses.map { LensCamera(it.ratio, it.entry.toDescriptor()) },
+    fallbackLenses = fallbackLenses.map { LensCamera(it.ratio, it.entry.toDescriptor()) },
 )

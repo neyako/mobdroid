@@ -24,6 +24,7 @@ data class CameraDescriptor(
     val realtimeTimestamps: Boolean = false,
     val vendorFpsBySize: Map<Size, Int> = emptyMap(),
     val lenses: List<LensCamera> = emptyList(),
+    val fallbackLenses: List<LensCamera> = emptyList(),
 ) {
     fun maxFps(size: Size): Int =
         maxOf(maxFpsBySize[size] ?: fpsRanges.maxOfOrNull { it.upper } ?: 30, vendorFpsBySize[size] ?: 0)
