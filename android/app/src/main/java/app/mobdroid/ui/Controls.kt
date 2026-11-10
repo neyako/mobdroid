@@ -37,6 +37,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BatteryAlert
 import androidx.compose.material.icons.rounded.ChatBubble
+import androidx.compose.material.icons.rounded.FiberManualRecord
+import androidx.compose.material.icons.rounded.PhotoCamera
+import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material.icons.rounded.FlashlightOff
 import androidx.compose.material.icons.rounded.FlashlightOn
 import androidx.compose.material.icons.rounded.Mic
@@ -99,6 +103,8 @@ import app.mobdroid.settings.QuickButtonId
 import app.mobdroid.settings.StatusItem
 import app.mobdroid.stream.LiveState
 import app.mobdroid.stream.LiveStats
+import app.mobdroid.stream.RecordingStats
+import app.mobdroid.stream.formatBytes
 import app.mobdroid.stream.StreamEngine
 import app.mobdroid.stream.UiState
 import app.mobdroid.stream.key
@@ -115,25 +121,53 @@ private val statusStyle = TextStyle(
 private val Warning = Color(0xFFFF9500)
 private val Pending = Color(0xFFFFCC00)
 
-class QuickButton(val label: String, val icon: ImageVector, val checked: Boolean, val onClick: () -> Unit)
+class QuickButton(
+    val label: String,
+    val icon: ImageVector,
+    val checked: Boolean,
+    val color: Color? = null,
+    val onClick: () -> Unit,
+)
 
 fun quickButtons(
     ui: UiState,
     hidden: Set<QuickButtonId>,
     chatOpen: Boolean,
+    recording: Boolean,
+    confirmRecordStop: Boolean,
     onChat: () -> Unit,
+    onRecord: () -> Unit,
+    onSnapshot: () -> Unit,
     onBitrate: () -> Unit,
     onStealth: () -> Unit,
     onMute: () -> Unit,
     onTorch: () -> Unit,
 ) = QuickButtonId.entries.filter { it !in hidden }.mapNotNull { id ->
     when (id) {
-        QuickButtonId.CHAT -> QuickButton(id.label, Icons.Rounded.ChatBubble, chatOpen, onChat)
-        QuickButtonId.BITRATE -> QuickButton(id.label, Icons.Rounded.Speed, false, onBitrate)
-        QuickButtonId.MIC -> QuickButton(id.label, if (ui.muted) Icons.Rounded.MicOff else Icons.Rounded.Mic, ui.muted, onMute)
-        QuickButtonId.STEALTH -> QuickButton(id.label, Icons.Rounded.VisibilityOff, false, onStealth)
+        QuickButtonId.CHAT -> QuickButton(id.label, Icons.Rounded.ChatBubble, chatOpen, onClick = onChat)
+        QuickButtonId.RECORD -> QuickButton(
+            if (confirmRecordStop) "Confirm" else if (recording) "Stop" else id.label,
+            if (recording) Icons.Rounded.Stop else Icons.Rounded.FiberManualRecord,
+            recording,
+            LiveRed,
+            onRecord,
+        )
+        QuickButtonId.SNAPSHOT -> QuickButton(id.label, Icons.Rounded.PhotoCamera, false, onClick = onSnapshot)
+        QuickButtonId.BITRATE -> QuickButton(id.label, Icons.Rounded.Speed, false, onClick = onBitrate)
+        QuickButtonId.MIC -> QuickButton(
+            id.label,
+            if (ui.muted) Icons.Rounded.MicOff else Icons.Rounded.Mic,
+            ui.muted,
+            onClick = onMute,
+        )
+        QuickButtonId.STEALTH -> QuickButton(id.label, Icons.Rounded.VisibilityOff, false, onClick = onStealth)
         QuickButtonId.TORCH -> if (ui.activeCamera?.hasFlash == true) {
-            QuickButton(id.label, if (ui.torch) Icons.Rounded.FlashlightOn else Icons.Rounded.FlashlightOff, ui.torch, onTorch)
+            QuickButton(
+                id.label,
+                if (ui.torch) Icons.Rounded.FlashlightOn else Icons.Rounded.FlashlightOff,
+                ui.torch,
+                onClick = onTorch,
+            )
         } else {
             null
         }
@@ -142,7 +176,7 @@ fun quickButtons(
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun BarButton(icon: ImageVector, label: String, checked: Boolean, size: Dp, onClick: () -> Unit) {
+private fun BarButton(icon: ImageVector, label: String, checked: Boolean, size: Dp, color: Color? = null, onClick: () -> Unit) {
     IconToggleButton(
         checked = checked,
         onCheckedChange = { onClick() },
@@ -150,8 +184,8 @@ private fun BarButton(icon: ImageVector, label: String, checked: Boolean, size: 
         colors = IconButtonDefaults.iconToggleButtonColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
             contentColor = Color.White,
-            checkedContainerColor = MaterialTheme.colorScheme.primary,
-            checkedContentColor = MaterialTheme.colorScheme.onPrimary,
+            checkedContainerColor = color ?: MaterialTheme.colorScheme.primary,
+            checkedContentColor = if (color != null) Color.White else MaterialTheme.colorScheme.onPrimary,
         ),
         modifier = Modifier.size(size),
     ) { Icon(icon, label) }
@@ -160,14 +194,14 @@ private fun BarButton(icon: ImageVector, label: String, checked: Boolean, size: 
 @Composable
 fun QuickButtonView(button: QuickButton, size: Dp = 44.dp) {
     Column(Modifier.width(size + 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        BarButton(button.icon, button.label, button.checked, size, button.onClick)
+        BarButton(button.icon, button.label, button.checked, size, button.color, button.onClick)
         Text(button.label, fontSize = 10.sp, lineHeight = 12.sp, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
     }
 }
 
 @Composable
 fun SettingsButton(open: Boolean, size: Dp = 40.dp, onChange: (Boolean) -> Unit) {
-    BarButton(Icons.Rounded.Settings, "Settings", open, size) { onChange(!open) }
+    BarButton(Icons.Rounded.Settings, "Settings", open, size, onClick = { onChange(!open) })
 }
 
 @Composable
@@ -283,6 +317,7 @@ fun Preview(engine: StreamEngine, ui: UiState, corner: Dp) {
 fun Status(
     ui: UiState,
     stats: LiveStats,
+    recording: RecordingStats?,
     audioLevel: StateFlow<Float>,
     hidden: Set<StatusItem>,
     onDismissError: () -> Unit,
@@ -319,11 +354,24 @@ fun Status(
             }
         }
     }
+    val recorded: @Composable () -> Unit = {
+        if (recording != null && StatusItem.RECORDING !in hidden) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.Videocam, "Recording", tint = LiveRed, modifier = Modifier.padding(end = 4.dp).size(14.dp))
+                Text(
+                    if (compact) formatUptime(recording.seconds) else "${formatUptime(recording.seconds)}  ${formatBytes(recording.bytes)}",
+                    style = statusStyle,
+                )
+            }
+        }
+    }
     val bitrate: @Composable () -> Unit = {
         if (live && StatusItem.BITRATE !in hidden) {
             Text(
                 formatBitrate(stats.bitrateBps),
                 style = statusStyle.copy(fontSize = if (compact) 13.sp else 20.sp, fontWeight = FontWeight.Bold),
+                maxLines = 1,
+                softWrap = false,
             )
         }
     }
@@ -353,10 +401,11 @@ fun Status(
                 uptime()
                 bitrate()
             }
-            if (error != null) {
-                errorText()
-            } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                recorded()
+                if (error != null) {
+                    errorText()
+                } else {
                     bonding()
                     meter()
                 }
@@ -365,6 +414,7 @@ fun Status(
     } else {
         Column(modifier, horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
             uptime()
+            recorded()
             bitrate()
             bonding()
             meter()

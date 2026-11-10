@@ -23,7 +23,7 @@ class StreamService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val stop = intent?.action == ACTION_STOP
         if (!stop || !foreground) {
-            enterForeground(intent?.getBooleanExtra(EXTRA_USB, false) == true)
+            enterForeground(intent?.getBooleanExtra(EXTRA_USB, false) == true, intent?.getStringExtra(EXTRA_TITLE) ?: "Live")
             foreground = true
         }
         if (stop) {
@@ -44,14 +44,14 @@ class StreamService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun enterForeground(usb: Boolean) {
+    private fun enterForeground(usb: Boolean, title: String) {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL, "Live stream", NotificationManager.IMPORTANCE_LOW),
         )
         val notification = Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_live)
-            .setContentTitle("Live")
+            .setContentTitle(title)
             .setOngoing(true)
             .setContentIntent(
                 PendingIntent.getActivity(
@@ -80,6 +80,7 @@ class StreamService : Service() {
 
     companion object {
         const val EXTRA_USB = "usb"
+        const val EXTRA_TITLE = "title"
         const val ACTION_STOP = "app.mobdroid.STOP"
         private const val CHANNEL = "live"
     }

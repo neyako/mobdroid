@@ -1,5 +1,6 @@
 package app.mobdroid.media.gl
 
+import android.graphics.Bitmap
 import android.graphics.SurfaceTexture
 import android.opengl.EGL14
 import android.opengl.EGLSurface
@@ -55,6 +56,8 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
     private var boottimeTimestamps = false
     private var previewSurface: EGLSurface? = null
     private var encoderSurface: EGLSurface? = null
+    private var recorderSurface: EGLSurface? = null
+    private var snapshot: ((Bitmap?) -> Unit)? = null
     private var frameIntervalNs = 1_000_000_000L / 30
     private var nextEncodeNs = 0L
     private var released = false
@@ -141,13 +144,27 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         nextEncodeNs = 0
     }
 
+    fun setRecorder(surface: Surface?) = runBlockingOnThread {
+        recorderSurface?.let { egl.makeNothingCurrent(); egl.releaseSurface(it) }
+        recorderSurface = surface?.let { egl.createWindowSurface(it) }
+        nextEncodeNs = 0
+    }
+
+    fun takeSnapshot(onResult: (Bitmap?) -> Unit) = handler.post {
+        if (released) onResult(null) else snapshot = onResult
+    }
+
     fun release() {
         runBlockingOnThread {
             released = true
+            snapshot?.invoke(null)
+            snapshot = null
             previewSurface?.let { egl.releaseSurface(it) }
             encoderSurface?.let { egl.releaseSurface(it) }
+            recorderSurface?.let { egl.releaseSurface(it) }
             previewSurface = null
             encoderSurface = null
+            recorderSurface = null
             surfaceTexture.setOnFrameAvailableListener(null)
             surfaceTexture.release()
             inputSurface.release()
@@ -189,13 +206,14 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
             Matrix.scaleM(scratch, 0, -1f, 1f, 1f)
             Matrix.multiplyMM(previewMatrix, 0, drawMatrix, 0, scratch, 0)
         }
-        encoderSurface?.let { surface ->
-            if (shouldEncode(ts) && egl.makeCurrent(surface)) {
-                GLES20.glViewport(0, 0, outputWidth, outputHeight)
-                draw(if (mirror && mirrorStream) previewMatrix else drawMatrix)
-                egl.setPresentationTime(surface, ts)
-                egl.swap(surface)
-            }
+        val streamMatrix = if (mirror && mirrorStream) previewMatrix else drawMatrix
+        if ((encoderSurface != null || recorderSurface != null) && shouldEncode(ts)) {
+            encoderSurface?.let { encode(it, streamMatrix, ts) }
+            recorderSurface?.let { encode(it, streamMatrix, ts) }
+        }
+        snapshot?.let {
+            snapshot = null
+            it(runCatching { capture(streamMatrix) }.getOrNull())
         }
         previewSurface?.let { surface ->
             if (egl.makeCurrent(surface)) {
@@ -203,6 +221,42 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
                 draw(if (mirror) previewMatrix else drawMatrix)
                 egl.swap(surface)
             }
+        }
+    }
+
+    private fun encode(surface: EGLSurface, matrix: FloatArray, ts: Long) {
+        if (!egl.makeCurrent(surface)) return
+        GLES20.glViewport(0, 0, outputWidth, outputHeight)
+        draw(matrix)
+        egl.setPresentationTime(surface, ts)
+        egl.swap(surface)
+    }
+
+    private fun capture(matrix: FloatArray): Bitmap {
+        egl.makeNothingCurrent()
+        val ids = IntArray(2)
+        GLES20.glGenTextures(1, ids, 0)
+        GLES20.glGenFramebuffers(1, ids, 1)
+        try {
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, ids[0])
+            GLES20.glTexImage2D(
+                GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, outputWidth, outputHeight, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null,
+            )
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, ids[1])
+            GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, ids[0], 0)
+            check(GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER) == GLES20.GL_FRAMEBUFFER_COMPLETE)
+            GLES20.glViewport(0, 0, outputWidth, outputHeight)
+            draw(matrix)
+            val pixels = ByteBuffer.allocateDirect(outputWidth * outputHeight * 4).order(ByteOrder.nativeOrder())
+            GLES20.glReadPixels(0, 0, outputWidth, outputHeight, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixels)
+            val upsideDown = Bitmap.createBitmap(outputWidth, outputHeight, Bitmap.Config.ARGB_8888)
+            upsideDown.copyPixelsFromBuffer(pixels)
+            val flip = android.graphics.Matrix().apply { preScale(1f, -1f) }
+            return Bitmap.createBitmap(upsideDown, 0, 0, outputWidth, outputHeight, flip, false).also { upsideDown.recycle() }
+        } finally {
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+            GLES20.glDeleteFramebuffers(1, ids, 1)
+            GLES20.glDeleteTextures(1, ids, 0)
         }
     }
 
