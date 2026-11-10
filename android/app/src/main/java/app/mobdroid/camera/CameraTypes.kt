@@ -23,6 +23,7 @@ data class CameraDescriptor(
     val maxFpsBySize: Map<Size, Int> = emptyMap(),
     val realtimeTimestamps: Boolean = false,
     val vendorFpsBySize: Map<Size, Int> = emptyMap(),
+    val lenses: List<LensCamera> = emptyList(),
 ) {
     fun maxFps(size: Size): Int =
         maxOf(maxFpsBySize[size] ?: fpsRanges.maxOfOrNull { it.upper } ?: 30, vendorFpsBySize[size] ?: 0)
@@ -30,6 +31,8 @@ data class CameraDescriptor(
     fun chooseSize(width: Int, height: Int, fps: Int): Size? =
         pickSize(sizes, { it.width }, { it.height }, ::maxFps, width, height, fps)
 }
+
+data class LensCamera(val ratio: Float, val camera: CameraDescriptor)
 
 sealed interface CameraState {
     data object Closed : CameraState

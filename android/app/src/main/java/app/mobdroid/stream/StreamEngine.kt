@@ -79,6 +79,7 @@ data class LiveStats(
 data class UiState(
     val cameras: List<CameraDescriptor> = emptyList(),
     val camera: CameraDescriptor? = null,
+    val lens: CameraDescriptor? = null,
     val cameraState: CameraState = CameraState.Closed,
     val zoom: Float = 1f,
     val torch: Boolean = false,
@@ -87,13 +88,15 @@ data class UiState(
     val error: String? = null,
     val thermal: Int = PowerManager.THERMAL_STATUS_NONE,
     val battery: Int = 100,
-)
+    val temperature: Int = 0,
+) {
+    val activeCamera: CameraDescriptor? get() = lens ?: camera
+}
 
 class StreamEngine(private val context: Context, private val settings: SettingsStore) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val powerManager = context.getSystemService(PowerManager::class.java)
-    private val batteryManager = context.getSystemService(BatteryManager::class.java)
     private val camera = CameraController(context)
     private val links = AndroidNetworkLinks(context)
     private val uvcDevices = UvcDevices(context)
@@ -156,6 +159,19 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             context,
             object : BroadcastReceiver() {
                 override fun onReceive(context: Context, intent: Intent) {
+                    val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, 100)
+                    val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
+                    val temperature = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) / 10
+                    _ui.update { it.copy(battery = level * 100 / scale, temperature = temperature) }
+                }
+            },
+            IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+        ContextCompat.registerReceiver(
+            context,
+            object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
                     val device = IntentCompat.getParcelableExtra(intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
                     onUsbChanged(
                         device?.takeIf { intent.action == UsbManager.ACTION_USB_DEVICE_ATTACHED }
@@ -207,7 +223,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 }
                 _ui.update { it.copy(cameras = cameras) }
                 if (next != null && next.key != current?.key) {
-                    _ui.update { it.copy(camera = next, zoom = 1f, torch = false) }
+                    _ui.update { it.copy(camera = next, lens = null, zoom = 1f, torch = false) }
                     if (previewActive) openCamera()
                 }
             }
@@ -287,15 +303,27 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     @Synchronized
     fun selectCamera(descriptor: CameraDescriptor) {
         settings.update { it.copy(cameraKey = descriptor.key) }
-        _ui.update { it.copy(camera = descriptor, zoom = 1f, torch = false) }
+        _ui.update { it.copy(camera = descriptor, lens = null, zoom = 1f, torch = false) }
         if (previewActive) openCamera()
     }
 
-    fun setZoom(ratio: Float) {
-        val range = _ui.value.camera?.zoomRatioRange ?: return
-        val clamped = ratio.coerceIn(range.start, range.endInclusive)
-        camera.setZoom(clamped)
-        _ui.update { it.copy(zoom = clamped) }
+    @Synchronized
+    fun setZoom(ratio: Float, switchLens: Boolean = true) {
+        val main = _ui.value.camera ?: return
+        val lens = if (switchLens) {
+            main.lenses.firstOrNull { it.ratio == ratio }
+        } else {
+            main.lenses.firstOrNull { it.camera.key == _ui.value.lens?.key }
+        }
+        val descriptor = lens?.camera ?: main
+        val base = lens?.ratio ?: 1f
+        val zoom = (ratio / base).coerceIn(descriptor.zoomRatioRange.start, descriptor.zoomRatioRange.endInclusive)
+        if (descriptor.key != _ui.value.activeCamera?.key) {
+            _ui.update { it.copy(lens = lens?.camera, torch = false) }
+            if (previewActive) openCamera()
+        }
+        camera.setZoom(zoom)
+        _ui.update { it.copy(zoom = base * zoom) }
     }
 
     fun setTorch(on: Boolean) {
@@ -517,7 +545,6 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             codec = liveCodec,
             links = shares,
         )
-        _ui.update { it.copy(battery = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)) }
     }
 
     @Volatile
@@ -583,7 +610,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     }
 
     private fun openCamera() {
-        val descriptor = _ui.value.camera ?: return
+        val descriptor = _ui.value.activeCamera ?: return
         val compositor = compositor ?: return
         closeSources()
         if (descriptor.id.startsWith(UVC_PREFIX)) {
@@ -679,7 +706,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     }
 
     private fun applyInputTransform() {
-        val descriptor = _ui.value.camera ?: return
+        val descriptor = _ui.value.activeCamera ?: return
         val size = currentInputSize
         compositor?.setInput(
             size.width,
@@ -693,7 +720,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     }
 
     private fun stabilization(): Stabilization {
-        val modes = _ui.value.camera?.stabilizationModes.orEmpty()
+        val modes = _ui.value.activeCamera?.stabilizationModes.orEmpty()
         val wanted = when (settings.settings.value.stabilization) {
             StabilizationSetting.OFF -> Stabilization.OFF
             StabilizationSetting.STANDARD -> Stabilization.VIDEO

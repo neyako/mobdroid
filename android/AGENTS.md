@@ -68,11 +68,15 @@ them, not code style.
   `SurfaceTexture.setDefaultBufferSize` before `open`; `open` resets zoom, torch, exposure and locks.
 - Catalog rules (`buildCatalog`): a hidden logical camera replaces a visible logical one of the same
   facing when it has all of its lenses and more zoom stops (the vivo X300 lists a two lens camera and
-  hides the three lens one). When a lens is wider than the zoom range reaches, the range's start is a
-  stop of its own (vivo: 0.65x is a crop of the ultra wide, the full lens is 0.4x). A lens the zoom
-  range cannot reach becomes its own entry: opened by its own camera id when that id can be probed,
-  through a physical stream of the logical camera only otherwise. A physical stream crashes the vivo's
-  Qualcomm camera provider (`ChiMcxStaticPolicy::ActivateAuxCameraStateAndMask`) at every fallback level.
+  hides the three lens one). A lens the zoom range cannot reach is a zoom stop of that camera
+  (`CameraDescriptor.lenses`), not an entry of its own: the vivo's zoom range starts at 0.65x, a crop of
+  the ultra wide, so its stops are 0.4x, 1x and 2.5x and 0.4x opens the ultra wide. Such a lens is opened
+  by its own camera id when that id can be probed, through a physical stream of the logical camera only
+  otherwise. A physical stream crashes the vivo's Qualcomm camera provider
+  (`ChiMcxStaticPolicy::ActivateAuxCameraStateAndMask`) at every fallback level.
+- `StreamEngine.setZoom` switches lens when the ratio is such a stop and reopens the camera;
+  `UiState.lens` is the open lens and `UiState.zoom` the ratio relative to the main lens. Pinch zoom
+  never switches lens.
 - A camera provider restart takes about 6 s, during which `getCameraCharacteristics` throws. That is a
   recoverable fault retried with backoff; an id `openCamera` rejects is not.
 - Samsung does not advertise 60 fps in the Camera2 AE ranges on most models. Its vendor table
@@ -109,20 +113,24 @@ them, not code style.
 
 ## UI
 
-- `ui/MainScreen.kt` lays the screen out the way Moblin does. Wide screens: the preview with rounded corners,
-  the status in its top right (uptime, bitrate, bonding share, audio meter, in that order), the zoom stops
-  and the camera row in its bottom right, and a 104 dp control bar on the right with the Moblin logo and the
-  settings button on top, the quick buttons under them and the Go Live button at the bottom. Near-square
+- `ui/MainScreen.kt` lays the screen out the way Moblin does. Wide screens: the preview with rounded corners
+  against the start edge, under a display cutout there (only the end side keeps its cutout inset), the
+  status in its top right (temperature and uptime, bitrate, bonding share, audio meter, in that order), the
+  zoom stops and the camera row in its bottom right, and a control bar that takes the width the preview
+  leaves (104 to 200 dp, with larger buttons from 150 dp) with the Moblin logo and the settings button on
+  top, the quick buttons under them and the Go Live button at the bottom. Near-square
   screens (the Flip cover, `maxWidth / maxHeight < 1.5`): status, logo and settings button in a top band,
   the preview with zoom stops left and cameras right, quick buttons and Go Live in a bottom band.
 - The preview `SurfaceView` has exactly the output aspect, so the corner mask drawn over it rounds the
   picture. Never animate its size: opening settings resizes it once and only the panel slides.
-- Settings (`SettingsPanel.kt`) sit between the preview and the control bar on wide screens and fill the
+- Settings (`SettingsPanel.kt`) sit between the preview and the control bar on wide screens (350 dp) and fill the
   screen on near-square ones. The pages follow Moblin's categories and drill down with a back stack. Rows
   are `SegmentedListItem`s built with `Group { row { ... } }` from `SettingsWidgets.kt`.
 - The microphone is open whenever the preview runs, so the audio meter works before going live: an
   `AudioEncoder` without a sink only reads and meters. It reports the peak level in dB about nine times a
   second to `StreamEngine.audioLevel`, which the meter reads in its draw phase only.
+- The status temperature is the battery temperature from `ACTION_BATTERY_CHANGED`, coloured by the thermal
+  status.
 - `LiveStats.links` is each SRTLA link's share of the bytes sent in the last second (`linkShares`).
 - `AppSettings` stores the status items and quick buttons the user hid, not the ones shown, so an item
   added later is shown by default.

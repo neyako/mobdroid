@@ -157,7 +157,7 @@ private fun stabilizationOf(chars: CameraCharacteristics): List<Stabilization> {
 private fun framesPerSecond(minFrameDurationNs: Long): Int =
     if (minFrameDurationNs <= 0L) 30 else (1e9 / minFrameDurationNs).roundToInt()
 
-private fun CatalogEntry.toDescriptor() = CameraDescriptor(
+private fun CatalogEntry.toDescriptor(): CameraDescriptor = CameraDescriptor(
     id = camera.id,
     physicalId = physicalId,
     facing = camera.facing,
@@ -173,4 +173,5 @@ private fun CatalogEntry.toDescriptor() = CameraDescriptor(
     maxFpsBySize = camera.maxFps.mapKeys { Size(it.key.width, it.key.height) },
     realtimeTimestamps = camera.realtimeTimestamps,
     vendorFpsBySize = camera.vendorFps.mapKeys { Size(it.key.width, it.key.height) },
+    lenses = lenses.map { LensCamera(it.ratio, it.entry.toDescriptor()) },
 )

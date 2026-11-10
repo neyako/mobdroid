@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CornerBasedShape
+import androidx.compose.foundation.shape.CornerSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChevronRight
@@ -20,23 +23,29 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.ListItemShapes
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.SegmentedListItem
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.ToggleButton
+import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.graphics.shapes.RoundedPolygon
 
@@ -185,8 +194,9 @@ fun <T> ChoiceRow(
                             values.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
                             else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
                         },
+                        colors = ToggleButtonDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
                         contentPadding = PaddingValues(horizontal = 4.dp),
-                        modifier = Modifier.weight(1f).height(36.dp),
+                        modifier = Modifier.weight(label(value).length + 2f).height(36.dp),
                     ) {
                         Text(label(value), maxLines = 1, style = MaterialTheme.typography.labelMedium)
                     }
@@ -237,8 +247,9 @@ fun TextRow(
     keyboard: KeyboardType = KeyboardType.Text,
     onChange: (String) -> Unit,
 ) {
-    SegmentedListItem(shapes = shapes, contentPadding = RowPadding, colors = rowColors()) {
-        OutlinedTextField(
+    val field = MaterialTheme.colorScheme.surfaceContainerHighest
+    SegmentedListItem(shapes = shapes, contentPadding = PaddingValues(FieldInset), colors = rowColors()) {
+        TextField(
             value,
             onChange,
             label = { Text(title) },
@@ -251,7 +262,28 @@ fun TextRow(
                 VisualTransformation.None
             },
             keyboardOptions = KeyboardOptions(keyboardType = keyboard),
+            shape = insetShape(shapes.shape, FieldInset),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = field,
+                unfocusedContainerColor = field,
+                disabledContainerColor = field,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                disabledIndicatorColor = Color.Transparent,
+            ),
             modifier = Modifier.fillMaxWidth(),
         )
     }
+}
+
+private val FieldInset = 8.dp
+
+@Composable
+private fun insetShape(shape: Shape, inset: Dp): Shape {
+    val outer = shape as? CornerBasedShape ?: return RoundedCornerShape(4.dp)
+    val density = LocalDensity.current
+    val inner = { corner: CornerSize ->
+        CornerSize(with(density) { maxOf(corner.toPx(Size.Zero, this).toDp() - inset, 4.dp) })
+    }
+    return RoundedCornerShape(inner(outer.topStart), inner(outer.topEnd), inner(outer.bottomEnd), inner(outer.bottomStart))
 }

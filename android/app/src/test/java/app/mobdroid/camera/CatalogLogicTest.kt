@@ -137,7 +137,7 @@ class CatalogLogicTest {
     }
 
     @Test
-    fun `lens the zoom range cannot reach becomes its own physical entry`() {
+    fun `lens the zoom range cannot reach is a stop that opens a physical stream`() {
         val cameras = listOf(
             camera(
                 "0",
@@ -146,10 +146,13 @@ class CatalogLogicTest {
                 physical = listOf(lens("5", 5f, 7.2f), lens("2", 1.7f, 4.48f, 2.2f)),
             ),
         )
-        val entries = buildCatalog(cameras)
-        assertEquals(listOf("0" to null, "0" to "2"), entries.map { it.camera.id to it.physicalId })
-        assertEquals(listOf("Wide", "Ultra wide"), entries.map { it.label })
-        assertEquals(1f..8f, entries.last().zoomRange)
+        val entry = buildCatalog(cameras).single()
+        assertEquals("Back", entry.label)
+        assertEquals(listOf(0.5f, 1f), entry.zoomStops)
+        val lens = entry.lenses.single()
+        assertEquals(0.5f, lens.ratio)
+        assertEquals("0" to "2", lens.entry.camera.id to lens.entry.physicalId)
+        assertEquals(1f..8f, lens.entry.zoomRange)
     }
 
     @Test
@@ -221,7 +224,8 @@ class CatalogLogicTest {
             ),
             camera("2", lens("2", 1.7f, 4.48f, 2.2f), visible = false),
         )
-        assertEquals(listOf("0" to null, "2" to null), buildCatalog(cameras).map { it.camera.id to it.physicalId })
+        val lens = buildCatalog(cameras).single().lenses.single().entry
+        assertEquals("2" to null, lens.camera.id to lens.physicalId)
     }
 
     @Test
@@ -240,7 +244,7 @@ class CatalogLogicTest {
     }
 
     @Test
-    fun `vivo with a 35 mm main lens lists the hidden three lens camera and the ultra wide`() {
+    fun `vivo with a 35 mm main lens lists the hidden three lens camera with the ultra wide as its widest stop`() {
         val main = lens("3", 11.56f, 11.424f, 1.85f)
         val ultraWide = lens("4", 4.03f, 9.994f, 2f)
         val telephoto = lens("5", 22.48f, 9.139f, 2.67f)
@@ -266,12 +270,11 @@ class CatalogLogicTest {
             camera("5", telephoto, visible = false),
         )
         val entries = buildCatalog(cameras)
-        assertEquals(
-            listOf("2" to "Back", "4" to "Ultra wide", "1" to "Front"),
-            entries.map { it.camera.id to it.label },
-        )
-        assertEquals(listOf(0.65f, 1f, 2.5f), entries.first().zoomStops)
-        assertEquals(listOf(null, null, null), entries.map { it.physicalId })
+        assertEquals(listOf("2" to "Back", "1" to "Front"), entries.map { it.camera.id to it.label })
+        assertEquals(listOf(0.4f, 1f, 2.5f), entries.first().zoomStops)
+        val ultraWideLens = entries.first().lenses.single()
+        assertEquals(0.4f, ultraWideLens.ratio)
+        assertEquals("4" to null, ultraWideLens.entry.camera.id to ultraWideLens.entry.physicalId)
     }
 
     @Test

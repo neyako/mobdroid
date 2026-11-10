@@ -128,7 +128,7 @@ fun quickButtons(
         QuickButtonId.BITRATE -> QuickButton(id.label, Icons.Rounded.Speed, false, onBitrate)
         QuickButtonId.MIC -> QuickButton(id.label, if (ui.muted) Icons.Rounded.MicOff else Icons.Rounded.Mic, ui.muted, onMute)
         QuickButtonId.STEALTH -> QuickButton(id.label, Icons.Rounded.VisibilityOff, false, onStealth)
-        QuickButtonId.TORCH -> if (ui.camera?.hasFlash == true) {
+        QuickButtonId.TORCH -> if (ui.activeCamera?.hasFlash == true) {
             QuickButton(id.label, if (ui.torch) Icons.Rounded.FlashlightOn else Icons.Rounded.FlashlightOff, ui.torch, onTorch)
         } else {
             null
@@ -154,21 +154,21 @@ private fun BarButton(icon: ImageVector, label: String, checked: Boolean, size: 
 }
 
 @Composable
-fun QuickButtonView(button: QuickButton) {
-    Column(Modifier.width(46.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        BarButton(button.icon, button.label, button.checked, 44.dp, button.onClick)
+fun QuickButtonView(button: QuickButton, size: Dp = 44.dp) {
+    Column(Modifier.width(size + 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        BarButton(button.icon, button.label, button.checked, size, button.onClick)
         Text(button.label, fontSize = 10.sp, lineHeight = 12.sp, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
     }
 }
 
 @Composable
-fun SettingsButton(open: Boolean, onChange: (Boolean) -> Unit) {
-    BarButton(Icons.Rounded.Settings, "Settings", open, 40.dp) { onChange(!open) }
+fun SettingsButton(open: Boolean, size: Dp = 40.dp, onChange: (Boolean) -> Unit) {
+    BarButton(Icons.Rounded.Settings, "Settings", open, size) { onChange(!open) }
 }
 
 @Composable
-fun MoblinLogo() {
-    Image(painterResource(R.drawable.moblin_logo), "Moblin", Modifier.size(40.dp))
+fun MoblinLogo(size: Dp = 40.dp) {
+    Image(painterResource(R.drawable.moblin_logo), "Moblin", Modifier.size(size))
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -258,7 +258,7 @@ fun Preview(engine: StreamEngine, ui: UiState, corner: Dp) {
             }
             .pointerInput(ui.camera) {
                 detectTransformGestures { _, _, zoom, _ ->
-                    if (zoom != 1f) engine.setZoom(engine.ui.value.zoom * zoom)
+                    if (zoom != 1f) engine.setZoom(engine.ui.value.zoom * zoom, switchLens = false)
                 }
             },
     )
@@ -287,11 +287,20 @@ fun Status(
 ) {
     val live = ui.live != LiveState.OFFLINE
     val uptime: @Composable () -> Unit = {
-        if (live && (StatusItem.UPTIME !in hidden || ui.live != LiveState.LIVE)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (ui.thermal >= PowerManager.THERMAL_STATUS_SEVERE) {
-                    Icon(Icons.Rounded.Thermostat, "Phone is hot", tint = Warning, modifier = Modifier.padding(end = 6.dp).size(14.dp))
+        val showUptime = live && (StatusItem.UPTIME !in hidden || ui.live != LiveState.LIVE)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (StatusItem.TEMPERATURE !in hidden) {
+                val color = when {
+                    ui.thermal >= PowerManager.THERMAL_STATUS_SEVERE -> Warning
+                    ui.thermal >= PowerManager.THERMAL_STATUS_MODERATE -> Pending
+                    else -> Color.White
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.Thermostat, "Temperature", tint = color, modifier = Modifier.size(14.dp))
+                    Text("${ui.temperature}°C", style = statusStyle.copy(color = color))
+                }
+            }
+            if (showUptime) Row(verticalAlignment = Alignment.CenterVertically) {
                 if (ui.battery <= 15) {
                     Icon(Icons.Rounded.BatteryAlert, "Battery low", tint = Warning, modifier = Modifier.padding(end = 6.dp).size(14.dp))
                 }

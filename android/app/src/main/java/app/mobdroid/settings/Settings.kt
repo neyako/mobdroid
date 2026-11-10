@@ -36,6 +36,7 @@ enum class MicSource(val label: String) { AUTO("Auto"), BUILT_IN("Phone"), USB("
 
 @Serializable
 enum class StatusItem(val label: String) {
+    TEMPERATURE("Temperature"),
     UPTIME("Uptime"),
     BITRATE("Bitrate"),
     BONDING("Bonding"),

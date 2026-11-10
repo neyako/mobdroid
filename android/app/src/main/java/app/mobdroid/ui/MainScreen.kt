@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -47,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.mobdroid.settings.SettingsStore
@@ -86,13 +89,22 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
         onMute = { engine.setMuted(!ui.muted) },
         onTorch = { engine.setTorch(!ui.torch) },
     )
+    val window = LocalWindowInfo.current.containerSize
+    val banded = window.width < window.height * 1.5f
     val motion = MaterialTheme.motionScheme
     val panel = remember { MutableTransitionState(false) }
     panel.targetState = showSettings
 
     Surface(color = Color.Black, contentColor = Color.White) {
-        BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-            val banded = maxWidth / maxHeight < 1.5f
+        BoxWithConstraints(
+            Modifier.fillMaxSize().windowInsetsPadding(
+                if (banded) {
+                    WindowInsets.safeDrawing
+                } else {
+                    WindowInsets.safeDrawing.only(WindowInsetsSides.Vertical + WindowInsetsSides.End)
+                },
+            ),
+        ) {
             if (banded) {
                 val previewHeight = minOf((maxWidth - 12.dp) / aspect, maxHeight - 140.dp)
                 Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -131,7 +143,9 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                     }
                 }
             } else {
-                val panelWidth = minOf(420.dp, (maxWidth - 104.dp) * 0.55f)
+                val barWidth = (maxWidth - (maxHeight - 12.dp) * aspect - 12.dp).coerceIn(104.dp, 200.dp)
+                val wideBar = barWidth >= 150.dp
+                val panelWidth = minOf(350.dp, (maxWidth - barWidth) * 0.5f)
                 Row(Modifier.fillMaxSize()) {
                     BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().padding(6.dp)) {
                         val width = minOf(maxWidth, maxHeight * aspect)
@@ -140,7 +154,6 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                         Column(
                             Modifier.fillMaxSize(),
                             verticalArrangement = Arrangement.Center,
-                            horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             Box(Modifier.size(width, height)) {
                                 Preview(engine, ui, 16.dp)
@@ -174,22 +187,27 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                         }
                     }
                     Column(
-                        Modifier.width(104.dp).fillMaxHeight().padding(vertical = 8.dp),
+                        Modifier.width(barWidth).fillMaxHeight().padding(vertical = 8.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            MoblinLogo()
-                            SettingsButton(showSettings) { showSettings = it }
+                        Row(horizontalArrangement = Arrangement.spacedBy(if (wideBar) 12.dp else 8.dp)) {
+                            MoblinLogo(if (wideBar) 52.dp else 40.dp)
+                            SettingsButton(showSettings, if (wideBar) 52.dp else 40.dp) { showSettings = it }
                         }
                         FlowRow(
                             Modifier.weight(1f).padding(top = 8.dp).verticalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+                            horizontalArrangement = Arrangement.spacedBy(if (wideBar) 8.dp else 4.dp, Alignment.CenterHorizontally),
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                             maxItemsInEachRow = 2,
                         ) {
-                            buttons.forEach { QuickButtonView(it) }
+                            buttons.forEach { QuickButtonView(it, if (wideBar) 52.dp else 44.dp) }
                         }
-                        LiveButton(ui.live, confirmStop, onLive, Modifier.padding(horizontal = 8.dp).fillMaxWidth().height(44.dp))
+                        LiveButton(
+                            ui.live,
+                            confirmStop,
+                            onLive,
+                            Modifier.padding(horizontal = 8.dp).fillMaxWidth().height(if (wideBar) 48.dp else 44.dp),
+                        )
                     }
                 }
             }

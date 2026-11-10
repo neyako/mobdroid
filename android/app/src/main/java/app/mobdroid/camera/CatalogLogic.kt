@@ -49,7 +49,10 @@ internal data class CatalogEntry(
     val label: String,
     val zoomRange: ClosedFloatingPointRange<Float>,
     val zoomStops: List<Float>,
+    val lenses: List<CatalogLens> = emptyList(),
 )
+
+internal data class CatalogLens(val ratio: Float, val entry: CatalogEntry)
 
 private const val MIN_BACK_AREA = 1920L * 1080
 private const val MIN_OTHER_AREA = 1280L * 720
@@ -136,11 +139,7 @@ private class Candidate(val camera: RawCamera) {
     val logical = ratios.isNotEmpty()
     val reachable = ratios.filter { isReachable(it.ratio, camera.zoomRange) }
     val keys = (reachable.map { it.lens } + camera.lens).map { lensKey(camera.facing, it) }
-    private val widerLens = ratios.any { it.ratio < camera.zoomRange.start * 0.9f }
-    val stops = reachable.map { niceStop(it.ratio, camera.zoomRange) }
-        .plus(listOfNotNull(camera.zoomRange.start.takeIf { widerLens }))
-        .distinct().sorted()
-        .takeIf { it.size >= 2 }.orEmpty()
+    val stops = reachable.map { niceStop(it.ratio, camera.zoomRange) }.distinct().sorted()
     val rank = when {
         camera.visible && logical -> 0
         camera.visible -> 1
@@ -158,8 +157,14 @@ private class Draft(
     val physicalId: String?,
     val lens: RawLens,
     val zoomRange: ClosedFloatingPointRange<Float>,
-    val zoomStops: List<Float>,
-)
+    private val ownStops: List<Float>,
+) {
+    val lenses = ArrayList<Pair<Float, Draft>>()
+    val zoomStops: List<Float>
+        get() = (ownStops + lenses.map { it.first }).distinct().sorted().takeIf { it.size >= 2 }.orEmpty()
+}
+
+private fun lensStop(ratio: Float): Float = if (ratio < 1f) (ratio * 10f).roundToInt() / 10f else niceRatio(ratio)
 
 internal fun buildCatalog(cameras: List<RawCamera>): List<CatalogEntry> {
     val physicalIds = cameras.filter { Capability.LOGICAL_MULTI_CAMERA in it.capabilities }
@@ -178,24 +183,25 @@ internal fun buildCatalog(cameras: List<RawCamera>): List<CatalogEntry> {
         )
     val covered = HashSet<String>()
     val drafts = ArrayList<Draft>()
-    val accepted = ArrayList<Candidate>()
+    val accepted = ArrayList<Pair<Candidate, Draft>>()
     for (listed in candidates) {
         if (listed.keys.all { it in covered }) continue
         val candidate = candidates.filter { it.extends(listed) }.maxByOrNull { it.stops.size } ?: listed
         covered += candidate.keys
-        accepted += candidate
-        drafts += Draft(candidate.camera, null, candidate.camera.lens, candidate.camera.zoomRange, candidate.stops)
+        val draft = Draft(candidate.camera, null, candidate.camera.lens, candidate.camera.zoomRange, candidate.stops)
+        accepted += candidate to draft
+        drafts += draft
     }
-    for (candidate in accepted) {
+    for ((candidate, draft) in accepted) {
         for (unreachable in candidate.ratios - candidate.reachable.toSet()) {
             if (!covered.add(lensKey(candidate.camera.facing, unreachable.lens))) continue
             val standalone = cameras.firstOrNull { it.id == unreachable.lens.id }
-            if (standalone != null) {
-                drafts += Draft(standalone, null, standalone.lens, standalone.zoomRange, emptyList())
-                continue
-            }
             val range = 1f..max(1f, candidate.camera.zoomRange.endInclusive)
-            drafts += Draft(candidate.camera, unreachable.lens.id, unreachable.lens, range, emptyList())
+            draft.lenses += lensStop(unreachable.ratio) to if (standalone != null) {
+                Draft(standalone, null, standalone.lens, standalone.zoomRange, emptyList())
+            } else {
+                Draft(candidate.camera, unreachable.lens.id, unreachable.lens, range, emptyList())
+            }
         }
     }
     return label(drafts.sortedBy { it.camera.facing.ordinal })
@@ -213,7 +219,16 @@ private fun label(drafts: List<Draft>): List<CatalogEntry> {
         val index = (seen[base] ?: 0) + 1
         seen[base] = index
         val label = if (total.getValue(base) > 1 && index > 1) "$base $index" else base
-        CatalogEntry(draft.camera, draft.physicalId, label, draft.zoomRange, draft.zoomStops)
+        CatalogEntry(
+            draft.camera,
+            draft.physicalId,
+            label,
+            draft.zoomRange,
+            draft.zoomStops,
+            draft.lenses.map { (ratio, lens) ->
+                CatalogLens(ratio, CatalogEntry(lens.camera, lens.physicalId, label, lens.zoomRange, emptyList()))
+            },
+        )
     }
 }
 
