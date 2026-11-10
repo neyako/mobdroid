@@ -98,5 +98,12 @@ internal class ByteWriter(initialCapacity: Int = 256) {
         array[at + 1] = value.toByte()
     }
 
+    fun setU32(at: Int, value: Int) {
+        array[at] = (value ushr 24).toByte()
+        array[at + 1] = (value ushr 16).toByte()
+        array[at + 2] = (value ushr 8).toByte()
+        array[at + 3] = value.toByte()
+    }
+
     fun toByteArray(): ByteArray = array.copyOf(size)
 }
