@@ -84,6 +84,13 @@ private fun nameColor(message: ChatMessage): Color {
     return if (color.luminance() < 0.3f) lerp(color, Color.White, 0.5f) else color
 }
 
+private val ChatPlatform.color: Color
+    get() = when (this) {
+        ChatPlatform.TWITCH -> Color(0xFFA970FF)
+        ChatPlatform.YOUTUBE -> Color(0xFFFF4E45)
+        ChatPlatform.KICK -> Color(0xFF53FC18)
+    }
+
 private val ChatPlatform.label: String
     get() = when (this) {
         ChatPlatform.TWITCH -> "Twitch"
@@ -92,11 +99,12 @@ private val ChatPlatform.label: String
     }
 
 @Composable
-fun ChatMessageText(line: ChatLine, sizeSp: Int, shadow: Boolean, modifier: Modifier = Modifier) {
+fun ChatMessageText(line: ChatLine, sizeSp: Int, shadow: Boolean, platformDot: Boolean, modifier: Modifier = Modifier) {
     val color = nameColor(line.message)
     val inline = remember(line.key) { HashMap<String, InlineTextContent>() }
-    val text = remember(line.key) {
+    val text = remember(line.key, platformDot) {
         buildAnnotatedString {
+            if (platformDot) withStyle(SpanStyle(color = line.message.platform.color)) { append("\u25CF ") }
             withStyle(SpanStyle(color = color, fontWeight = FontWeight.Bold)) { append(line.message.user) }
             append("  ")
             line.message.segments.forEachIndexed { index, segment ->
@@ -130,8 +138,9 @@ fun ChatMessageText(line: ChatLine, sizeSp: Int, shadow: Boolean, modifier: Modi
 @Composable
 fun ChatOverlay(engine: StreamEngine, sizeSp: Int, count: Int, modifier: Modifier) {
     val lines by engine.chat.lines.collectAsStateWithLifecycle()
+    val connected by engine.chat.connected.collectAsStateWithLifecycle()
     Column(modifier) {
-        lines.takeLast(count).forEach { ChatMessageText(it, sizeSp, shadow = true) }
+        lines.takeLast(count).forEach { ChatMessageText(it, sizeSp, shadow = true, platformDot = connected.size > 1) }
     }
 }
 
@@ -179,7 +188,9 @@ fun ChatPanel(engine: StreamEngine, settings: AppSettings, onClose: () -> Unit, 
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                items(lines.asReversed(), key = { it.key }) { ChatMessageText(it, settings.chatTextSize.sp, shadow = false) }
+                items(lines.asReversed(), key = { it.key }) {
+                    ChatMessageText(it, settings.chatTextSize.sp, shadow = false, platformDot = connected.size > 1)
+                }
             }
             if (canSend.isNotEmpty()) ChatInput(canSend) { platform, text, onResult -> engine.chat.send(platform, text, onResult) }
         }
