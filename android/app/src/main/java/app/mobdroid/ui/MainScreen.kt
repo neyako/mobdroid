@@ -199,7 +199,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                                 if (shownSide == Side.CHAT) {
                                     ChatPanel(engine, appSettings, onClose = { side = null })
                                 } else {
-                                    SettingsPanel(settings, ui.live != LiveState.OFFLINE, onClose = { side = null })
+                                    SettingsPanel(settings, engine, ui.live != LiveState.OFFLINE, onClose = { side = null })
                                 }
                             }
                         }
@@ -249,7 +249,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                             Status(ui, stats, engine.audioLevel, appSettings.hiddenStatusItems, engine::clearError, compact = true, Modifier)
                         }
                     } else {
-                        SettingsPanel(settings, ui.live != LiveState.OFFLINE, onClose = { side = null })
+                        SettingsPanel(settings, engine, ui.live != LiveState.OFFLINE, onClose = { side = null })
                     }
                 }
             }

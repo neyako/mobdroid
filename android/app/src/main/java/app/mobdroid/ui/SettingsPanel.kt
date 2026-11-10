@@ -84,6 +84,7 @@ import app.mobdroid.settings.StatusItem
 import app.mobdroid.settings.StreamProfile
 import app.mobdroid.settings.allowedCodecs
 import app.mobdroid.settings.fpsChoices
+import app.mobdroid.stream.StreamEngine
 import app.mobdroid.stream.outputSize
 import java.util.UUID
 
@@ -105,6 +106,8 @@ private sealed interface Route {
     data class StreamChat(val id: String) : Route
 
     data object Chat : Route
+
+    data object TwitchAccount : Route
 
     data object Display : Route
 
@@ -141,6 +144,7 @@ private fun title(route: Route, settings: AppSettings) = when (route) {
     is Route.StreamTransport -> settings.profile(route.id)?.let(::transportName).orEmpty()
     is Route.StreamChat -> "Chat"
     Route.Chat -> "Chat"
+    Route.TwitchAccount -> "Twitch account"
     Route.Display -> "Display"
     Route.StatusItems -> "Status"
     Route.QuickButtons -> "Quick buttons"
@@ -159,7 +163,7 @@ private fun videoSummary(profile: StreamProfile): String {
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun SettingsPanel(store: SettingsStore, live: Boolean, onClose: () -> Unit) {
+fun SettingsPanel(store: SettingsStore, engine: StreamEngine, live: Boolean, onClose: () -> Unit) {
     val settings by store.settings.collectAsStateWithLifecycle()
     val stack = remember { mutableStateListOf<Route>(Route.Home) }
     val push: (Route) -> Unit = { stack += it }
@@ -238,28 +242,8 @@ fun SettingsPanel(store: SettingsStore, live: Boolean, onClose: () -> Unit) {
                                 }
                             }
                         }
-                        Route.Chat -> Group {
-                            row { shapes ->
-                                ChoiceRow(shapes, "Text size", ChatTextSize.entries, settings.chatTextSize, { it.label }) { size ->
-                                    store.update { it.copy(chatTextSize = size) }
-                                }
-                            }
-                            row { shapes ->
-                                SwitchRow(shapes, "Show on the preview on small screens", settings.chatOnPreview) { on ->
-                                    store.update { it.copy(chatOnPreview = on) }
-                                }
-                            }
-                            row { shapes ->
-                                SwitchRow(shapes, "Text to speech", settings.chatSpeech) { on -> store.update { it.copy(chatSpeech = on) } }
-                            }
-                            if (settings.chatSpeech) {
-                                row { shapes ->
-                                    SwitchRow(shapes, "Say who wrote the message", settings.chatSpeechNames) { on ->
-                                        store.update { it.copy(chatSpeechNames = on) }
-                                    }
-                                }
-                            }
-                        }
+                        Route.TwitchAccount -> TwitchAccountPage(engine)
+                        Route.Chat -> ChatPage(store, settings, engine, push)
                         Route.Display -> Display(store, settings, push)
                         Route.StatusItems -> Group {
                             StatusItem.entries.forEach { item ->
@@ -295,6 +279,67 @@ fun SettingsPanel(store: SettingsStore, live: Boolean, onClose: () -> Unit) {
                         }
                         Route.ImportExport -> ImportExport(store, live)
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TwitchAccountPage(engine: StreamEngine) {
+    val logins by engine.logins.logins.collectAsStateWithLifecycle()
+    var loggingIn by remember { mutableStateOf(false) }
+    val account = logins.twitch
+    Group {
+        if (account != null) {
+            row { ValueRow(it, "Logged in as", account.login) }
+            row { shapes ->
+                ActionRow(shapes, "Log out", Icons.Rounded.Close, MaterialTheme.colorScheme.error) {
+                    engine.logins.update { it.copy(twitch = null) }
+                }
+            }
+        } else {
+            row { ActionRow(it, "Log in", Icons.Rounded.Add) { loggingIn = true } }
+        }
+    }
+    if (loggingIn) {
+        TwitchLoginDialog(
+            engine.http,
+            onAccount = { added ->
+                engine.logins.update { it.copy(twitch = added) }
+                loggingIn = false
+            },
+            onClose = { loggingIn = false },
+        )
+    }
+}
+
+@Composable
+private fun ChatPage(store: SettingsStore, settings: AppSettings, engine: StreamEngine, push: (Route) -> Unit) {
+    val logins by engine.logins.logins.collectAsStateWithLifecycle()
+    Group {
+        row { shapes ->
+            NavRow(shapes, "Twitch account", logins.twitch?.login ?: "Not logged in") { push(Route.TwitchAccount) }
+        }
+    }
+    Group {
+        row { shapes ->
+            ChoiceRow(shapes, "Text size", ChatTextSize.entries, settings.chatTextSize, { it.label }) { size ->
+                store.update { it.copy(chatTextSize = size) }
+            }
+        }
+        row { shapes ->
+            SwitchRow(shapes, "Show on the preview on small screens", settings.chatOnPreview) { on ->
+                store.update { it.copy(chatOnPreview = on) }
+            }
+        }
+        row { shapes ->
+            SwitchRow(shapes, "Text to speech", settings.chatSpeech) { on -> store.update { it.copy(chatSpeech = on) } }
+        }
+        if (settings.chatSpeech) {
+            row { shapes ->
+                SwitchRow(shapes, "Say who wrote the message", settings.chatSpeechNames) { on ->
+                    store.update { it.copy(chatSpeechNames = on) }
                 }
             }
         }

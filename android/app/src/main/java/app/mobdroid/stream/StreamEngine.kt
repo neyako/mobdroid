@@ -40,7 +40,9 @@ import app.mobdroid.media.AudioEncoder
 import app.mobdroid.media.CodecCatalog
 import app.mobdroid.media.VideoEncoder
 import app.mobdroid.media.gl.VideoCompositor
+import app.mobdroid.settings.LoginStore
 import app.mobdroid.settings.MicSource
+import java.io.File
 import app.mobdroid.settings.SettingsStore
 import app.mobdroid.settings.streamUrl
 import app.mobdroid.settings.StabilizationSetting
@@ -115,11 +117,12 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     val ui: StateFlow<UiState> = _ui.asStateFlow()
     private val _stats = MutableStateFlow(LiveStats())
     val stats: StateFlow<LiveStats> = _stats.asStateFlow()
-    private val http = OkHttpClient()
+    val http = OkHttpClient()
+    val logins = LoginStore(File(context.filesDir, "logins.json"))
     private val speech = ChatSpeech(context)
     val chat = ChatController(
         scope,
-        { listener -> createChatClients(settings.settings.value.selectedProfile, http, listener) },
+        { listener -> createChatClients(settings.settings.value.selectedProfile, logins.logins.value, http, listener) },
         { message ->
             val current = settings.settings.value
             if (current.chatSpeech) speech.say(message, current.chatSpeechNames)
@@ -185,6 +188,9 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 .distinctUntilChanged()
                 .drop(1)
                 .collect { synchronized(this@StreamEngine) { if (previewActive || isLive) chat.start() } }
+        }
+        scope.launch {
+            logins.logins.drop(1).collect { synchronized(this@StreamEngine) { if (previewActive || isLive) chat.start() } }
         }
         scope.launch {
             settings.settings.map { it.mic }.distinctUntilChanged().drop(1).collect {
