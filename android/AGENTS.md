@@ -107,6 +107,29 @@ them, not code style.
   go through `camera/` instead. `UvcCamera.start` blocks on USB negotiation, so `StreamEngine` calls it
   outside its lock. A USB attach selects the attached camera only, never another one already plugged in.
 
+## UI
+
+- `ui/MainScreen.kt` lays the screen out the way Moblin does. Wide screens: the preview with rounded corners,
+  the status in its top right (uptime, bitrate, bonding share, audio meter, in that order), the zoom stops
+  and the camera row in its bottom right, and a 104 dp control bar on the right with the Moblin logo and the
+  settings button on top, the quick buttons under them and the Go Live button at the bottom. Near-square
+  screens (the Flip cover, `maxWidth / maxHeight < 1.5`): status, logo and settings button in a top band,
+  the preview with zoom stops left and cameras right, quick buttons and Go Live in a bottom band.
+- The preview `SurfaceView` has exactly the output aspect, so the corner mask drawn over it rounds the
+  picture. Never animate its size: opening settings resizes it once and only the panel slides.
+- Settings (`SettingsPanel.kt`) sit between the preview and the control bar on wide screens and fill the
+  screen on near-square ones. The pages follow Moblin's categories and drill down with a back stack. Rows
+  are `SegmentedListItem`s built with `Group { row { ... } }` from `SettingsWidgets.kt`.
+- The microphone is open whenever the preview runs, so the audio meter works before going live: an
+  `AudioEncoder` without a sink only reads and meters. It reports the peak level in dB about nine times a
+  second to `StreamEngine.audioLevel`, which the meter reads in its draw phase only.
+- `LiveStats.links` is each SRTLA link's share of the bytes sent in the last second (`linkShares`).
+- `AppSettings` stores the status items and quick buttons the user hid, not the ones shown, so an item
+  added later is shown by default.
+- `streamUrl` adds the profile's SRT latency to an `srt`/`srtla` URL that does not name one.
+  `StreamProfile.bondingNetworks` limits which networks SRTLA requests.
+- `mirrorFrontCameraOnStream` makes the encoder draw the same mirrored picture as the preview.
+
 ## Commands
 
 Run from `android/`. `local.properties` (gitignored) needs `sdk.dir=$HOME/Android/Sdk`.

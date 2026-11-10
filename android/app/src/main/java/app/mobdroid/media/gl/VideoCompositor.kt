@@ -51,6 +51,7 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
     private var swapped = false
     private var displayRotation = 0
     private var mirror = false
+    private var mirrorStream = false
     private var boottimeTimestamps = false
     private var previewSurface: EGLSurface? = null
     private var encoderSurface: EGLSurface? = null
@@ -92,8 +93,10 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         sensorOrientation: Int,
         displayRotation: Int,
         mirror: Boolean,
+        mirrorStream: Boolean,
         boottimeTimestamps: Boolean,
     ) = runBlockingOnThread {
+        this.mirrorStream = mirrorStream
         this.boottimeTimestamps = boottimeTimestamps
         inputWidth = width
         inputHeight = height
@@ -180,10 +183,16 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         lastFrameNanos = SystemClock.elapsedRealtimeNanos()
         countFps()
         Matrix.multiplyMM(drawMatrix, 0, stMatrix, 0, sourceMatrix, 0)
+        if (mirror) {
+            Matrix.setIdentityM(scratch, 0)
+            Matrix.translateM(scratch, 0, 1f, 0f, 0f)
+            Matrix.scaleM(scratch, 0, -1f, 1f, 1f)
+            Matrix.multiplyMM(previewMatrix, 0, drawMatrix, 0, scratch, 0)
+        }
         encoderSurface?.let { surface ->
             if (shouldEncode(ts) && egl.makeCurrent(surface)) {
                 GLES20.glViewport(0, 0, outputWidth, outputHeight)
-                draw(drawMatrix)
+                draw(if (mirror && mirrorStream) previewMatrix else drawMatrix)
                 egl.setPresentationTime(surface, ts)
                 egl.swap(surface)
             }
@@ -191,15 +200,7 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         previewSurface?.let { surface ->
             if (egl.makeCurrent(surface)) {
                 fitViewport(egl.surfaceWidth(surface), egl.surfaceHeight(surface))
-                if (mirror) {
-                    Matrix.setIdentityM(scratch, 0)
-                    Matrix.translateM(scratch, 0, 1f, 0f, 0f)
-                    Matrix.scaleM(scratch, 0, -1f, 1f, 1f)
-                    Matrix.multiplyMM(previewMatrix, 0, drawMatrix, 0, scratch, 0)
-                    draw(previewMatrix)
-                } else {
-                    draw(drawMatrix)
-                }
+                draw(if (mirror) previewMatrix else drawMatrix)
                 egl.swap(surface)
             }
         }

@@ -3,6 +3,8 @@ package app.mobdroid.stream
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.os.BatteryManager
 import android.os.PowerManager
 import android.util.Log
@@ -26,11 +28,14 @@ import app.mobdroid.settings.allowedCodecs
 import app.mobdroid.engine.media.VideoCodec
 import app.mobdroid.engine.net.Publisher
 import app.mobdroid.engine.net.PublisherListener
+import app.mobdroid.media.AUDIO_LEVEL_FLOOR_DB
 import app.mobdroid.media.AudioEncoder
 import app.mobdroid.media.CodecCatalog
 import app.mobdroid.media.VideoEncoder
 import app.mobdroid.media.gl.VideoCompositor
+import app.mobdroid.settings.MicSource
 import app.mobdroid.settings.SettingsStore
+import app.mobdroid.settings.streamUrl
 import app.mobdroid.settings.StabilizationSetting
 import app.mobdroid.settings.StreamProfile
 import app.mobdroid.uvc.UvcCamera
@@ -68,8 +73,7 @@ data class LiveStats(
     val droppedFrames: Long = 0,
     val uptimeSeconds: Long = 0,
     val codec: VideoCodec? = null,
-    val links: Int = 0,
-    val audioLevel: Float = 0f,
+    val links: List<LinkShare> = emptyList(),
 )
 
 data class UiState(
@@ -101,6 +105,10 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     val ui: StateFlow<UiState> = _ui.asStateFlow()
     private val _stats = MutableStateFlow(LiveStats())
     val stats: StateFlow<LiveStats> = _stats.asStateFlow()
+    private val _audioLevel = MutableStateFlow(AUDIO_LEVEL_FLOOR_DB)
+    val audioLevel: StateFlow<Float> = _audioLevel.asStateFlow()
+    private val audioManager = context.getSystemService(AudioManager::class.java)
+    private var linkBytes = emptyMap<String, Long>()
 
     private var compositor: VideoCompositor? = null
     private var previewSurface: Surface? = null
@@ -130,6 +138,16 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                         openCamera()
                     }
                 }
+        }
+        scope.launch {
+            settings.settings.map { it.mirrorFrontCameraOnStream }.distinctUntilChanged().drop(1).collect {
+                synchronized(this@StreamEngine) { applyInputTransform() }
+            }
+        }
+        scope.launch {
+            settings.settings.map { it.mic }.distinctUntilChanged().drop(1).collect {
+                synchronized(this@StreamEngine) { if (!isLive && previewActive) startAudioMeter() }
+            }
         }
         powerManager.addThermalStatusListener(context.mainExecutor) { status ->
             _ui.update { it.copy(thermal = status) }
@@ -215,8 +233,28 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 _ui.update { it.copy(cameras = cameras, camera = selected) }
                 ensureCompositor()
                 openCamera()
+                if (!isLive) startAudioMeter()
             }
         }
+    }
+
+    private fun micDevice(): AudioDeviceInfo? {
+        val types = when (settings.settings.value.mic) {
+            MicSource.AUTO -> return null
+            MicSource.BUILT_IN -> listOf(AudioDeviceInfo.TYPE_BUILTIN_MIC)
+            MicSource.USB -> listOf(AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET)
+            MicSource.WIRED -> listOf(AudioDeviceInfo.TYPE_WIRED_HEADSET)
+        }
+        return audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull { it.type in types }
+    }
+
+    private fun startAudioMeter() {
+        audioEncoder?.release()
+        audioEncoder = null
+        if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
+        audioEncoder = runCatching {
+            AudioEncoder(0, null, micDevice(), { _audioLevel.value = it }) { Log.w(TAG, "Audio meter: $it") }
+        }.onFailure { Log.w(TAG, "Audio meter failed", it) }.getOrNull()?.also { it.muted = _ui.value.muted }
     }
 
     @Volatile
@@ -226,6 +264,8 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     fun stopPreviewIfIdle() {
         if (!previewActive || isLive) return
         previewActive = false
+        audioEncoder?.release()
+        audioEncoder = null
         closeSources()
         compositor?.release()
         compositor = null
@@ -302,12 +342,19 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             videoEncoder?.requestKeyFrame()
         }
         session = newSession
-        if (profile.url.startsWith("srtla://")) links.start()
+        if (profile.url.startsWith("srtla://")) links.start(profile.bondingNetworks)
+        linkBytes = emptyMap()
         try {
             startVideoEncoder()
-            audioEncoder = AudioEncoder(profile.audioBitrateKbps * 1000, newSession, ::onFatal).also {
-                it.muted = _ui.value.muted
-            }
+            audioEncoder?.release()
+            audioEncoder = null
+            audioEncoder = AudioEncoder(
+                profile.audioBitrateKbps * 1000,
+                newSession,
+                micDevice(),
+                { _audioLevel.value = it },
+                ::onFatal,
+            ).also { it.muted = _ui.value.muted }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start encoders", e)
             stopLive()
@@ -357,7 +404,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 context.stopService(service)
             }
         }
-        if (previewSurface == null) stopPreviewIfIdle()
+        if (previewSurface == null) stopPreviewIfIdle() else if (previewActive) startAudioMeter()
     }
 
     fun clearError() = _ui.update { it.copy(error = null) }
@@ -386,7 +433,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     }
 
     private fun createPublisher(profile: StreamProfile, listener: PublisherListener): Publisher {
-        val url = profile.url.trim()
+        val url = streamUrl(profile)
         return when {
             url.startsWith("rtmp://") || url.startsWith("rtmps://") -> RtmpPublisher(url, profile.streamKey.trim(), listener)
             url.startsWith("srtla://") -> SrtPublisher(url, listener, links)
@@ -456,6 +503,9 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         } else {
             transportMeter.pause()
         }
+        val linkStats = (session.publisher as? SrtPublisher)?.linkStats().orEmpty()
+        val shares = linkShares(linkBytes, linkStats)
+        linkBytes = linkStats.associate { it.id to it.bytesSent }
         _stats.value = LiveStats(
             bitrateBps = stats.sendBitrateBps,
             targetBitrateBps = targetBitrate,
@@ -465,8 +515,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             droppedFrames = stats.droppedVideoFrames,
             uptimeSeconds = (System.nanoTime() - liveStartedAt) / 1_000_000_000L,
             codec = liveCodec,
-            links = (session.publisher as? SrtPublisher)?.linkStats()?.count { it.bytesSent > 0 } ?: 0,
-            audioLevel = audioEncoder?.level ?: 0f,
+            links = shares,
         )
         _ui.update { it.copy(battery = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)) }
     }
@@ -638,6 +687,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             descriptor.sensorOrientation,
             if (descriptor.facing == Facing.EXTERNAL) 0 else displayRotation,
             descriptor.facing == Facing.FRONT,
+            settings.settings.value.mirrorFrontCameraOnStream,
             boottimeTimestamps = uvcCamera == null && descriptor.realtimeTimestamps,
         )
     }

@@ -35,9 +35,10 @@ class AndroidNetworkLinks(context: Context) : NetworkLinkProvider {
         }
     }
 
-    fun start() {
+    fun start(types: Set<LinkType>) {
         if (callbacks.isNotEmpty()) return
         for ((transport, type) in TRANSPORTS) {
+            if (type !in types) continue
             val callback = object : ConnectivityManager.NetworkCallback() {
                 override fun onLinkPropertiesChanged(network: Network, properties: LinkProperties) {
                     val name = properties.interfaceName ?: type.name.lowercase()

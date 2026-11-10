@@ -32,6 +32,10 @@ class SettingsStore(private val file: File, scope: CoroutineScope) {
         s.copy(profiles = s.profiles.map { if (it.id == profile.id) profile else it })
     }
 
+    fun exportJson(): String = json.encodeToString(AppSettings.serializer(), _settings.value)
+
+    fun importJson(text: String): Boolean = runCatching { _settings.value = decode(text) }.isSuccess
+
     private fun load(): AppSettings = runCatching {
         decode(file.readText())
     }.getOrDefault(AppSettings())

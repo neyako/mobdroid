@@ -1,6 +1,7 @@
 package app.mobdroid.settings
 
 import app.mobdroid.engine.media.VideoCodec
+import app.mobdroid.engine.net.LinkType
 import java.util.UUID
 import kotlinx.serialization.Serializable
 
@@ -31,6 +32,20 @@ enum class Resolution(val label: String, val width: Int, val height: Int) {
 enum class StabilizationSetting { OFF, STANDARD, PREVIEW }
 
 @Serializable
+enum class MicSource(val label: String) { AUTO("Auto"), BUILT_IN("Phone"), USB("USB"), WIRED("Headset") }
+
+@Serializable
+enum class StatusItem(val label: String) {
+    UPTIME("Uptime"),
+    BITRATE("Bitrate"),
+    BONDING("Bonding"),
+    AUDIO_LEVEL("Audio level"),
+}
+
+@Serializable
+enum class QuickButtonId(val label: String) { BITRATE("Bitrate"), MIC("Mic"), STEALTH("Stealth"), TORCH("Torch") }
+
+@Serializable
 data class StreamProfile(
     val id: String = UUID.randomUUID().toString(),
     val name: String = "Stream",
@@ -45,6 +60,8 @@ data class StreamProfile(
     val minBitrateKbps: Int = 500,
     val audioBitrateKbps: Int = 128,
     val keyFrameIntervalSeconds: Int = 2,
+    val srtLatencyMs: Int = 3000,
+    val bondingNetworks: Set<LinkType> = BONDING_NETWORKS,
 )
 
 @Serializable
@@ -54,6 +71,11 @@ data class AppSettings(
     val cameraKey: String? = null,
     val stabilization: StabilizationSetting = StabilizationSetting.STANDARD,
     val keepScreenOn: Boolean = true,
+    val mirrorFrontCameraOnStream: Boolean = false,
+    val mic: MicSource = MicSource.AUTO,
+    val hiddenStatusItems: Set<StatusItem> = emptySet(),
+    val hiddenQuickButtons: Set<QuickButtonId> = emptySet(),
+    val bitratePresetsKbps: List<Int> = listOf(1000, 2500, 4000, 6000, 8000, 10000, 15000, 20000),
 ) {
     val selectedProfile: StreamProfile
         get() = profiles.firstOrNull { it.id == selectedProfileId } ?: profiles.first()
@@ -62,6 +84,14 @@ data class AppSettings(
 fun isValidBitrateKbps(kbps: Int) = kbps in 50..50_000
 
 val fpsChoices = listOf(25, 30, 50, 60)
+
+val BONDING_NETWORKS = setOf(LinkType.WIFI, LinkType.CELLULAR, LinkType.ETHERNET)
+
+fun streamUrl(profile: StreamProfile): String {
+    val url = profile.url.trim()
+    if (!url.startsWith("srt") || Regex("[?&]latency=").containsMatchIn(url)) return url
+    return url + (if ('?' in url) "&" else "?") + "latency=${profile.srtLatencyMs}"
+}
 
 val StreamProfile.allowedCodecs: List<VideoCodec>
     get() = if (url.startsWith("srt")) platform.codecs - VideoCodec.AV1 else platform.codecs

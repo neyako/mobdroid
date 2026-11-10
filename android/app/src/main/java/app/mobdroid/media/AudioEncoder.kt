@@ -1,6 +1,7 @@
 package app.mobdroid.media
 
 import android.annotation.SuppressLint
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat as AndroidAudioFormat
 import android.media.AudioRecord
 import android.media.AudioTimestamp
@@ -17,7 +18,9 @@ import java.util.Arrays
 
 class AudioEncoder(
     bitrateBps: Int,
-    private val sink: MediaSink,
+    private val sink: MediaSink?,
+    device: AudioDeviceInfo?,
+    private val onLevel: (Float) -> Unit,
     private val onError: (String) -> Unit,
 ) {
     private val sampleRate = 48_000
@@ -30,11 +33,7 @@ class AudioEncoder(
     @Volatile
     private var running = true
 
-    @Volatile
-    var level = 0f
-        private set
-
-    private val codec: MediaCodec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC).also { codec ->
+    private val codec: MediaCodec? = if (sink == null) null else MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC).also { codec ->
         try {
             codec.configure(
                 MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, sampleRate, channels).apply {
@@ -55,7 +54,7 @@ class AudioEncoder(
     private val record = try {
         createRecord()
     } catch (e: Exception) {
-        codec.release()
+        codec?.release()
         throw e
     }
 
@@ -86,12 +85,13 @@ class AudioEncoder(
     init {
         try {
             check(record.state == AudioRecord.STATE_INITIALIZED) { "Microphone unavailable" }
-            codec.start()
+            if (device != null) record.setPreferredDevice(device)
+            codec?.start()
             record.startRecording()
             thread.start()
         } catch (e: Exception) {
             record.release()
-            codec.release()
+            codec?.release()
             throw e
         }
     }
@@ -110,6 +110,8 @@ class AudioEncoder(
         var anchorFrames = 0L
         var anchorNanos = System.nanoTime()
         var lastAnchorUpdate = 0L
+        var chunkPeak = 0f
+        var shownDb = AUDIO_LEVEL_FLOOR_DB
         try {
             while (running) {
                 var filled = 0
@@ -131,7 +133,13 @@ class AudioEncoder(
                 }
                 val ptsUs = (anchorNanos + (framesRead - anchorFrames) * 1_000_000_000L / sampleRate) / 1000
                 framesRead += 1024
-                if (muted) Arrays.fill(pcm, 0) else level = peak(pcm)
+                if (muted) Arrays.fill(pcm, 0) else chunkPeak = maxOf(chunkPeak, peak(pcm))
+                if (framesRead % (1024 * 5) == 0L) {
+                    shownDb = maxOf(decibels(chunkPeak), shownDb - 6f)
+                    chunkPeak = 0f
+                    onLevel(shownDb)
+                }
+                if (codec == null) continue
                 val inIndex = codec.dequeueInputBuffer(20_000)
                 if (inIndex >= 0) {
                     codec.getInputBuffer(inIndex)!!.apply {
@@ -140,7 +148,7 @@ class AudioEncoder(
                     }
                     codec.queueInputBuffer(inIndex, 0, frameBytes, ptsUs, 0)
                 }
-                drain(info)
+                drain(codec, info)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Audio failed", e)
@@ -148,12 +156,13 @@ class AudioEncoder(
         } finally {
             runCatching { record.stop() }
             record.release()
-            runCatching { codec.stop() }
-            codec.release()
+            runCatching { codec?.stop() }
+            codec?.release()
+            onLevel(AUDIO_LEVEL_FLOOR_DB)
         }
     }
 
-    private fun drain(info: MediaCodec.BufferInfo) {
+    private fun drain(codec: MediaCodec, info: MediaCodec.BufferInfo) {
         while (true) {
             val index = codec.dequeueOutputBuffer(info, 0)
             if (index < 0) return
@@ -163,9 +172,9 @@ class AudioEncoder(
                 buffer.position(info.offset)
                 buffer.get(data, 0, info.size)
                 if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
-                    sink.setAudioFormat(AudioFormat(sampleRate, channels, data))
+                    sink!!.setAudioFormat(AudioFormat(sampleRate, channels, data))
                 } else {
-                    sink.writeAudio(EncodedFrame(data, info.presentationTimeUs, true))
+                    sink!!.writeAudio(EncodedFrame(data, info.presentationTimeUs, true))
                 }
             }
             codec.releaseOutputBuffer(index, false)
@@ -188,3 +197,9 @@ class AudioEncoder(
         const val TAG = "AudioEncoder"
     }
 }
+
+const val AUDIO_LEVEL_FLOOR_DB = -60f
+
+fun decibels(peak: Float): Float =
+    if (peak <= 0.001f) AUDIO_LEVEL_FLOOR_DB else (20f * kotlin.math.log10(peak)).coerceIn(AUDIO_LEVEL_FLOOR_DB, 0f)
+

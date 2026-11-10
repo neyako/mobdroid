@@ -31,4 +31,27 @@ class SettingsStoreTest {
     fun `an empty profile list gets the default profile`() {
         assertEquals(1, store.decode("""{"profiles":[]}""").profiles.size)
     }
+
+    @Test
+    fun `srt url takes the profile latency unless it names one`() {
+        assertEquals("srt://x:1?latency=2000", streamUrl(StreamProfile(url = "srt://x:1", srtLatencyMs = 2000)))
+        assertEquals(
+            "srtla://x:1?streamid=a&latency=2000",
+            streamUrl(StreamProfile(url = "srtla://x:1?streamid=a", srtLatencyMs = 2000)),
+        )
+        assertEquals("srt://x:1?latency=500", streamUrl(StreamProfile(url = "srt://x:1?latency=500", srtLatencyMs = 2000)))
+        assertEquals("rtmp://x/app", streamUrl(StreamProfile(url = " rtmp://x/app ", srtLatencyMs = 2000)))
+    }
+
+    @Test
+    fun `an export imports back and a broken file is refused`() {
+        store.update { it.copy(keepScreenOn = false, hiddenStatusItems = setOf(StatusItem.BONDING)) }
+        val exported = store.exportJson()
+        store.update { AppSettings() }
+        assertEquals(false, store.importJson("not json"))
+        assertEquals(AppSettings().keepScreenOn, store.settings.value.keepScreenOn)
+        assertEquals(true, store.importJson(exported))
+        assertEquals(false, store.settings.value.keepScreenOn)
+        assertEquals(setOf(StatusItem.BONDING), store.settings.value.hiddenStatusItems)
+    }
 }
