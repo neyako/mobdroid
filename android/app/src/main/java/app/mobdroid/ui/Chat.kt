@@ -43,8 +43,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
@@ -60,29 +58,12 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.mobdroid.chat.ChatLine
-import app.mobdroid.engine.chat.ChatMessage
+import app.mobdroid.chat.chatNameColor
 import app.mobdroid.engine.chat.ChatPlatform
 import app.mobdroid.engine.chat.ChatSegment
 import app.mobdroid.settings.AppSettings
 import app.mobdroid.stream.StreamEngine
 import coil3.compose.AsyncImage
-import kotlin.math.absoluteValue
-
-private val NameColors = listOf(
-    Color(0xFFFF8A65),
-    Color(0xFFB39DFF),
-    Color(0xFF7FD4FF),
-    Color(0xFFC7F08A),
-    Color(0xFFFFD166),
-    Color(0xFFFF9ECF),
-    Color(0xFF8EF0D0),
-)
-
-private fun nameColor(message: ChatMessage): Color {
-    val color = message.userColor?.let { Color(0xFF000000 or it.toLong()) }
-        ?: return NameColors[message.user.hashCode().absoluteValue % NameColors.size]
-    return if (color.luminance() < 0.3f) lerp(color, Color.White, 0.5f) else color
-}
 
 private val ChatPlatform.color: Color
     get() = when (this) {
@@ -100,7 +81,7 @@ private val ChatPlatform.label: String
 
 @Composable
 fun ChatMessageText(line: ChatLine, sizeSp: Int, shadow: Boolean, platformDot: Boolean, modifier: Modifier = Modifier) {
-    val color = nameColor(line.message)
+    val color = Color(chatNameColor(line.message))
     val inline = remember(line.key) { HashMap<String, InlineTextContent>() }
     val text = remember(line.key, platformDot) {
         buildAnnotatedString {

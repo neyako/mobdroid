@@ -41,7 +41,10 @@ import app.mobdroid.media.AUDIO_LEVEL_FLOOR_DB
 import app.mobdroid.media.AudioEncoder
 import app.mobdroid.media.CodecCatalog
 import app.mobdroid.media.VideoEncoder
+import app.mobdroid.media.gl.Overlay
 import app.mobdroid.media.gl.VideoCompositor
+import app.mobdroid.scenes.defaultScenes
+import app.mobdroid.widgets.WidgetRenderer
 import app.mobdroid.settings.LoginStore
 import app.mobdroid.settings.MicSource
 import app.mobdroid.settings.RECORDING_CODECS
@@ -156,6 +159,8 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private var linkBytes = emptyMap<String, Long>()
 
     private var compositor: VideoCompositor? = null
+    private var overlays = emptyList<Overlay>()
+    private var widgetRenderer: WidgetRenderer? = null
     private var previewSurface: Surface? = null
     private var displayRotation = 0
     private var videoEncoder: VideoEncoder? = null
@@ -197,6 +202,22 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                         openCamera()
                     }
                 }
+        }
+        scope.launch {
+            settings.settings.map { it.scenes.isEmpty() }.distinctUntilChanged().drop(1).collect { empty ->
+                if (empty) ensureScenes(_ui.value.cameras)
+            }
+        }
+        scope.launch {
+            settings.settings.map { it.selectedScene?.cameraKey }.distinctUntilChanged().drop(1).collect {
+                synchronized(this@StreamEngine) {
+                    val next = sceneCamera(_ui.value.cameras) ?: return@collect
+                    if (next.key != _ui.value.camera?.key) {
+                        _ui.update { it.copy(camera = next, lens = defaultLens(next), zoom = 1f, torch = false) }
+                        if (previewActive) openCamera()
+                    }
+                }
+            }
         }
         scope.launch {
             settings.settings.map { it.mirrorFrontCameraOnStream }.distinctUntilChanged().drop(1).collect {
@@ -303,12 +324,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             val cameras = listCameras()
             synchronized(this@StreamEngine) {
                 val current = _ui.value.camera
-                val attached = cameras.firstOrNull { it.id == attachedId }
-                val next = when {
-                    attached != null -> attached
-                    current != null && cameras.none { it.key == current.key } -> defaultCamera(cameras)
-                    else -> current
-                }
+                val next = cameras.firstOrNull { it.id == attachedId } ?: sceneCamera(cameras)
                 _ui.update { it.copy(cameras = cameras) }
                 if (next != null && next.key != current?.key) {
                     _ui.update { it.copy(camera = next, lens = defaultLens(next), zoom = 1f, torch = false) }
@@ -381,6 +397,24 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private fun defaultCamera(cameras: List<CameraDescriptor>) =
         cameras.firstOrNull { it.facing == Facing.BACK } ?: cameras.firstOrNull()
 
+    private fun sceneCamera(cameras: List<CameraDescriptor>): CameraDescriptor? {
+        val key = settings.settings.value.selectedScene?.cameraKey
+        return cameras.firstOrNull { it.facing == Facing.EXTERNAL }
+            ?: cameras.firstOrNull { it.key == key }
+            ?: defaultCamera(cameras)
+    }
+
+    fun selectScene(id: String) = settings.update { it.copy(selectedSceneId = id) }
+
+    private fun ensureScenes(cameras: List<CameraDescriptor>) = settings.update { current ->
+        if (current.scenes.isNotEmpty()) return@update current
+        val scenes = defaultScenes(cameras.filter { it.facing != Facing.EXTERNAL }.map { it.key to it.label })
+        current.copy(
+            scenes = scenes,
+            selectedSceneId = (scenes.firstOrNull { it.cameraKey == current.cameraKey } ?: scenes.firstOrNull())?.id,
+        )
+    }
+
     val isLive: Boolean get() = session != null
 
     private val busy: Boolean get() = session != null || activeRecording != null
@@ -394,8 +428,8 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             val cameras = listCameras()
             synchronized(this@StreamEngine) {
                 if (!previewActive) return@launch
-                val key = settings.settings.value.cameraKey
-                val selected = cameras.firstOrNull { it.key == key } ?: defaultCamera(cameras)
+                ensureScenes(cameras)
+                val selected = sceneCamera(cameras)
                 _ui.update { it.copy(cameras = cameras, camera = selected, lens = selected?.let(::defaultLens)) }
                 ensureCompositor()
                 openCamera()
@@ -452,13 +486,6 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         if (degrees == displayRotation) return
         displayRotation = degrees
         applyInputTransform()
-    }
-
-    @Synchronized
-    fun selectCamera(descriptor: CameraDescriptor) {
-        settings.update { it.copy(cameraKey = descriptor.key) }
-        _ui.update { it.copy(camera = descriptor, lens = defaultLens(descriptor), zoom = 1f, torch = false) }
-        if (previewActive) openCamera()
     }
 
     @Synchronized
@@ -953,6 +980,15 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         compositor = VideoCompositor(w, h).also {
             it.setFrameRate(profile.fps)
             it.setPreview(if (previewEnabled) previewSurface else null)
+            it.setOverlays(overlays)
+        }
+        if (widgetRenderer == null) {
+            widgetRenderer = WidgetRenderer(File(context.filesDir, "widgets"), scope, settings.settings, chat.lines) { next ->
+                synchronized(this) {
+                    overlays = next
+                    compositor?.setOverlays(next)
+                }
+            }
         }
     }
 

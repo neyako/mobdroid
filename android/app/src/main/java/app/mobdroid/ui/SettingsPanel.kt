@@ -16,7 +16,19 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Videocam
+import androidx.activity.result.PickVisualMediaRequest
+import app.mobdroid.camera.Facing
+import app.mobdroid.scenes.placement
+import app.mobdroid.scenes.withPlacement
+import app.mobdroid.scenes.withoutWidget
+import app.mobdroid.settings.Corner
+import app.mobdroid.settings.Scene
+import app.mobdroid.settings.SceneWidget
+import app.mobdroid.settings.Widget
+import app.mobdroid.settings.WidgetType
+import java.io.File
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
@@ -28,6 +40,7 @@ import app.mobdroid.recording.Recording
 import app.mobdroid.settings.RECORDING_CODECS
 import app.mobdroid.settings.RecordingSettings
 import app.mobdroid.stream.formatBytes
+import app.mobdroid.stream.key
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -141,6 +154,14 @@ internal sealed interface Route {
 
     data object Recordings : Route
 
+    data object Scenes : Route
+
+    data class ScenePage(val id: String) : Route
+
+    data class Placement(val sceneId: String, val widgetId: String) : Route
+
+    data class WidgetPage(val id: String) : Route
+
     data object Chat : Route
 
     data object TwitchAccount : Route
@@ -183,6 +204,13 @@ private fun title(route: Route, settings: AppSettings) = when (route) {
     is Route.StreamChat -> "Chat"
     is Route.StreamRecording -> "Recording"
     Route.Recordings -> "Recordings"
+    Route.Scenes -> "Scenes"
+    is Route.ScenePage -> settings.scenes.firstOrNull { it.id == route.id }?.name.orEmpty()
+    is Route.Placement -> listOfNotNull(
+        settings.widgets.firstOrNull { it.id == route.widgetId }?.name,
+        settings.scenes.firstOrNull { it.id == route.sceneId }?.name,
+    ).joinToString(" in ")
+    is Route.WidgetPage -> settings.widgets.firstOrNull { it.id == route.id }?.name.orEmpty()
     Route.Chat -> "Chat"
     Route.TwitchAccount -> "Twitch account"
     Route.KickAccount -> "Kick account"
@@ -296,6 +324,18 @@ fun SettingsPanel(
                             StreamRecording(store, it, editable(settings, it, live))
                         }
                         Route.Recordings -> RecordingsPage(engine)
+                        Route.Scenes -> ScenesPage(store, settings, engine, push)
+                        is Route.ScenePage -> settings.scenes.firstOrNull { it.id == route.id }?.let {
+                            ScenePage(store, settings, it, engine, push, pop)
+                        }
+                        is Route.Placement -> {
+                            val scene = settings.scenes.firstOrNull { it.id == route.sceneId }
+                            val widget = settings.widgets.firstOrNull { it.id == route.widgetId }
+                            if (scene != null && widget != null) PlacementPage(store, scene, widget)
+                        }
+                        is Route.WidgetPage -> settings.widgets.firstOrNull { it.id == route.id }?.let {
+                            WidgetPage(store, it, pop)
+                        }
                         Route.TwitchAccount -> TwitchAccountPage(engine)
                         Route.KickAccount -> KickAccountPage(engine)
                         Route.Chat -> ChatPage(store, settings, engine, push)
@@ -449,6 +489,14 @@ private fun Home(settings: AppSettings, push: (Route) -> Unit) {
                 settings.selectedProfile.name,
                 Badge(Icons.Rounded.Sensors, Color(0xFFFF8A7A), MaterialShapes.Cookie9Sided),
             ) { push(Route.Streams) }
+        }
+        row {
+            NavRow(
+                it,
+                "Scenes",
+                settings.selectedScene?.name,
+                Badge(Icons.Rounded.Layers, Color(0xFFFFB86B), MaterialShapes.Slanted),
+            ) { push(Route.Scenes) }
         }
         row {
             NavRow(it, "Chat", badge = Badge(Icons.Rounded.ChatBubble, Color(0xFFFF9ECF), MaterialShapes.Pill)) {
@@ -659,6 +707,185 @@ private fun StreamAudio(store: SettingsStore, profile: StreamProfile, editable: 
         row { shapes ->
             ChoiceRow(shapes, "Bitrate", listOf(96, 128, 160, 192, 256), profile.audioBitrateKbps, { "$it kbps" }, enabled = editable) {
                 store.updateProfile(profile.copy(audioBitrateKbps = it))
+            }
+        }
+    }
+}
+
+private fun cameraLabel(engine: StreamEngine, scene: Scene): String =
+    engine.ui.value.cameras.firstOrNull { it.key == scene.cameraKey }?.label ?: "Default"
+
+@Composable
+private fun ScenesPage(store: SettingsStore, settings: AppSettings, engine: StreamEngine, push: (Route) -> Unit) {
+    Group {
+        settings.scenes.forEach { scene ->
+            row { shapes ->
+                val count = scene.widgets.count { it.enabled }
+                NavRow(shapes, scene.name, "${cameraLabel(engine, scene)}, $count ${if (count == 1) "widget" else "widgets"}") {
+                    push(Route.ScenePage(scene.id))
+                }
+            }
+        }
+        row { shapes ->
+            ActionRow(shapes, "Create scene", Icons.Rounded.Add) {
+                val scene = Scene(name = "Scene ${settings.scenes.size + 1}", cameraKey = settings.selectedScene?.cameraKey)
+                store.update { it.copy(scenes = it.scenes + scene) }
+                push(Route.ScenePage(scene.id))
+            }
+        }
+    }
+    Group {
+        settings.widgets.forEach { widget ->
+            row { shapes -> NavRow(shapes, widget.name, widget.type.label) { push(Route.WidgetPage(widget.id)) } }
+        }
+        row { shapes ->
+            ActionRow(shapes, "Create widget", Icons.Rounded.Add) {
+                val widget = Widget(name = "Widget ${settings.widgets.size + 1}")
+                store.update { it.copy(widgets = it.widgets + widget) }
+                push(Route.WidgetPage(widget.id))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScenePage(
+    store: SettingsStore,
+    settings: AppSettings,
+    scene: Scene,
+    engine: StreamEngine,
+    push: (Route) -> Unit,
+    pop: () -> Unit,
+) {
+    val ui by engine.ui.collectAsStateWithLifecycle()
+    val cameras = ui.cameras.filter { it.facing != Facing.EXTERNAL }
+    val update = { changed: Scene -> store.update { s -> s.copy(scenes = s.scenes.map { if (it.id == scene.id) changed else it }) } }
+    Group {
+        row { TextRow(it, "Name", scene.name) { name -> update(scene.copy(name = name)) } }
+        if (cameras.size > 1) {
+            row { shapes ->
+                ChoiceRow(
+                    shapes,
+                    "Camera",
+                    cameras.map { it.key },
+                    scene.cameraKey,
+                    { key -> cameras.firstOrNull { it.key == key }?.label.orEmpty() },
+                ) { update(scene.copy(cameraKey = it)) }
+            }
+        }
+    }
+    if (settings.widgets.isNotEmpty()) {
+        Group {
+            settings.widgets.forEach { widget ->
+                val placement = scene.placement(widget)
+                row { shapes ->
+                    SwitchNavRow(
+                        shapes,
+                        widget.name,
+                        placement.enabled,
+                        { on -> store.update { it.withPlacement(scene.id, placement.copy(enabled = on)) } },
+                    ) {
+                        store.update { it.withPlacement(scene.id, placement) }
+                        push(Route.Placement(scene.id, widget.id))
+                    }
+                }
+            }
+        }
+    }
+    Group {
+        row { shapes ->
+            ActionRow(shapes, "Duplicate", Icons.Rounded.ContentCopy) {
+                val copy = scene.copy(id = UUID.randomUUID().toString(), name = "${scene.name} copy")
+                store.update { it.copy(scenes = it.scenes + copy) }
+                pop()
+            }
+        }
+        if (settings.scenes.size > 1) {
+            row { shapes ->
+                ActionRow(shapes, "Delete", Icons.Rounded.Delete, MaterialTheme.colorScheme.error) {
+                    pop()
+                    store.update { s -> s.copy(scenes = s.scenes.filterNot { it.id == scene.id }) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlacementPage(store: SettingsStore, scene: Scene, widget: Widget) {
+    val placement = scene.placement(widget)
+    val update = { changed: SceneWidget -> store.update { it.withPlacement(scene.id, changed) } }
+    Group {
+        row { shapes ->
+            ChoiceRow(shapes, "Corner", Corner.entries, placement.corner, { it.label }) { update(placement.copy(corner = it)) }
+        }
+        row { SliderRow(it, "X", placement.x, 0..100, "${placement.x}%") { x -> update(placement.copy(x = x)) } }
+        row { SliderRow(it, "Y", placement.y, 0..100, "${placement.y}%") { y -> update(placement.copy(y = y)) } }
+        if (widget.type != WidgetType.TEXT) {
+            row { SliderRow(it, "Size", placement.size, 5..100, "${placement.size}%") { size -> update(placement.copy(size = size)) } }
+        }
+    }
+    Group {
+        row { SwitchRow(it, "Show in this scene", placement.enabled) { on -> update(placement.copy(enabled = on)) } }
+    }
+}
+
+@Composable
+private fun WidgetPage(store: SettingsStore, widget: Widget, pop: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val update = { changed: Widget -> store.update { s -> s.copy(widgets = s.widgets.map { if (it.id == widget.id) changed else it }) } }
+    val directory = File(context.filesDir, "widgets")
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) {
+            scope.launch(Dispatchers.IO) {
+                val name = "${widget.id}-${System.currentTimeMillis()}"
+                val copied = runCatching {
+                    directory.mkdirs()
+                    context.contentResolver.openInputStream(uri)!!.use { input ->
+                        File(directory, name).outputStream().use { input.copyTo(it) }
+                    }
+                }.isSuccess
+                if (copied) {
+                    widget.image?.let { File(directory, it).delete() }
+                    store.update { s -> s.copy(widgets = s.widgets.map { if (it.id == widget.id) it.copy(image = name) else it }) }
+                }
+            }
+        }
+    }
+    Group {
+        row { TextRow(it, "Name", widget.name) { name -> update(widget.copy(name = name)) } }
+        row { shapes ->
+            ChoiceRow(shapes, "Type", WidgetType.entries, widget.type, { it.label }) { update(widget.copy(type = it)) }
+        }
+    }
+    when (widget.type) {
+        WidgetType.TEXT -> Group {
+            row { TextRow(it, "Text", widget.text, "{time} and {date} are filled in") { text -> update(widget.copy(text = text)) } }
+            row { SliderRow(it, "Text size", widget.textSize, 8..60, "${widget.textSize}") { size -> update(widget.copy(textSize = size)) } }
+        }
+        WidgetType.IMAGE -> Group {
+            row { shapes ->
+                ActionRow(shapes, if (widget.image == null) "Choose image" else "Change image", Icons.Rounded.Add) {
+                    pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                }
+            }
+        }
+        WidgetType.CHAT -> Unit
+    }
+    Group {
+        row { shapes ->
+            ChoiceRow(shapes, "Show on", listOf(false, true), widget.previewOnly, { if (it) "Preview only" else "Stream and preview" }) {
+                update(widget.copy(previewOnly = it))
+            }
+        }
+    }
+    Group {
+        row { shapes ->
+            ActionRow(shapes, "Delete", Icons.Rounded.Delete, MaterialTheme.colorScheme.error) {
+                pop()
+                widget.image?.let { File(directory, it).delete() }
+                store.update { it.withoutWidget(widget.id) }
             }
         }
     }

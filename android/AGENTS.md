@@ -188,18 +188,38 @@ them, not code style.
   change while busy. Recording stops with an alert when free storage falls under 300 MiB.
 - The foreground service runs while live or recording; its notification title says which.
 
+## Scenes and widgets
+
+- `AppSettings.scenes` are what the row under the zoom stops switches between. A `Scene` has a name, a
+  camera (`cameraKey`) and its widget placements. Whenever there are none (the first start, a settings reset),
+  one scene per built-in camera is created, named after it, so the row reads Back and Front as the camera
+  row did. An external camera (USB) is not a
+  scene: while one is attached it replaces the camera of every scene (`StreamEngine.sceneCamera`).
+- `AppSettings.widgets` are global; a `SceneWidget` places one in a scene: on or off, a corner, X and Y
+  offsets from that corner in percent of the picture, and a size in percent of its width. Text widgets
+  ignore the size, their text size sets it. `Widget.previewOnly` keeps a widget out of the stream, the
+  recording and snapshots.
+- `widgets/WidgetRenderer` turns the selected scene's widgets into `Overlay`s (a bitmap and a rectangle in
+  picture coordinates, origin top left). Text fills in `{time}` and `{date}` and is redrawn each minute;
+  images are copies in `files/widgets/`; chat is the last six lines of `ChatController.lines`. A bitmap is
+  reused while its inputs are the same, and the compositor uploads a texture only when the bitmap object
+  changed.
+- `VideoCompositor.setOverlays` draws them over the camera with premultiplied alpha blending: all of them
+  on the preview, the ones that are not preview only on the encoder and recorder surfaces and in snapshots.
+  They are never mirrored.
+
 ## UI
 
 - `ui/MainScreen.kt` lays the screen out the way Moblin does, with Moblin's sizes. Wide screens: the preview
   with rounded corners against the start edge, under a display cutout there (only the end side keeps its
   cutout inset), the status in its top right (temperature and uptime, recording, bitrate, bonding share,
-  audio meter, in that order), the zoom stops and the camera row in its bottom right, and a control bar at
+  audio meter, in that order), the zoom stops and the scene row in its bottom right, and a control bar at
   the far end with the Moblin logo and the settings button on top, the quick buttons under them and the Go
   Live button at the bottom. Quick buttons are 40 dp in 48 dp cells. With no panel the bar takes the width
   the preview leaves (100 to 250 dp) and shows as many button columns as fit (three on the vivo); with a
   panel open it is 100 dp with two columns, as in Moblin. Near-square screens (the Flip cover,
   `maxWidth / maxHeight < 1.5`): status, logo and settings button in a top band, the preview with zoom
-  stops left and cameras right, quick buttons and Go Live in a bottom band.
+  stops left and scenes right, quick buttons and Go Live in a bottom band.
 - The preview `SurfaceView` has exactly the output aspect, so the corner mask drawn over it rounds the
   picture. Never animate its size: it takes its final size the moment a panel opens or closes, and the
   rest moves over it. The control bar's width and the quick buttons' positions follow one spring
@@ -226,6 +246,9 @@ them, not code style.
 - `streamUrl` adds the profile's SRT latency to an `srt`/`srtla` URL that does not name one.
   `StreamProfile.bondingNetworks` limits which networks SRTLA requests.
 - `mirrorFrontCameraOnStream` makes the encoder draw the same mirrored picture as the preview.
+- The Widgets quick button opens a panel that turns the selected scene's widgets on and off. Scenes and
+  widgets are edited under Settings, Scenes: a scene page lists every widget with a switch, and tapping one
+  opens its placement in that scene.
 - The Record quick button asks for a second tap to stop, like the End button. The recording time and size
   are a status item. Recording settings are per stream (Streams, a stream, Recording); the recordings list
   is Settings, Recordings.

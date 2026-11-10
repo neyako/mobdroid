@@ -52,6 +52,7 @@ enum class QuickButtonId(val label: String) {
     CHAT("Chat"),
     RECORD("Record"),
     SNAPSHOT("Snapshot"),
+    WIDGETS("Widgets"),
     BITRATE("Bitrate"),
     MIC("Mic"),
     STEALTH("Stealth"),
@@ -68,6 +69,46 @@ data class RecordingSettings(
 )
 
 val RECORDING_CODECS = listOf(VideoCodec.HEVC, VideoCodec.H264, VideoCodec.AV1)
+
+@Serializable
+enum class WidgetType(val label: String) { TEXT("Text"), IMAGE("Image"), CHAT("Chat") }
+
+@Serializable
+enum class Corner(val label: String, val left: Boolean, val top: Boolean) {
+    TOP_LEFT("Top left", true, true),
+    TOP_RIGHT("Top right", false, true),
+    BOTTOM_LEFT("Bottom left", true, false),
+    BOTTOM_RIGHT("Bottom right", false, false),
+}
+
+@Serializable
+data class Widget(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String = "Widget",
+    val type: WidgetType = WidgetType.TEXT,
+    val text: String = "",
+    val textSize: Int = 15,
+    val image: String? = null,
+    val previewOnly: Boolean = false,
+)
+
+@Serializable
+data class SceneWidget(
+    val widgetId: String,
+    val enabled: Boolean = true,
+    val corner: Corner = Corner.TOP_LEFT,
+    val x: Int = 2,
+    val y: Int = 3,
+    val size: Int = 30,
+)
+
+@Serializable
+data class Scene(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String = "Scene",
+    val cameraKey: String? = null,
+    val widgets: List<SceneWidget> = emptyList(),
+)
 
 @Serializable
 data class StreamProfile(
@@ -110,9 +151,15 @@ data class AppSettings(
     val hiddenQuickButtons: Set<QuickButtonId> = emptySet(),
     val fixedLensCameras: Set<String> = emptySet(),
     val bitratePresetsKbps: List<Int> = listOf(1000, 2500, 4000, 6000, 8000, 10000, 15000, 20000),
+    val scenes: List<Scene> = emptyList(),
+    val widgets: List<Widget> = emptyList(),
+    val selectedSceneId: String? = null,
 ) {
     val selectedProfile: StreamProfile
         get() = profiles.firstOrNull { it.id == selectedProfileId } ?: profiles.first()
+
+    val selectedScene: Scene?
+        get() = scenes.firstOrNull { it.id == selectedSceneId } ?: scenes.firstOrNull()
 }
 
 fun isValidBitrateKbps(kbps: Int) = kbps in 50..50_000

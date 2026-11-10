@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.BatteryAlert
 import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.Widgets
 import androidx.compose.material.icons.rounded.FiberManualRecord
 import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.material.icons.rounded.Stop
@@ -106,6 +107,7 @@ import app.mobdroid.camera.CameraDescriptor
 import app.mobdroid.camera.CameraState
 import app.mobdroid.media.AUDIO_LEVEL_FLOOR_DB
 import app.mobdroid.settings.QuickButtonId
+import app.mobdroid.settings.Scene
 import app.mobdroid.settings.StatusItem
 import app.mobdroid.stream.LiveState
 import app.mobdroid.stream.LiveStats
@@ -141,6 +143,8 @@ fun quickButtons(
     chatOpen: Boolean,
     recording: Boolean,
     confirmRecordStop: Boolean,
+    widgetsOpen: Boolean,
+    onWidgets: () -> Unit,
     onChat: () -> Unit,
     onRecord: () -> Unit,
     onSnapshot: () -> Unit,
@@ -159,6 +163,7 @@ fun quickButtons(
             onRecord,
         )
         QuickButtonId.SNAPSHOT -> QuickButton(id.label, Icons.Rounded.PhotoCamera, false, onClick = onSnapshot)
+        QuickButtonId.WIDGETS -> QuickButton(id.label, Icons.Rounded.Widgets, widgetsOpen, onClick = onWidgets)
         QuickButtonId.BITRATE -> QuickButton(id.label, Icons.Rounded.Speed, false, onClick = onBitrate)
         QuickButtonId.MIC -> QuickButton(
             id.label,
@@ -247,7 +252,7 @@ fun QuickButtonGrid(buttons: List<QuickButton>, closedColumns: Int, open: () -> 
         val fraction = open()
         val x = { index: Int, columns: Int -> quickButtonX(index, count, columns, width, cell) + 1.dp.roundToPx() }
         val height = { columns: Int -> (count + columns - 1) / columns * rowHeight }
-        layout(width, lerp(height(closedColumns), height(2), fraction).coerceAtLeast(0)) {
+        layout(width, lerp(height(closedColumns), height(2), fraction).coerceAtLeast(constraints.minHeight)) {
             placeables.forEachIndexed { index, placeable ->
                 placeable.place(
                     lerp(x(index, closedColumns), x(index, 2), fraction),
@@ -505,10 +510,10 @@ private fun AudioMeter(level: StateFlow<Float>, muted: Boolean) {
 }
 
 @Composable
-fun CameraControls(ui: UiState, engine: StreamEngine, modifier: Modifier) {
+fun CameraControls(ui: UiState, scenes: List<Scene>, scene: Scene?, engine: StreamEngine, modifier: Modifier) {
     Column(modifier, horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         ZoomStops(ui, engine::setZoom)
-        CameraSwitch(ui, engine::selectCamera, Modifier)
+        SceneSwitch(scenes, scene, engine::selectScene, Modifier)
     }
 }
 
@@ -556,12 +561,9 @@ fun ZoomStops(ui: UiState, onZoom: (Float) -> Unit) {
 }
 
 @Composable
-fun CameraSwitch(ui: UiState, onSelect: (CameraDescriptor) -> Unit, modifier: Modifier) {
-    if (ui.cameras.size < 2) return
-    Segments(
-        ui.cameras,
-        ui.cameras.firstOrNull { it.key == ui.camera?.key },
-        modifier.horizontalScroll(rememberScrollState()),
-        { it.label },
-    ) { if (it.key != ui.camera?.key) onSelect(it) }
+fun SceneSwitch(scenes: List<Scene>, scene: Scene?, onSelect: (String) -> Unit, modifier: Modifier) {
+    if (scenes.size < 2) return
+    Segments(scenes, scene, modifier.horizontalScroll(rememberScrollState()), { it.name }) {
+        if (it.id != scene?.id) onSelect(it.id)
+    }
 }
