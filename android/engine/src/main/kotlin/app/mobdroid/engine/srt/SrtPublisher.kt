@@ -195,6 +195,9 @@ class SrtPublisher internal constructor(
             fail("Failed to resolve ${target.host}")
             return
         }
+        if (terminated.get()) {
+            return
+        }
         val transport = environment.transportFactory?.invoke(engine, address, target)
             ?: if (target.bonded) {
                 SrtlaClient(engine, address, links!!, priorities)
@@ -207,6 +210,10 @@ class SrtPublisher internal constructor(
             created.write(buffer, offset, length, inAudio)
         }
         created.start()
+        if (terminated.get()) {
+            created.stop()
+            return
+        }
         engine.execute(drainTask)
     }
 

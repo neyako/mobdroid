@@ -252,6 +252,34 @@ class SrtPublisherTest {
     }
 
     @Test
+    fun stopWhileTheHostIsStillResolvingOpensNoTransportAfterwards() {
+        val resolving = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val resolved = CountDownLatch(1)
+        val setup = Setup(resolver = { _, port ->
+            resolving.countDown()
+            while (release.count > 0) {
+                try {
+                    release.await()
+                } catch (_: InterruptedException) {
+                }
+            }
+            resolved.countDown()
+            InetSocketAddress("127.0.0.1", port)
+        })
+        setup.publisher.start()
+        assertTrue(resolving.await(5, TimeUnit.SECONDS))
+        setup.publisher.stop()
+        release.countDown()
+        assertTrue(resolved.await(5, TimeUnit.SECONDS))
+        val deadline = System.nanoTime() + 5_000_000_000L
+        while (Thread.getAllStackTraces().keys.any { it.isAlive && it.name == "srt-publisher" } && System.nanoTime() < deadline) {
+            Thread.sleep(10)
+        }
+        assertEquals(null, setup.peer)
+    }
+
+    @Test
     fun overflowWhileTheSenderIsStalledDropsVideoUntilTheNextKeyFrameButKeepsAudio() {
         val setup = Setup(maximumQueuedBytes = 20_000)
         setup.connect()
