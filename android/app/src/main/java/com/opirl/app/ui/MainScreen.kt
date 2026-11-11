@@ -102,6 +102,11 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
     val settingsPages = remember { SettingsPages() }
     val chatDraft = remember { mutableStateOf("") }
     val browser = remember { BrowserState() }
+    val drawTool = remember { DrawTool() }
+    var drawing by remember { mutableStateOf(false) }
+    var showOverlays by remember { mutableStateOf(true) }
+    val runningMacros by engine.macros.running.collectAsStateWithLifecycle()
+    val draw = drawTool.takeIf { drawing }
     val showSettings = side == Side.SETTINGS
     val toggle = { target: Side ->
         side = if (side == target && !panelHidden) null else target
@@ -155,6 +160,17 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
         widgetsOpen = side == Side.WIDGETS && !panelHidden,
         obsOpen = side == Side.OBS && !panelHidden,
         browserOpen = side == Side.BROWSER && !panelHidden,
+        filters = (side == Side.FILTERS && !panelHidden) || appSettings.effects.filters.isNotEmpty() ||
+            appSettings.effects.luts.any { it.enabled },
+        drawing = drawing,
+        overlaysHidden = !showOverlays,
+        switcher = (side == Side.SWITCHER && !panelHidden) || appSettings.autoSwitcherId != null,
+        macros = (side == Side.MACROS && !panelHidden) || runningMacros.isNotEmpty(),
+        onFilters = { toggle(Side.FILTERS) },
+        onDraw = { drawing = !drawing },
+        onOverlays = { showOverlays = !showOverlays },
+        onSwitcher = { toggle(Side.SWITCHER) },
+        onMacros = { toggle(Side.MACROS) },
         onWidgets = { toggle(Side.WIDGETS) },
         onObs = { toggle(Side.OBS) },
         onBrowser = { toggle(Side.BROWSER) },
@@ -191,29 +207,30 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
     val statusInset by animateDpAsState(if (panelHidden) 36.dp else 0.dp, motion.defaultSpatialSpec(), label = "status")
 
     val statusView: @Composable (Boolean, Modifier) -> Unit = { compact, modifier ->
-        Status(ui, stats, recording, obs, engine.audioLevel, appSettings.hiddenStatusItems, engine::clearError, compact, modifier)
+        if (showOverlays) {
+            Status(ui, stats, recording, obs, engine.audioLevel, appSettings.hiddenStatusItems, engine::clearError, compact, modifier)
+        }
+    }
+    val sidePanel: @Composable (Side, (@Composable () -> Unit)?) -> Unit = { shown, chatHeader ->
+        when (shown) {
+            Side.CHAT -> ChatPanel(engine, appSettings, chatDraft, onHide = { panelHidden = true }, onClose = closePanel, header = chatHeader)
+            Side.WIDGETS -> WidgetsPanel(settings, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
+            Side.OBS -> obsPanel()
+            Side.BROWSER -> BrowserPanel(settings, appSettings, browser, onHide = { panelHidden = true }, onClose = closePanel)
+            Side.FILTERS -> FiltersPanel(settings, appSettings, engine, onHide = { panelHidden = true }, onClose = closePanel)
+            Side.SWITCHER -> SwitcherPanel(settings, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
+            Side.MACROS -> MacrosPanel(appSettings, engine, onHide = { panelHidden = true }, onClose = closePanel)
+            Side.SETTINGS -> SettingsPanel(settings, engine, busy, settingsPages, onHide = { panelHidden = true }, onClose = closePanel)
+        }
     }
     val panelView: @Composable (Boolean) -> Unit = { chatStatus ->
         AnimatedContent(shownSide, transitionSpec = { through }, label = "panel") { shown ->
-            when (shown) {
-                Side.CHAT -> ChatPanel(
-                    engine,
-                    appSettings,
-                    chatDraft,
-                    onHide = { panelHidden = true },
-                    onClose = closePanel,
-                    header = if (chatStatus) ({ statusView(true, Modifier) }) else null,
-                )
-                Side.WIDGETS -> WidgetsPanel(settings, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
-                Side.OBS -> obsPanel()
-                Side.BROWSER -> BrowserPanel(settings, appSettings, browser, onHide = { panelHidden = true }, onClose = closePanel)
-                Side.SETTINGS -> SettingsPanel(settings, engine, busy, settingsPages, onHide = { panelHidden = true }, onClose = closePanel)
-            }
+            sidePanel(shown, if (chatStatus) ({ statusView(true, Modifier) }) else null)
         }
     }
     val picture: @Composable (Modifier) -> Unit = { modifier ->
         Box(modifier) {
-            Preview(engine, ui, 16.dp, access) { flash.value }
+            Preview(engine, ui, 16.dp, access, draw) { flash.value }
             statusView(false, Modifier.align(Alignment.TopEnd).padding(12.dp).padding(top = statusInset))
             floatingButtons(Modifier.align(Alignment.TopEnd).padding(8.dp))
             CameraControls(
@@ -222,6 +239,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                 appSettings.selectedScene,
                 video,
                 engine,
+                draw,
                 Modifier.align(Alignment.BottomEnd).padding(10.dp),
             )
         }
@@ -333,25 +351,15 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                         Modifier.fillMaxWidth().height(52.dp).padding(start = 24.dp, end = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Status(
-                            ui,
-                            stats,
-                            recording,
-                            obs,
-                            engine.audioLevel,
-                            appSettings.hiddenStatusItems,
-                            engine::clearError,
-                            compact = true,
-                            Modifier.weight(1f),
-                        )
+                        Box(Modifier.weight(1f)) { statusView(true, Modifier) }
                         AppLogo()
                         Spacer(Modifier.width(8.dp))
                         SettingsButton(showSettings && !panelHidden) { toggle(Side.SETTINGS) }
                     }
                     Box(Modifier.fillMaxWidth().height(previewHeight), contentAlignment = Alignment.Center) {
                         Box(Modifier.size(previewHeight * aspect, previewHeight)) {
-                            Preview(engine, ui, 14.dp, access) { flash.value }
-                            if (appSettings.chatOnPreview) {
+                            Preview(engine, ui, 14.dp, access, draw) { flash.value }
+                            if (appSettings.chatOnPreview && showOverlays) {
                                 ChatOverlay(
                                     engine,
                                     appSettings.chatTextSize.sp - 1,
@@ -365,16 +373,20 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                             Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
-                            AnimatedContent(
-                                video,
-                                if (video != null) Modifier.weight(1f) else Modifier,
-                                transitionSpec = { through },
-                                label = "source",
-                            ) { player ->
-                                if (player != null) VideoStrip(player, Modifier.fillMaxWidth()) else ZoomStops(ui, engine::setZoom)
+                            if (draw != null) {
+                                DrawStrip(draw, engine, Modifier)
+                            } else {
+                                AnimatedContent(
+                                    video,
+                                    if (video != null) Modifier.weight(1f) else Modifier,
+                                    transitionSpec = { through },
+                                    label = "source",
+                                ) { player ->
+                                    if (player != null) VideoStrip(player, Modifier.fillMaxWidth()) else ZoomStops(ui, engine::setZoom)
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                SceneSwitch(appSettings.scenes, appSettings.selectedScene, engine::selectScene, Modifier.weight(1f, fill = false))
                             }
-                            Spacer(Modifier.width(8.dp))
-                            SceneSwitch(appSettings.scenes, appSettings.selectedScene, engine::selectScene, Modifier.weight(1f, fill = false))
                         }
                     }
                     Row(
@@ -410,18 +422,8 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                             verticalArrangement = Arrangement.Center,
                         ) {
                             Box(Modifier.size(width, height)) {
-                                Preview(engine, ui, 16.dp, access) { flash.value }
-                                Status(
-                                    ui,
-                                    stats,
-                                    recording,
-                                    obs,
-                                    engine.audioLevel,
-                                    appSettings.hiddenStatusItems,
-                                    engine::clearError,
-                                    compact = false,
-                                    Modifier.align(Alignment.TopEnd).padding(12.dp).padding(top = statusInset),
-                                )
+                                Preview(engine, ui, 16.dp, access, draw) { flash.value }
+                                statusView(false, Modifier.align(Alignment.TopEnd).padding(12.dp).padding(top = statusInset))
                                 floatingButtons(Modifier.align(Alignment.TopEnd).padding(8.dp))
                                 if (!below) {
                                     CameraControls(
@@ -430,6 +432,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                                         appSettings.selectedScene,
                                         video,
                                         engine,
+                                        draw,
                                         Modifier.align(Alignment.BottomEnd).padding(10.dp),
                                     )
                                 }
@@ -441,6 +444,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                                     appSettings.selectedScene,
                                     video,
                                     engine,
+                                    draw,
                                     Modifier.width(width).padding(top = 8.dp),
                                 )
                             }
@@ -464,28 +468,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                                 exit = slideOutHorizontally(motion.fastSpatialSpec()) { it / 4 } +
                                     fadeOut(motion.fastEffectsSpec()),
                             ) {
-                                AnimatedContent(shownSide, transitionSpec = { through }, label = "panel") { shown ->
-                                    when (shown) {
-                                        Side.CHAT -> ChatPanel(engine, appSettings, chatDraft, onHide = { panelHidden = true }, onClose = closePanel)
-                                        Side.WIDGETS -> WidgetsPanel(settings, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
-                                        Side.OBS -> obsPanel()
-                                        Side.BROWSER -> BrowserPanel(
-                                            settings,
-                                            appSettings,
-                                            browser,
-                                            onHide = { panelHidden = true },
-                                            onClose = closePanel,
-                                        )
-                                        Side.SETTINGS -> SettingsPanel(
-                                            settings,
-                                            engine,
-                                            busy,
-                                            settingsPages,
-                                            onHide = { panelHidden = true },
-                                            onClose = closePanel,
-                                        )
-                                    }
-                                }
+                                AnimatedContent(shownSide, transitionSpec = { through }, label = "panel") { shown -> sidePanel(shown, null) }
                             }
                         }
                     }
@@ -582,7 +565,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
     }
 }
 
-private enum class Side { SETTINGS, CHAT, WIDGETS, OBS, BROWSER }
+private enum class Side { SETTINGS, CHAT, WIDGETS, OBS, BROWSER, FILTERS, SWITCHER, MACROS }
 
 fun formatBitrate(bps: Long): String = if (bps >= 1_000_000) "%.1f Mbps".format(Locale.ROOT, bps / 1e6) else "${bps / 1000} kbps"
 

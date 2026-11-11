@@ -32,6 +32,8 @@ compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeB
 compose-foundation = { module = "androidx.compose.foundation:foundation" }
 compose-material3 = { module = "androidx.compose.material3:material3", version = "1.5.0-rc01" }
 compose-material-icons = { module = "androidx.compose.material:material-icons-extended" }
+mlkit-face-detection = { module = "com.google.mlkit:face-detection", version = "16.1.7" }
+mlkit-text-recognition = { module = "com.google.mlkit:text-recognition", version = "16.0.1" }
 compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 

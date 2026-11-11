@@ -1,0 +1,16 @@
+ML Kit
+
+Face detection and text recognition are provided by Google ML Kit
+(com.google.mlkit:face-detection, com.google.mlkit:text-recognition).
+The images are processed on the device and never leave it.
+
+ML Kit is licensed under the ML Kit Terms of Service and the Google APIs
+Terms of Service:
+
+https://developers.google.com/ml-kit/terms
+https://developers.google.com/terms
+
+The libraries bundle open source software. The notices for that software are
+part of the libraries (third_party_licenses) and are listed at:
+
+https://developers.google.com/ml-kit/license

@@ -71,6 +71,11 @@ enum class QuickButtonId(@StringRes val label: Int) {
     MIC(R.string.quick_mic),
     STEALTH(R.string.quick_stealth),
     TORCH(R.string.quick_torch),
+    FILTERS(R.string.filters),
+    DRAW(R.string.quick_draw),
+    OVERLAYS(R.string.quick_overlays),
+    AUTO_SWITCHER(R.string.quick_auto_switcher),
+    MACROS(R.string.macros),
 }
 
 @Serializable
@@ -126,6 +131,9 @@ data class Widget(
     val previewOnly: Boolean = false,
     val cover: Boolean = true,
     val hideWhenPaused: Boolean = true,
+    val removeBackground: Boolean = false,
+    val keyFrom: Int = 90,
+    val keyTo: Int = 150,
 )
 
 @Serializable
@@ -154,6 +162,154 @@ data class Scene(
 ) {
     val playsVideo: Boolean get() = video && videos.isNotEmpty()
 }
+
+@Serializable
+enum class Filter(@StringRes val label: Int) {
+    FOUR_THREE(R.string.filter_four_three),
+    CRT(R.string.filter_crt),
+    GRAYSCALE(R.string.filter_grayscale),
+    SEPIA(R.string.filter_sepia),
+    TRIPLE(R.string.filter_triple),
+    TWIN(R.string.filter_twin),
+    PIXELLATE(R.string.filter_pixellate),
+    WHIRLPOOL(R.string.filter_whirlpool),
+    PINCH(R.string.filter_pinch),
+    BLUR_FACES(R.string.filter_blur_faces),
+    BLUR_TEXT(R.string.filter_blur_text),
+    PRIVACY(R.string.filter_privacy),
+    BEAUTY(R.string.filter_beauty),
+    MOUTH(R.string.filter_mouth),
+}
+
+@Serializable
+enum class PrivacyMode(@StringRes val label: Int) {
+    BLUR(R.string.privacy_blur),
+    PIXELLATE(R.string.filter_pixellate),
+    IMAGE(R.string.widget_image),
+    ICON(R.string.privacy_icon),
+}
+
+@Serializable
+data class Lut(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+    val file: String? = null,
+    val enabled: Boolean = false,
+)
+
+val BUNDLED_LUTS = listOf(Lut(id = "bundled-meme", name = "Moblin Meme"))
+
+@Serializable
+data class Effects(
+    val filters: Set<Filter> = emptySet(),
+    val pixellate: Int = 30,
+    val whirlpool: Int = 90,
+    val pinch: Int = 50,
+    val privacyMode: PrivacyMode = PrivacyMode.BLUR,
+    val blurStrength: Int = 80,
+    val facePixellate: Int = 30,
+    val faceImage: String? = null,
+    val smoothRadius: Int = 10,
+    val smoothStrength: Int = 65,
+    val shapePosition: Int = 50,
+    val shapeRadius: Int = 50,
+    val shapeStrength: Int = 50,
+    val luts: List<Lut> = BUNDLED_LUTS,
+)
+
+@Serializable
+data class SwitcherScene(val id: String = UUID.randomUUID().toString(), val sceneId: String? = null, val seconds: Int = 15)
+
+@Serializable
+data class AutoSwitcher(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String = "Switcher",
+    val shuffle: Boolean = false,
+    val scenes: List<SwitcherScene> = emptyList(),
+)
+
+@Serializable
+enum class MacroFunction(@StringRes val label: Int) {
+    SCENE(R.string.scene),
+    ZOOM(R.string.zoom),
+    FILTERS(R.string.filters),
+    REACTION(R.string.macro_reaction),
+    RECORD(R.string.quick_record),
+    SNAPSHOT(R.string.quick_snapshot),
+    MUTE(R.string.macro_mute),
+    TORCH(R.string.quick_torch),
+    AUTO_SWITCHER(R.string.auto_switcher),
+    CHAT_MESSAGE(R.string.macro_chat_message),
+    NOTIFICATION(R.string.macro_notification),
+    DELAY(R.string.macro_delay),
+    WAIT_FOR_EVENT(R.string.macro_wait),
+    IF(R.string.macro_if),
+    MACRO(R.string.macro_run_macro),
+}
+
+@Serializable
+enum class MacroEventType(@StringRes val label: Int) {
+    GO_LIVE(R.string.go_live),
+    END(R.string.end),
+    START_RECORDING(R.string.event_start_recording),
+    STOP_RECORDING(R.string.event_stop_recording),
+    SWITCH_SCENE(R.string.event_switch_scene),
+}
+
+@Serializable
+enum class Comparison(val label: String) {
+    EQUAL("="),
+    NOT_EQUAL("!="),
+    LESS("<"),
+    LESS_EQUAL("<="),
+    GREATER(">"),
+    GREATER_EQUAL(">="),
+    CONTAINS("contains"),
+}
+
+@Serializable
+enum class Reaction(@StringRes val label: Int) {
+    GLASSES(R.string.prop_glasses),
+    SPARKLE(R.string.prop_sparkle),
+}
+
+@Serializable
+enum class RepeatMode(@StringRes val label: Int) {
+    OFF(R.string.off),
+    COUNT(R.string.repeat_count),
+    FOREVER(R.string.repeat_forever),
+}
+
+@Serializable
+data class MacroAction(
+    val id: String = UUID.randomUUID().toString(),
+    val function: MacroFunction = MacroFunction.SCENE,
+    val sceneId: String? = null,
+    val zoom: Float = 1f,
+    val filters: Set<Filter> = emptySet(),
+    val reaction: Reaction = Reaction.GLASSES,
+    val on: Boolean = true,
+    val switcherId: String? = null,
+    val text: String = "",
+    val delaySeconds: Float = 3f,
+    val event: MacroEventType = MacroEventType.GO_LIVE,
+    val value: String = "",
+    val comparison: Comparison = Comparison.EQUAL,
+    val otherValue: String = "",
+    val runCount: Int = 1,
+    val macroId: String? = null,
+)
+
+@Serializable
+data class Macro(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String = "Macro",
+    val actions: List<MacroAction> = emptyList(),
+    val repeat: RepeatMode = RepeatMode.OFF,
+    val repeatCount: Int = 5,
+    val closePanel: Boolean = false,
+    val runAtStart: Boolean = false,
+)
 
 @Serializable
 data class Bookmark(val id: String = UUID.randomUUID().toString(), val name: String, val url: String)
@@ -207,6 +363,11 @@ data class AppSettings(
     val bookmarks: List<Bookmark> = emptyList(),
     val usbCameraRotation: Int = 0,
     val setupDone: Boolean = false,
+    val effects: Effects = Effects(),
+    val fixedHorizon: Boolean = false,
+    val autoSwitchers: List<AutoSwitcher> = emptyList(),
+    val autoSwitcherId: String? = null,
+    val macros: List<Macro> = emptyList(),
 ) {
     val selectedProfile: StreamProfile
         get() = profiles.firstOrNull { it.id == selectedProfileId } ?: profiles.first()
