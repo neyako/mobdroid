@@ -573,6 +573,20 @@ It's built with SolidJS.
 
 4. Done!
 
+## Android app
+
+`android/` is a native Android port (Kotlin, Jetpack Compose, Material 3 Expressive). It streams the
+camera or a USB (UVC) camera over RTMP(S), SRT and SRTLA bonding with H.264, HEVC and, over RTMP, AV1,
+using the phone's hardware encoders. Build it with the Android SDK and NDK:
+
+```sh
+cd android
+echo "sdk.dir=$HOME/Android/Sdk" > local.properties
+./gradlew :engine:test :app:installDebug
+```
+
+See `android/AGENTS.md` for the module layout.
+
 ## Twitch login callback server
 
 Twitch login uses `ASWebAuthenticationSession` with an `https://mys-lang.org/auth` callback. For iOS to
