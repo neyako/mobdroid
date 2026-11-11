@@ -105,6 +105,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.mobdroid.R
 import app.mobdroid.camera.CameraDescriptor
 import app.mobdroid.camera.CameraState
+import app.mobdroid.engine.obs.ObsState
 import app.mobdroid.media.AUDIO_LEVEL_FLOOR_DB
 import app.mobdroid.settings.QuickButtonId
 import app.mobdroid.settings.Scene
@@ -144,7 +145,9 @@ fun quickButtons(
     recording: Boolean,
     confirmRecordStop: Boolean,
     widgetsOpen: Boolean,
+    obsOpen: Boolean,
     onWidgets: () -> Unit,
+    onObs: () -> Unit,
     onChat: () -> Unit,
     onRecord: () -> Unit,
     onSnapshot: () -> Unit,
@@ -164,6 +167,7 @@ fun quickButtons(
         )
         QuickButtonId.SNAPSHOT -> QuickButton(id.label, Icons.Rounded.PhotoCamera, false, onClick = onSnapshot)
         QuickButtonId.WIDGETS -> QuickButton(id.label, Icons.Rounded.Widgets, widgetsOpen, onClick = onWidgets)
+        QuickButtonId.OBS -> QuickButton(id.label, ObsLogo, obsOpen, onClick = onObs)
         QuickButtonId.BITRATE -> QuickButton(id.label, Icons.Rounded.Speed, false, onClick = onBitrate)
         QuickButtonId.MIC -> QuickButton(
             id.label,
@@ -377,6 +381,7 @@ fun Status(
     ui: UiState,
     stats: LiveStats,
     recording: RecordingStats?,
+    obs: ObsState?,
     audioLevel: StateFlow<Float>,
     hidden: Set<StatusItem>,
     onDismissError: () -> Unit,
@@ -424,6 +429,15 @@ fun Status(
             }
         }
     }
+    val remote: @Composable () -> Unit = {
+        if (obs != null && StatusItem.OBS !in hidden) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(7.dp).clip(CircleShape).background(if (obs.connected) Color(0xFF34C759) else Warning))
+                Spacer(Modifier.width(5.dp))
+                Text(if (compact) "OBS" else obsStatus(obs), style = statusStyle, maxLines = 1, softWrap = false)
+            }
+        }
+    }
     val bitrate: @Composable () -> Unit = {
         if (live && StatusItem.BITRATE !in hidden) {
             Text(
@@ -462,6 +476,7 @@ fun Status(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 recorded()
+                remote()
                 if (error != null) {
                     errorText()
                 } else {
@@ -472,6 +487,7 @@ fun Status(
         }
     } else {
         Column(modifier, horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            remote()
             uptime()
             recorded()
             bitrate()

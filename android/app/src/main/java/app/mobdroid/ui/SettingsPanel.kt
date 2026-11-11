@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import app.mobdroid.recording.Recording
 import app.mobdroid.settings.RECORDING_CODECS
+import app.mobdroid.settings.ObsSettings
 import app.mobdroid.settings.RecordingSettings
 import app.mobdroid.stream.formatBytes
 import app.mobdroid.stream.key
@@ -131,6 +132,11 @@ class SettingsPages {
     fun reset() {
         if (stack.size > 1) stack.removeRange(1, stack.size)
     }
+
+    internal fun open(vararg routes: Route) {
+        reset()
+        stack += routes
+    }
 }
 
 internal sealed interface Route {
@@ -151,6 +157,8 @@ internal sealed interface Route {
     data class StreamChat(val id: String) : Route
 
     data class StreamRecording(val id: String) : Route
+
+    data class StreamObs(val id: String) : Route
 
     data object Recordings : Route
 
@@ -203,6 +211,7 @@ private fun title(route: Route, settings: AppSettings) = when (route) {
     is Route.StreamTransport -> settings.profile(route.id)?.let(::transportName).orEmpty()
     is Route.StreamChat -> "Chat"
     is Route.StreamRecording -> "Recording"
+    is Route.StreamObs -> "OBS remote"
     Route.Recordings -> "Recordings"
     Route.Scenes -> "Scenes"
     is Route.ScenePage -> settings.scenes.firstOrNull { it.id == route.id }?.name.orEmpty()
@@ -323,6 +332,7 @@ fun SettingsPanel(
                         is Route.StreamRecording -> settings.profile(route.id)?.let {
                             StreamRecording(store, it, editable(settings, it, live))
                         }
+                        is Route.StreamObs -> settings.profile(route.id)?.let { StreamObs(store, it) }
                         Route.Recordings -> RecordingsPage(engine)
                         Route.Scenes -> ScenesPage(store, settings, engine, push)
                         is Route.ScenePage -> settings.scenes.firstOrNull { it.id == route.id }?.let {
@@ -610,6 +620,7 @@ private fun StreamPage(
             NavRow(shapes, "Chat", if (channels == 0) "Off" else "$channels on") { push(Route.StreamChat(profile.id)) }
         }
         row { NavRow(it, "Recording", recordingSummary(profile)) { push(Route.StreamRecording(profile.id)) } }
+        row { NavRow(it, "OBS remote", if (profile.obs.enabled) "On" else "Off") { push(Route.StreamObs(profile.id)) } }
     }
     Group {
         row { shapes ->
@@ -959,6 +970,29 @@ private fun StreamRecording(store: SettingsStore, profile: StreamProfile, editab
                 update(recording.copy(stopWithStream = it))
             }
         }
+    }
+}
+
+@Composable
+private fun StreamObs(store: SettingsStore, profile: StreamProfile) {
+    val obs = profile.obs
+    val update = { changed: ObsSettings -> store.updateProfile(profile.copy(obs = changed)) }
+    Group {
+        row { SwitchRow(it, "Enabled", obs.enabled) { on -> update(obs.copy(enabled = on)) } }
+    }
+    Group {
+        row { shapes ->
+            TextRow(shapes, "URL", obs.url, "ws://192.168.1.20:4455", keyboard = KeyboardType.Uri) { update(obs.copy(url = it.trim())) }
+        }
+        row { shapes ->
+            TextRow(shapes, "Password", obs.password, keyboard = KeyboardType.Password) { update(obs.copy(password = it)) }
+        }
+    }
+    Group {
+        row { SwitchRow(it, "Start OBS stream on Go Live", obs.startStream) { on -> update(obs.copy(startStream = on)) } }
+        row { SwitchRow(it, "Stop OBS stream on End", obs.stopStream) { on -> update(obs.copy(stopStream = on)) } }
+        row { SwitchRow(it, "Start OBS recording on Go Live", obs.startRecording) { on -> update(obs.copy(startRecording = on)) } }
+        row { SwitchRow(it, "Stop OBS recording on End", obs.stopRecording) { on -> update(obs.copy(stopRecording = on)) } }
     }
 }
 
