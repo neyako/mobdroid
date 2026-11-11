@@ -46,6 +46,7 @@ import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material.icons.rounded.FlashlightOff
 import androidx.compose.material.icons.rounded.FlashlightOn
+import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.MicOff
 import androidx.compose.material.icons.rounded.Settings
@@ -146,8 +147,10 @@ fun quickButtons(
     confirmRecordStop: Boolean,
     widgetsOpen: Boolean,
     obsOpen: Boolean,
+    browserOpen: Boolean,
     onWidgets: () -> Unit,
     onObs: () -> Unit,
+    onBrowser: () -> Unit,
     onChat: () -> Unit,
     onRecord: () -> Unit,
     onSnapshot: () -> Unit,
@@ -168,6 +171,7 @@ fun quickButtons(
         QuickButtonId.SNAPSHOT -> QuickButton(id.label, Icons.Rounded.PhotoCamera, false, onClick = onSnapshot)
         QuickButtonId.WIDGETS -> QuickButton(id.label, Icons.Rounded.Widgets, widgetsOpen, onClick = onWidgets)
         QuickButtonId.OBS -> QuickButton(id.label, ObsLogo, obsOpen, onClick = onObs)
+        QuickButtonId.BROWSER -> QuickButton(id.label, Icons.Rounded.Language, browserOpen, onClick = onBrowser)
         QuickButtonId.BITRATE -> QuickButton(id.label, Icons.Rounded.Speed, false, onClick = onBitrate)
         QuickButtonId.MIC -> QuickButton(
             id.label,

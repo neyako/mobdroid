@@ -55,6 +55,7 @@ enum class QuickButtonId(val label: String) {
     SNAPSHOT("Snapshot"),
     WIDGETS("Widgets"),
     OBS("OBS"),
+    BROWSER("Browser"),
     BITRATE("Bitrate"),
     MIC("Mic"),
     STEALTH("Stealth"),
@@ -127,6 +128,9 @@ data class Scene(
 )
 
 @Serializable
+data class Bookmark(val id: String = UUID.randomUUID().toString(), val name: String, val url: String)
+
+@Serializable
 data class StreamProfile(
     val id: String = UUID.randomUUID().toString(),
     val name: String = "Stream",
@@ -171,6 +175,7 @@ data class AppSettings(
     val scenes: List<Scene> = emptyList(),
     val widgets: List<Widget> = emptyList(),
     val selectedSceneId: String? = null,
+    val bookmarks: List<Bookmark> = emptyList(),
 ) {
     val selectedProfile: StreamProfile
         get() = profiles.firstOrNull { it.id == selectedProfileId } ?: profiles.first()

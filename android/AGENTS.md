@@ -274,7 +274,7 @@ them, not code style.
   rest moves over it. The control bar's width and the quick buttons' positions follow one spring
   (`QuickButtonGrid` places each button between its place in the wide and the two column layout), read in
   the layout phase only, while the panel slides out from behind the bar or fades away over the preview.
-- Panels (settings, chat, widgets, OBS) sit between the preview and the control bar on wide screens (350 dp, Moblin's
+- Panels (settings, chat, widgets, OBS, browser) sit between the preview and the control bar on wide screens (350 dp, Moblin's
   `settingsHalfWidth`) and fill the screen on near-square ones. Their header is 44 dp with `PanelButtons`:
   hide and close, extra small filled icon buttons with the expressive shape morph. They are 32 dp with
   16 dp between them, so their 48 dp touch targets do not overlap. Hide takes the panel off the screen and
@@ -303,6 +303,19 @@ them, not code style.
   state. Stopping an output takes a second tap within 3 seconds. A stream without OBS set up gets the URL
   and password fields in the panel; an unreachable OBS shows why and a link to Streams, the stream, OBS
   remote. The OBS status item (scene, live, rec, or offline) shows while OBS is enabled for the stream.
+- The Browser quick button opens a web browser in the panel slot (`ui/Browser.kt`). `BrowserState` in
+  `MainScreen` owns the one `WebView`, created at the first load: it lives while the browser is the
+  selected panel, shown or hidden, so a hidden page keeps running, and is destroyed when the panel is closed
+  or another panel takes its place, and with the activity. It is paused while the activity is stopped. A
+  page whose renderer process dies is closed instead of taking the app down. Only `http`, `https` and
+  `about` links are followed. `browserAddress` turns the address field's text into a URL, and nothing else is ever
+  loaded: an `http` or `https` URL and `about:blank` are kept, an IPv4 address or `localhost` gets
+  `http://`, other text with a dot, no space and no scheme gets `https://`, and the rest, any other scheme
+  included, is a Google search. The field shows the URL without `https://`; Go on that unchanged text loads the page's
+  own URL (`editedAddress`). The field selects all its text when tapped.
+  The system back button goes back in the page's history before it closes the panel. Bookmarks
+  (`AppSettings.bookmarks`) are listed where the page would be until one is loaded, and on their own page
+  with "Add this page"; the page's sound plays on the phone and is not in the stream.
 - The Record quick button asks for a second tap to stop, like the End button. The recording time and size
   are a status item. Recording settings are per stream (Streams, a stream, Recording); the recordings list
   is Settings, Recordings.
