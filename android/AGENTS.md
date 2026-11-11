@@ -248,7 +248,8 @@ them, not code style.
 - Sound: the audio track is decoded, resampled to 48 kHz stereo (`engine/audio/PcmConverter`, linear) and
   written with its time to a one second `PcmRing`, kept 300 ms ahead of the clock. The ring keeps one
   timestamp gap (audio written more than 20 ms away from where the buffered audio ends starts a new
-  segment at its own time), and a write larger than the ring keeps its end at the right time. `AudioEncoder` hands
+  segment at its own time, and a late read never drops past that point), and a write larger than the ring
+  keeps its end at the right time. `AudioEncoder` hands
   every microphone buffer to `AudioMix`, which mutes the mic if the mic button is on or the scene's "Mic
   while playing" is off, then adds the video's sound at the scene's volume. So the sound is in the stream
   and the recording and is not played on the phone. The phone's audio clock and its system clock differ

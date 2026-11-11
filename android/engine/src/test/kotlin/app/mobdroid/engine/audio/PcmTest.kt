@@ -97,6 +97,18 @@ class PcmTest {
     }
 
     @Test
+    fun aLateReadDoesNotDropAudioBeyondATimestampGap() {
+        val ring = PcmRing(48_000)
+        ring.write(ShortArray(9600) { 1 }, 4800, 0)
+        ring.write(ShortArray(9600) { 2 }, 4800, 1_000_000)
+        val pcm = ByteArray(4)
+        assertEquals(NO_AUDIO, ring.mixInto(pcm, 200_000, 1f))
+        assertEquals(100_000, ring.bufferedUs())
+        assertEquals(0, ring.mixInto(pcm, 1_000_000, 1f))
+        assertEquals(listOf<Short>(2, 2), samples(pcm).toList())
+    }
+
+    @Test
     fun aWriteLargerThanTheRingKeepsItsEndAtTheRightTime() {
         val ring = PcmRing(48_000)
         ring.write(ShortArray(192_000) { (it / 2 / 480).toShort() }, 96_000, 0)

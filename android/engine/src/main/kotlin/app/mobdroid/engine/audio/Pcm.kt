@@ -91,12 +91,15 @@ class PcmRing(private val capacityFrames: Int, private val toleranceUs: Long = 8
     @Synchronized
     fun mixInto(pcm: ByteArray, positionUs: Long, volume: Float): Long {
         if (count == 0) return NO_AUDIO
-        val deviationUs = headPtsUs - positionUs
-        if (deviationUs > toleranceUs) return NO_AUDIO
-        if (deviationUs < -toleranceUs) {
-            drop(minOf(count.toLong(), -deviationUs * PCM_RATE / 1_000_000).toInt())
-            if (count == 0 || headPtsUs - positionUs > toleranceUs) return NO_AUDIO
+        var deviationUs = headPtsUs - positionUs
+        var skipped = false
+        while (deviationUs < -toleranceUs && count > 0) {
+            val segment = if (boundary > 0) boundary else count
+            drop(minOf(segment.toLong(), -deviationUs * PCM_RATE / 1_000_000).toInt())
+            skipped = true
+            deviationUs = headPtsUs - positionUs
         }
+        if (count == 0 || deviationUs > toleranceUs) return NO_AUDIO
         val frames = minOf(pcm.size / 4, count, if (boundary > 0) boundary else count)
         val gain = (volume * 256).toInt()
         for (frame in 0 until frames) {
@@ -111,7 +114,7 @@ class PcmRing(private val capacityFrames: Int, private val toleranceUs: Long = 8
         }
         count -= frames
         consumed(frames)
-        return if (frames > 0 && deviationUs >= -toleranceUs) deviationUs else NO_AUDIO
+        return if (frames > 0 && !skipped) deviationUs else NO_AUDIO
     }
 
     private fun drop(frames: Int) {
