@@ -20,6 +20,7 @@ import app.mobdroid.chat.ChatSpeech
 import app.mobdroid.chat.createChatClients
 import app.mobdroid.engine.obs.ObsClient
 import app.mobdroid.engine.obs.ObsOutput
+import app.mobdroid.engine.obs.ObsState
 import app.mobdroid.engine.obs.obsUrl
 import okhttp3.OkHttpClient
 import app.mobdroid.camera.CameraController
@@ -55,6 +56,7 @@ import app.mobdroid.widgets.BrowserWidgets
 import app.mobdroid.widgets.WidgetRenderer
 import app.mobdroid.settings.LoginStore
 import app.mobdroid.settings.MicSource
+import app.mobdroid.settings.ObsSettings
 import app.mobdroid.settings.RECORDING_CODECS
 import app.mobdroid.settings.RecordingSettings
 import app.mobdroid.recording.RecordingFile
@@ -665,11 +667,14 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         }
         startTicker()
         if (profile.recording.startWithStream) startRecording()
-        val remote = obs.state.value
         val wanted = settings.settings.value.selectedProfile.obs
-        if (wanted.startStream && remote.connected && remote.stream == ObsOutput.STOPPED) obs.startStream()
-        if (wanted.startRecording && remote.connected && remote.record == ObsOutput.STOPPED) obs.startRecord()
+        val remote = connectedObs(wanted)
+        if (wanted.startStream && remote?.stream == ObsOutput.STOPPED) obs.startStream()
+        if (wanted.startRecording && remote?.record == ObsOutput.STOPPED) obs.startRecord()
     }
+
+    private fun connectedObs(wanted: ObsSettings): ObsState? =
+        obs.state.value.takeIf { it.connected && wanted.enabled && obs.isFor(obsUrl(wanted.url), wanted.password) }
 
     private fun syncObs() {
         val wanted = settings.settings.value.selectedProfile.obs
@@ -689,13 +694,13 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         links.stop()
         _ui.update { it.copy(live = LiveState.OFFLINE, error = null) }
         _stats.value = LiveStats()
-        if (wasLive && profile?.recording?.stopWithStream == true) stopRecording()
         if (wasLive) {
-            val remote = obs.state.value
             val wanted = settings.settings.value.selectedProfile.obs
-            if (wanted.stopStream && remote.stream == ObsOutput.STARTED) obs.stopStream()
-            if (wanted.stopRecording && remote.record == ObsOutput.STARTED) obs.stopRecord()
+            val remote = connectedObs(wanted)
+            if (wanted.stopStream && remote?.stream == ObsOutput.STARTED) obs.stopStream()
+            if (wanted.stopRecording && remote?.record == ObsOutput.STARTED) obs.stopRecord()
         }
+        if (wasLive && profile?.recording?.stopWithStream == true) stopRecording()
         if (profile != null) {
             targetBitrate = profile.bitrateKbps * 1000
             videoEncoder?.setBitrate(targetBitrate)

@@ -238,14 +238,23 @@ them, not code style.
   the calling thread and the socket closes gracefully, so a command sent right before `stop()` still
   reaches OBS (ending a stream from the background stops the preview in the same call). A failed command
   reports OBS's comment through `onError`, which shows an alert. The state changes only from OBS's events,
-  never optimistically.
+  never optimistically. A request OBS does not answer within 10 seconds fails with "OBS did not answer", so
+  the pending requests stay bounded.
+- Between `CurrentSceneCollectionChanging` and `CurrentSceneCollectionChanged` nothing is sent (OBS can
+  crash on requests then): requests fail at once, the screenshot timer stops, and everything is read again
+  afterwards.
+- A mute event that arrives during an input refresh restarts the refresh, so an older answer cannot
+  overwrite it.
 - The audio inputs are OBS's special inputs (desktop and mic devices) plus the enabled sources of the
   program scene, kept only when `GetInputMute` succeeds, which is how OBS tells a source has audio.
 - `setScreenshots(true)` fetches a 480 px wide JPEG of the program scene, then again 2 seconds after each
-  answer and at once on a scene change. The OBS panel turns it on only while it is on screen and the
+  answer and at once on a scene change. Every fetch cancels the timer and the answer of the one before, so
+  there is one timer chain however often the panel is shown. The OBS panel turns it on only while it is on screen and the
   activity is started; nothing is fetched in the background.
 - `StreamProfile.obs` also holds four switches that start and stop OBS's stream and recording with Go Live
-  and End. They act only when OBS is connected and the output is in the opposite state.
+  and End. They act only when the client is connected to the selected stream's OBS (`isFor`) and the
+  output is in the opposite state. End sends them before it stops the local recording, which can stop the
+  preview and with it the client.
 
 ## UI
 

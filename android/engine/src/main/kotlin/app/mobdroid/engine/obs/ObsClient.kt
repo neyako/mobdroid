@@ -83,6 +83,7 @@ class ObsClient(
     private val onError: (String) -> Unit,
     private val retryMs: Long = 5000,
     private val screenshotMs: Long = 2000,
+    private val requestTimeoutMs: Long = 10_000,
     private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
     private val sockets = http.newBuilder().pingInterval(10, TimeUnit.SECONDS).build()
@@ -112,10 +113,12 @@ class ObsClient(
     fun setScreenshots(enabled: Boolean) = synchronized(lock) {
         screenshots = enabled
         if (!enabled) _screenshot.value = null
-        run?.let { it.post(it::shoot) }
+        run?.let { it.post(if (enabled) it::shoot else it::stopShooting) }
     }
 
     fun elapsedMs(startedAtMs: Long): Long = clock() - startedAtMs
+
+    fun isFor(url: String?, password: String): Boolean = synchronized(lock) { run?.url == url && run?.password == password }
 
     fun setScene(name: String) = command("SetCurrentProgramScene") { put("sceneName", name) }
 
@@ -151,8 +154,11 @@ class ObsClient(
         @Volatile private var socket: WebSocket? = null
 
         @Volatile private var identified = false
+
+        @Volatile private var changing = false
         private var inputsRefresh = 0
-        private var shooting = false
+        private var refreshing = false
+        private var shot = 0
         private var shotTimer: ScheduledFuture<*>? = null
 
         fun post(task: () -> Unit) {
@@ -166,7 +172,9 @@ class ObsClient(
         }
 
         fun connect() {
-            socket = sockets.newWebSocket(Request.Builder().url(url).build(), this)
+            val created = sockets.newWebSocket(Request.Builder().url(url).build(), this)
+            socket = created
+            if (closed) created.cancel()
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) = post {
@@ -186,9 +194,10 @@ class ObsClient(
             if (webSocket !== socket) return
             socket = null
             identified = false
+            changing = false
             pending.clear()
-            shooting = false
-            shotTimer?.cancel(false)
+            refreshing = false
+            stopShooting()
             update { ObsState(error = reason) }
             publish(null)
             executor.schedule({ post(::connect) }, retryMs, TimeUnit.MILLISECONDS)
@@ -254,13 +263,13 @@ class ObsClient(
 
         fun request(type: String, data: JsonObject? = null, onResult: (JsonObject?, String?) -> Unit) {
             val current = socket
-            if (current == null || !identified) {
-                onResult(null, "OBS is not connected")
+            if (current == null || !identified || changing) {
+                onResult(null, if (changing) "OBS is changing its scene collection" else "OBS is not connected")
                 return
             }
             val id = nextId.incrementAndGet().toString()
             pending[id] = onResult
-            current.send(
+            val sent = current.send(
                 buildJsonObject {
                     put("op", 6)
                     putJsonObject("d") {
@@ -270,6 +279,17 @@ class ObsClient(
                     }
                 }.toString(),
             )
+            if (!sent) {
+                pending.remove(id)?.invoke(null, "OBS is not connected")
+                return
+            }
+            runCatching {
+                executor.schedule(
+                    { if (!closed) pending.remove(id)?.invoke(null, "OBS did not answer") },
+                    requestTimeoutMs,
+                    TimeUnit.MILLISECONDS,
+                )
+            }
         }
 
         private fun requestOutput(type: String, apply: (ObsState, ObsOutput, Long) -> ObsState) = request(type) { data, _ ->
@@ -293,13 +313,14 @@ class ObsClient(
 
         private fun sceneChanged() {
             refreshInputs()
-            shotTimer?.cancel(false)
             shoot()
         }
 
         private fun refreshInputs() {
             val refresh = ++inputsRefresh
-            val scene = _state.value.scene ?: return
+            val scene = _state.value.scene
+            refreshing = scene != null && !changing
+            if (!refreshing) return
             request("GetSpecialInputs") { special, _ ->
                 request("GetSceneItemList", buildJsonObject { put("sceneName", scene) }) { items, _ ->
                     val names = (
@@ -313,6 +334,7 @@ class ObsClient(
                     var left = names.size
                     val done = {
                         if (refresh == inputsRefresh) {
+                            refreshing = false
                             update { state ->
                                 state.copy(inputs = names.indices.mapNotNull { i -> muted[i]?.let { ObsInput(names[i], it) } })
                             }
@@ -339,9 +361,17 @@ class ObsClient(
                     }
                 }
                 "SceneListChanged", "SceneCreated", "SceneRemoved", "SceneNameChanged" -> requestScenes()
+                "CurrentSceneCollectionChanging" -> {
+                    changing = true
+                    inputsRefresh++
+                    refreshing = false
+                    stopShooting()
+                }
                 "CurrentSceneCollectionChanged" -> {
+                    changing = false
                     requestScenes()
                     refreshInputs()
+                    shoot()
                 }
                 "StreamStateChanged" -> {
                     val next = output(data)
@@ -367,6 +397,7 @@ class ObsClient(
                     update { state ->
                         state.copy(inputs = state.inputs.map { if (it.name == name) it.copy(muted = muted) else it })
                     }
+                    if (refreshing) refreshInputs()
                 }
                 "InputCreated", "InputRemoved", "InputNameChanged", "SceneItemCreated", "SceneItemRemoved",
                 "SceneItemEnableStateChanged",
@@ -374,11 +405,17 @@ class ObsClient(
             }
         }
 
+        fun stopShooting() {
+            shot++
+            shotTimer?.cancel(false)
+        }
+
         fun shoot() {
+            stopShooting()
+            val current = shot
             val scene = _state.value.scene
             val wanted = synchronized(lock) { screenshots }
-            if (!wanted || !identified || shooting || scene == null) return
-            shooting = true
+            if (!wanted || !identified || changing || scene == null) return
             val data = buildJsonObject {
                 put("sourceName", scene)
                 put("imageFormat", "jpg")
@@ -386,17 +423,13 @@ class ObsClient(
                 put("imageCompressionQuality", 60)
             }
             request("GetSourceScreenshot", data) { response, _ ->
-                shooting = false
+                if (current != shot) return@request
                 publish(
                     response?.string("imageData")?.substringAfter("base64,", "")?.takeIf { it.isNotEmpty() }?.let {
                         runCatching { Base64.getDecoder().decode(it) }.getOrNull()
                     },
                 )
-                if (scene != _state.value.scene) {
-                    shoot()
-                } else {
-                    shotTimer = executor.schedule({ post(::shoot) }, screenshotMs, TimeUnit.MILLISECONDS)
-                }
+                shotTimer = executor.schedule({ post(::shoot) }, screenshotMs, TimeUnit.MILLISECONDS)
             }
         }
     }

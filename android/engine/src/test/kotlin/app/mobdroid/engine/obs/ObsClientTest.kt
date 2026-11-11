@@ -1,6 +1,7 @@
 package app.mobdroid.engine.obs
 
 import java.util.Base64
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
@@ -39,6 +40,9 @@ private class FakeObs : WebSocketListener() {
     val requests = CopyOnWriteArrayList<Sent>()
     val connections = AtomicInteger()
     val failing = CopyOnWriteArrayList<String>()
+    val muted = ConcurrentHashMap(mapOf("Desktop Audio" to true))
+
+    @Volatile var beforeResponse: (Sent) -> Unit = {}
 
     @Volatile var socket: WebSocket? = null
 
@@ -63,7 +67,9 @@ private class FakeObs : WebSocketListener() {
                 val type = data.getValue("requestType").jsonPrimitive.content
                 val id = data.getValue("requestId").jsonPrimitive.content
                 val requestData = data["requestData"]?.jsonObject
-                requests += Sent(type, requestData)
+                val sent = Sent(type, requestData)
+                requests += sent
+                beforeResponse(sent)
                 val response = respond(type, requestData)
                 val status = if (response == null) {
                     """{"result":false,"code":604,"comment":"Not possible"}"""
@@ -99,22 +105,20 @@ private class FakeObs : WebSocketListener() {
         type == "GetSceneItemList" ->
             """{"sceneItems":[{"sourceName":"Camera","sceneItemEnabled":true},{"sourceName":"Logo","sceneItemEnabled":true},""" +
                 """{"sourceName":"Music","sceneItemEnabled":false}]}"""
-        type == "GetInputMute" -> when (data!!.getValue("inputName").jsonPrimitive.content) {
-            "Logo" -> null
-            "Desktop Audio" -> """{"inputMuted":true}"""
-            else -> """{"inputMuted":false}"""
+        type == "GetInputMute" -> data!!.getValue("inputName").jsonPrimitive.content.let { name ->
+            if (name == "Logo") null else """{"inputMuted":${muted[name] == true}}"""
         }
         type == "GetSourceScreenshot" -> """{"imageData":"data:image/jpg;base64,${Base64.getEncoder().encodeToString(IMAGE)}"}"""
         else -> ""
     }
 }
 
-private class Harness(password: String = PASSWORD) : AutoCloseable {
+private class Harness(password: String = PASSWORD, screenshotMs: Long = 20) : AutoCloseable {
     private val server = MockWebServer()
     private val http = OkHttpClient()
     val obs = FakeObs()
     val errors = LinkedBlockingQueue<String>()
-    val client = ObsClient(http, { errors += it }, retryMs = 50, screenshotMs = 20, clock = { 100_000 })
+    val client = ObsClient(http, { errors += it }, retryMs = 50, screenshotMs = screenshotMs, clock = { 100_000 })
 
     init {
         server.dispatcher = object : Dispatcher() {
@@ -236,6 +240,56 @@ class ObsClientTest {
         Thread.sleep(150)
         assertEquals(count, harness.obs.sent("GetSourceScreenshot").size)
         assertNull(harness.client.screenshot.value)
+    }
+
+    @Test
+    fun showingThePanelAgainKeepsOneScreenshotTimer() = Harness(screenshotMs = 200).use { harness ->
+        harness.await { it.connected && it.inputs.size == 3 }
+        repeat(5) {
+            harness.client.setScreenshots(true)
+            harness.awaitRequest("GetSourceScreenshot", it + 1)
+            harness.client.setScreenshots(false)
+        }
+        harness.client.setScreenshots(true)
+        Thread.sleep(1100)
+        val count = harness.obs.sent("GetSourceScreenshot").size
+        assertTrue(count in 8..13, "$count screenshot requests")
+    }
+
+    @Test
+    fun aMuteEventDuringAnInputRefreshIsKept() = Harness().use { harness ->
+        harness.await { it.connected && it.inputs.size == 3 }
+        harness.obs.beforeResponse = { sent ->
+            if (sent.type == "GetInputMute" && sent.data!!.getValue("inputName").jsonPrimitive.content == "Camera") {
+                harness.obs.beforeResponse = {}
+                harness.obs.muted["Mic/Aux"] = true
+                harness.obs.event("InputMuteStateChanged", """{"inputName":"Mic/Aux","inputMuted":true}""")
+            }
+        }
+        harness.obs.event("InputCreated", """{"inputName":"New"}""")
+        harness.awaitRequest("GetSpecialInputs", 3)
+        harness.awaitRequest("GetInputMute", 12)
+        Thread.sleep(100)
+        assertEquals(ObsInput("Mic/Aux", true), harness.client.state.value.inputs[1])
+    }
+
+    @Test
+    fun nothingIsRequestedWhileTheSceneCollectionChanges() = Harness().use { harness ->
+        harness.await { it.connected && it.inputs.size == 3 }
+        harness.client.setScreenshots(true)
+        harness.awaitRequest("GetSourceScreenshot")
+        harness.obs.event("CurrentSceneCollectionChanging", """{"sceneCollectionName":"Other"}""")
+        Thread.sleep(100)
+        val before = harness.obs.requests.size
+        harness.obs.event("InputRemoved", """{"inputName":"Camera"}""")
+        harness.client.setScene("BRB")
+        assertEquals("OBS is changing its scene collection", harness.errors.poll(10, TimeUnit.SECONDS))
+        Thread.sleep(150)
+        assertEquals(before, harness.obs.requests.size)
+        harness.obs.event("CurrentSceneCollectionChanged", """{"sceneCollectionName":"Other"}""")
+        harness.awaitRequest("GetSceneList", 2)
+        val shots = harness.obs.sent("GetSourceScreenshot").size
+        assertTrue(harness.awaitRequest("GetSourceScreenshot", shots + 1).size > shots)
     }
 
     @Test
