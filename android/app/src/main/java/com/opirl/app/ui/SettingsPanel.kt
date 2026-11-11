@@ -857,9 +857,13 @@ private val LICENSES = listOf(
     LicenseItem("libuvc", "BSD", "libuvc.txt"),
     LicenseItem("libjpeg-turbo", "BSD, IJG, zlib", "libjpeg-turbo.txt"),
     LicenseItem("OkHttp", "Apache 2.0", "apache-2.0.txt"),
+    LicenseItem("Okio", "Apache 2.0", "apache-2.0.txt"),
     LicenseItem("Coil", "Apache 2.0", "apache-2.0.txt"),
-    LicenseItem("Kotlin and kotlinx", "Apache 2.0", "apache-2.0.txt"),
+    LicenseItem("Kotlin and JetBrains libraries", "Apache 2.0", "apache-2.0.txt"),
     LicenseItem("AndroidX and Compose", "Apache 2.0", "apache-2.0.txt"),
+    LicenseItem("Accompanist", "Apache 2.0", "apache-2.0.txt"),
+    LicenseItem("Guava", "Apache 2.0", "apache-2.0.txt"),
+    LicenseItem("JSpecify", "Apache 2.0", "apache-2.0.txt"),
     LicenseItem("OBS logo", "GPL 2.0", "gpl-2.0.txt"),
 )
 
