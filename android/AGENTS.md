@@ -315,7 +315,7 @@ them, not code style.
   with rounded corners against the start edge, under a display cutout there (only the end side keeps its
   cutout inset), the status in its top right (OBS, temperature and uptime, recording, bitrate, bonding
   share, audio meter, in that order), the zoom stops and the scene row in its bottom right, and a control bar at
-  the far end with the Moblin logo and the settings button on top, the quick buttons under them and the Go
+  the far end with the opIRL logo and the settings button on top, the quick buttons under them and the Go
   Live button at the bottom. Quick buttons are 40 dp in 48 dp cells. With no panel the bar takes the width
   the preview leaves (100 to 250 dp) and shows as many button columns as fit (three on the vivo); with a
   panel open it is 100 dp with two columns, as in Moblin. Near-square screens (the Flip cover,

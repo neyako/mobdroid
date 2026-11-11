@@ -186,7 +186,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                             compact = true,
                             Modifier.weight(1f),
                         )
-                        MoblinLogo()
+                        AppLogo()
                         Spacer(Modifier.width(8.dp))
                         SettingsButton(showSettings && !panelHidden) { toggle(Side.SETTINGS) }
                     }
@@ -323,7 +323,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            MoblinLogo()
+                            AppLogo()
                             SettingsButton(showSettings && !panelHidden) { toggle(Side.SETTINGS) }
                         }
                         QuickButtonGrid(
