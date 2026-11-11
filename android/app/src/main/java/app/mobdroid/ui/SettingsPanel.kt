@@ -107,7 +107,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.mobdroid.BuildConfig
 import app.mobdroid.engine.media.VideoCodec
@@ -962,10 +961,6 @@ private fun WidgetPage(store: SettingsStore, widget: Widget, engine: StreamEngin
         }
         WidgetType.MUSIC -> {
             val allowed by engine.nowPlaying.allowed.collectAsStateWithLifecycle()
-            LifecycleResumeEffect(Unit) {
-                engine.nowPlaying.refresh()
-                onPauseOrDispose {}
-            }
             if (allowed) {
                 Group {
                     row { SwitchRow(it, "Cover", widget.cover) { on -> update(widget.copy(cover = on)) } }

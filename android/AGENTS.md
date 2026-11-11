@@ -225,9 +225,14 @@ them, not code style.
   (`MediaSessionManager.getActiveSessions`), which Android only allows for an app with notification access;
   `MediaListener` is an empty `NotificationListenerService` that exists to be granted that, and no
   notification is read. The widget's page opens the system screen for it until it is granted. `NowPlaying`
-  listens only while the preview runs or the app is live and a Music widget exists, on the main thread; it
-  takes the session that is playing, else the first one, never the app's own, bounds the cover to 256 px
-  and publishes a new `Track` only when something changed. "Hide when paused" (on by default) removes the
+  listens only while the preview runs or the app is live and a Music widget exists, on the main thread, and
+  registers again from scratch whenever that or the access setting changes (it observes the setting), so a
+  revoked and returned access is picked up. It takes the session that is playing, else the first one, never
+  the app's own (`currentSession`). Each session's metadata and play state are kept from its callbacks, so
+  a state update costs no call to the other app. The cover is bounded to 256 px and kept when the new
+  one has the same pixels, and a new `Track` is published only when something changed, so a player that
+  resends its state does not make the widget redraw. The text size is clamped to the slider's range and the
+  bitmap to the picture. "Hide when paused" (on by default) removes the
   widget while nothing plays; "Cover" off leaves the text.
 - `VideoCompositor.setOverlays` draws them over the camera with premultiplied alpha blending: all of them
   on the preview, the ones that are not preview only on the encoder and recorder surfaces and in snapshots.

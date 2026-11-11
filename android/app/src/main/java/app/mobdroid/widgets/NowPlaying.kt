@@ -2,6 +2,7 @@ package app.mobdroid.widgets
 
 import android.content.ComponentName
 import android.content.Context
+import android.database.ContentObserver
 import android.graphics.Bitmap
 import android.media.MediaMetadata
 import android.media.session.MediaController
@@ -19,6 +20,11 @@ class MediaListener : NotificationListenerService()
 
 class Track(val title: String, val artist: String, val cover: Bitmap?, val playing: Boolean)
 
+fun <T> currentSession(sessions: List<T>, own: (T) -> Boolean, playing: (T) -> Boolean): T? {
+    val others = sessions.filterNot(own)
+    return others.firstOrNull(playing) ?: others.firstOrNull()
+}
+
 class NowPlaying(private val context: Context) {
     private val manager = context.getSystemService(MediaSessionManager::class.java)
     private val component = ComponentName(context, MediaListener::class.java)
@@ -28,61 +34,93 @@ class NowPlaying(private val context: Context) {
     private val _allowed = MutableStateFlow(false)
     val allowed: StateFlow<Boolean> = _allowed.asStateFlow()
     private var wanted = false
-    private var listening = false
-    private var controllers = emptyList<MediaController>()
-    private var art: Bitmap? = null
-    private var cover: Bitmap? = null
+    private var watched = emptyList<Watched>()
     private val sessions = MediaSessionManager.OnActiveSessionsChangedListener { watch(it.orEmpty()) }
-    private val callback = object : MediaController.Callback() {
-        override fun onMetadataChanged(metadata: MediaMetadata?) = publish()
 
-        override fun onPlaybackStateChanged(state: PlaybackState?) = publish()
+    private inner class Watched(val controller: MediaController) : MediaController.Callback() {
+        var metadata: MediaMetadata? = null
+        var playing = false
+        var cover: Bitmap? = null
+
+        fun read() {
+            playing = controller.playbackState?.state == PlaybackState.STATE_PLAYING
+            take(controller.metadata)
+        }
+
+        override fun onMetadataChanged(metadata: MediaMetadata?) {
+            take(metadata)
+            publish()
+        }
+
+        override fun onPlaybackStateChanged(state: PlaybackState?) {
+            playing = state?.state == PlaybackState.STATE_PLAYING
+            publish()
+        }
+
+        private fun take(next: MediaMetadata?) {
+            metadata = next
+            val art = (
+                next?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
+                    ?: next?.getBitmap(MediaMetadata.METADATA_KEY_ART)
+                    ?: next?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+                )?.let(::bounded)
+            if (art == null || cover?.sameAs(art) != true) cover = art
+        }
+    }
+
+    init {
+        context.contentResolver.registerContentObserver(
+            Settings.Secure.getUriFor(LISTENERS),
+            false,
+            object : ContentObserver(handler) {
+                override fun onChange(selfChange: Boolean) = sync()
+            },
+        )
+        handler.post(::sync)
     }
 
     fun setEnabled(enabled: Boolean) {
         handler.post {
-            wanted = enabled
-            sync()
+            if (wanted != enabled) {
+                wanted = enabled
+                sync()
+            }
         }
-    }
-
-    fun refresh() {
-        handler.post(::sync)
     }
 
     private fun sync() {
-        val allowed = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
+        val allowed = Settings.Secure.getString(context.contentResolver, LISTENERS)
             ?.split(':')
             ?.contains(component.flattenToString()) == true
         _allowed.value = allowed
-        val listen = wanted && allowed
-        if (listen == listening) return
-        listening = listen
-        if (listen) {
-            runCatching {
-                manager.addOnActiveSessionsChangedListener(sessions, component, handler)
-                watch(manager.getActiveSessions(component))
-            }.onFailure { listening = false }
-        } else {
-            manager.removeOnActiveSessionsChangedListener(sessions)
-            watch(emptyList())
-        }
+        manager.removeOnActiveSessionsChangedListener(sessions)
+        watch(
+            if (wanted && allowed) {
+                runCatching {
+                    manager.addOnActiveSessionsChangedListener(sessions, component, handler)
+                    manager.getActiveSessions(component)
+                }.getOrElse {
+                    manager.removeOnActiveSessionsChangedListener(sessions)
+                    emptyList()
+                }
+            } else {
+                emptyList()
+            },
+        )
     }
 
     private fun watch(next: List<MediaController>) {
-        controllers.forEach { it.unregisterCallback(callback) }
-        controllers = next.filter { it.packageName != context.packageName }
-        controllers.forEach { it.registerCallback(callback, handler) }
+        watched.forEach { it.controller.unregisterCallback(it) }
+        watched = next.map { controller -> Watched(controller).also { controller.registerCallback(it, handler) } }
+        watched.forEach { it.read() }
         publish()
     }
 
     private fun publish() {
-        val controller = controllers.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: controllers.firstOrNull()
-        val metadata = controller?.metadata
+        val session = currentSession(watched, { it.controller.packageName == context.packageName }, { it.playing })
+        val metadata = session?.metadata
         val title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: metadata?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
-        if (metadata == null || title.isNullOrBlank()) {
-            art = null
-            cover = null
+        if (session == null || metadata == null || title.isNullOrBlank()) {
             _track.value = null
             return
         }
@@ -90,17 +128,9 @@ class NowPlaying(private val context: Context) {
             ?: metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
             ?: metadata.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
             ?: ""
-        val source = metadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
-            ?: metadata.getBitmap(MediaMetadata.METADATA_KEY_ART)
-            ?: metadata.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
-        if (source !== art) {
-            art = source
-            cover = source?.let(::bounded)
-        }
-        val playing = controller.playbackState?.state == PlaybackState.STATE_PLAYING
         val current = _track.value
-        if (current == null || current.title != title || current.artist != artist || current.cover !== cover || current.playing != playing) {
-            _track.value = Track(title, artist, cover, playing)
+        if (current == null || current.title != title || current.artist != artist || current.cover !== session.cover || current.playing != session.playing) {
+            _track.value = Track(title, artist, session.cover, session.playing)
         }
     }
 
@@ -116,5 +146,6 @@ class NowPlaying(private val context: Context) {
 
     private companion object {
         const val COVER_SIZE = 256
+        const val LISTENERS = "enabled_notification_listeners"
     }
 }

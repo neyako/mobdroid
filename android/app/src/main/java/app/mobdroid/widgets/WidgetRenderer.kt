@@ -126,8 +126,9 @@ class WidgetRenderer(
                     WidgetType.BROWSER -> null
                     WidgetType.MUSIC -> track?.takeIf { it.playing || !widget.hideWhenPaused }?.let { shown ->
                         val art = shown.cover.takeIf { widget.cover }
-                        cached(widget.id, listOf(shown.title, shown.artist, art, widget.textSize, input.height)) {
-                            music(shown.title, shown.artist, art, widget.textSize * input.height / 400f, input.width)
+                        val size = widget.textSize.coerceIn(8, 60) * input.height / 400f
+                        cached(widget.id, listOf(shown.title, shown.artist, art, size)) {
+                            music(shown.title, shown.artist, art, size, input.width, input.height)
                         }
                     }
                 }
@@ -168,7 +169,7 @@ class WidgetRenderer(
         return bitmap
     }
 
-    private fun music(title: String, artist: String, cover: Bitmap?, size: Float, maxWidth: Int): Bitmap {
+    private fun music(title: String, artist: String, cover: Bitmap?, size: Float, maxWidth: Int, maxHeight: Int): Bitmap {
         val titlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             textSize = size
@@ -189,7 +190,7 @@ class WidgetRenderer(
         val lines = if (shownArtist.isEmpty()) titlePaint.fontSpacing else titlePaint.fontSpacing + artistPaint.fontSpacing
         val height = maxOf(side, lines) + pad * 2
         val width = side + gap + maxOf(titlePaint.measureText(shownTitle), artistPaint.measureText(shownArtist)) + pad * 2
-        val bitmap = Bitmap.createBitmap(width.toInt().coerceAtLeast(1), height.toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+        val bitmap = Bitmap.createBitmap(width.toInt().coerceIn(1, maxWidth), height.toInt().coerceIn(1, maxHeight), Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         if (cover != null) {
             val rect = RectF(pad, (height - side) / 2, pad + side, (height + side) / 2)
