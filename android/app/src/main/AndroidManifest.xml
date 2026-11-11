@@ -23,6 +23,7 @@
         android:label="Mobdroid"
         android:icon="@mipmap/ic_launcher"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.Mobdroid">
         <activity
             android:name=".MainActivity"

@@ -872,6 +872,19 @@ private fun WidgetPage(store: SettingsStore, widget: Widget, pop: () -> Unit) {
             }
         }
         WidgetType.CHAT -> Unit
+        WidgetType.BROWSER -> Group {
+            row { TextRow(it, "URL", widget.url, "https://", keyboard = KeyboardType.Uri) { url -> update(widget.copy(url = url.trim())) } }
+            row { shapes ->
+                SliderRow(shapes, "Width", widget.browserWidth, 200..1920, "${widget.browserWidth}", 10) {
+                    update(widget.copy(browserWidth = it))
+                }
+            }
+            row { shapes ->
+                SliderRow(shapes, "Height", widget.browserHeight, 100..1080, "${widget.browserHeight}", 10) {
+                    update(widget.copy(browserHeight = it))
+                }
+            }
+        }
     }
     Group {
         row { shapes ->
