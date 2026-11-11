@@ -35,6 +35,9 @@ enum class StabilizationSetting { OFF, STANDARD, PREVIEW }
 enum class MicSource(val label: String) { AUTO("Auto"), BUILT_IN("Phone"), USB("USB"), WIRED("Headset") }
 
 @Serializable
+enum class ChatTextSize(val label: String, val sp: Int) { SMALL("Small", 12), MEDIUM("Medium", 14), LARGE("Large", 17) }
+
+@Serializable
 enum class StatusItem(val label: String) {
     TEMPERATURE("Temperature"),
     UPTIME("Uptime"),
@@ -44,7 +47,7 @@ enum class StatusItem(val label: String) {
 }
 
 @Serializable
-enum class QuickButtonId(val label: String) { BITRATE("Bitrate"), MIC("Mic"), STEALTH("Stealth"), TORCH("Torch") }
+enum class QuickButtonId(val label: String) { CHAT("Chat"), BITRATE("Bitrate"), MIC("Mic"), STEALTH("Stealth"), TORCH("Torch") }
 
 @Serializable
 data class StreamProfile(
@@ -61,6 +64,9 @@ data class StreamProfile(
     val minBitrateKbps: Int = 500,
     val audioBitrateKbps: Int = 128,
     val keyFrameIntervalSeconds: Int = 2,
+    val twitchChannel: String = "",
+    val kickChannel: String = "",
+    val youtubeChannel: String = "",
     val srtLatencyMs: Int = 3000,
     val bondingNetworks: Set<LinkType> = BONDING_NETWORKS,
 )
@@ -72,6 +78,11 @@ data class AppSettings(
     val cameraKey: String? = null,
     val stabilization: StabilizationSetting = StabilizationSetting.STANDARD,
     val keepScreenOn: Boolean = true,
+    val alertHaptics: Boolean = true,
+    val chatOnPreview: Boolean = true,
+    val chatTextSize: ChatTextSize = ChatTextSize.MEDIUM,
+    val chatSpeech: Boolean = false,
+    val chatSpeechNames: Boolean = true,
     val mirrorFrontCameraOnStream: Boolean = false,
     val mic: MicSource = MicSource.AUTO,
     val hiddenStatusItems: Set<StatusItem> = emptySet(),

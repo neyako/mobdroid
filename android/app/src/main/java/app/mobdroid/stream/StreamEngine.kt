@@ -7,10 +7,16 @@ import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.BatteryManager
 import android.os.PowerManager
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.util.Log
 import android.util.Size
 import android.view.Surface
 import app.mobdroid.camera.CameraCatalog
+import app.mobdroid.chat.ChatController
+import app.mobdroid.chat.ChatSpeech
+import app.mobdroid.chat.createChatClients
+import okhttp3.OkHttpClient
 import app.mobdroid.camera.CameraController
 import app.mobdroid.camera.CameraDescriptor
 import app.mobdroid.camera.CameraState
@@ -34,7 +40,9 @@ import app.mobdroid.media.AudioEncoder
 import app.mobdroid.media.CodecCatalog
 import app.mobdroid.media.VideoEncoder
 import app.mobdroid.media.gl.VideoCompositor
+import app.mobdroid.settings.LoginStore
 import app.mobdroid.settings.MicSource
+import java.io.File
 import app.mobdroid.settings.SettingsStore
 import app.mobdroid.settings.streamUrl
 import app.mobdroid.settings.StabilizationSetting
@@ -58,6 +66,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -109,6 +118,23 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     val ui: StateFlow<UiState> = _ui.asStateFlow()
     private val _stats = MutableStateFlow(LiveStats())
     val stats: StateFlow<LiveStats> = _stats.asStateFlow()
+    val http = OkHttpClient()
+    val logins = LoginStore(File(context.filesDir, "logins.json"))
+    private val speech = ChatSpeech(context)
+    val chat = ChatController(
+        scope,
+        { listener -> createChatClients(settings.settings.value.selectedProfile, logins.logins.value, http, listener) },
+        { message ->
+            val current = settings.settings.value
+            if (current.chatSpeech) speech.say(message, current.chatSpeechNames)
+        },
+    )
+    private val _alert = MutableStateFlow<Alert?>(null)
+    val alert: StateFlow<Alert?> = _alert.asStateFlow()
+    private val vibrator = context.getSystemService(Vibrator::class.java)
+    private var alertJob: Job? = null
+    private var alertId = 0L
+    private var lowBitrate = LowBitrateWatch()
     private val _audioLevel = MutableStateFlow(AUDIO_LEVEL_FLOOR_DB)
     val audioLevel: StateFlow<Float> = _audioLevel.asStateFlow()
     private val audioManager = context.getSystemService(AudioManager::class.java)
@@ -155,12 +181,32 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             }
         }
         scope.launch {
+            settings.settings.map { it.chatSpeech }.distinctUntilChanged().collect { speech.setEnabled(it) }
+        }
+        scope.launch {
+            settings.settings
+                .map { s -> s.selectedProfile.let { listOf(it.twitchChannel, it.kickChannel, it.youtubeChannel) } }
+                .distinctUntilChanged()
+                .drop(1)
+                .debounce(1000)
+                .collect { synchronized(this@StreamEngine) { if (previewActive || isLive) chat.start() } }
+        }
+        scope.launch {
+            logins.logins.drop(1).collect { synchronized(this@StreamEngine) { if (previewActive || isLive) chat.start() } }
+        }
+        scope.launch {
             settings.settings.map { it.mic }.distinctUntilChanged().drop(1).collect {
                 synchronized(this@StreamEngine) { if (!isLive && previewActive) startAudioMeter() }
             }
         }
         powerManager.addThermalStatusListener(context.mainExecutor) { status ->
+            val previous = _ui.value.thermal
             _ui.update { it.copy(thermal = status) }
+            if (status >= PowerManager.THERMAL_STATUS_CRITICAL && previous < PowerManager.THERMAL_STATUS_CRITICAL) {
+                showAlert(AlertLevel.ERROR, "Phone is overheating", "The stream may stop")
+            } else if (status == PowerManager.THERMAL_STATUS_SEVERE && previous < PowerManager.THERMAL_STATUS_SEVERE) {
+                showAlert(AlertLevel.WARNING, "Phone is hot", "Lower the bitrate or the frame rate")
+            }
         }
         ContextCompat.registerReceiver(
             context,
@@ -169,7 +215,13 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                     val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, 100)
                     val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
                     val temperature = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) / 10
-                    _ui.update { it.copy(battery = level * 100 / scale, temperature = temperature) }
+                    val battery = level * 100 / scale
+                    val previous = _ui.value.battery
+                    _ui.update { it.copy(battery = battery, temperature = temperature) }
+                    val charging = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
+                    if (!charging && listOf(15, 5).any { battery <= it && previous > it }) {
+                        showAlert(AlertLevel.WARNING, "Battery low", "$battery%")
+                    }
                 }
             },
             IntentFilter(Intent.ACTION_BATTERY_CHANGED),
@@ -239,6 +291,29 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
 
     private val unopenableLenses = HashSet<String>()
 
+    fun showAlert(level: AlertLevel, title: String, detail: String? = null) {
+        val alert = Alert(++alertId, level, title, detail)
+        _alert.value = alert
+        if (settings.settings.value.alertHaptics) {
+            vibrator?.vibrate(
+                when (level) {
+                    AlertLevel.ERROR -> VibrationEffect.createWaveform(longArrayOf(0, 120, 80, 120, 80, 220), -1)
+                    AlertLevel.WARNING -> VibrationEffect.createWaveform(longArrayOf(0, 100, 80, 100), -1)
+                    AlertLevel.INFO -> VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE)
+                },
+            )
+        }
+        alertJob?.cancel()
+        alertJob = scope.launch {
+            delay(if (level == AlertLevel.INFO) 3000 else 6000)
+            _alert.compareAndSet(alert, null)
+        }
+    }
+
+    fun dismissAlert() {
+        _alert.value = null
+    }
+
     private fun lenses(main: CameraDescriptor): List<LensCamera> =
         if (main.id in settings.settings.value.fixedLensCameras) main.lenses + main.fallbackLenses else main.lenses
 
@@ -293,7 +368,10 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 _ui.update { it.copy(cameras = cameras, camera = selected, lens = selected?.let(::defaultLens)) }
                 ensureCompositor()
                 openCamera()
-                if (!isLive) startAudioMeter()
+                if (!isLive) {
+                    startAudioMeter()
+                    chat.start()
+                }
             }
         }
     }
@@ -324,6 +402,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     fun stopPreviewIfIdle() {
         if (!previewActive || isLive) return
         previewActive = false
+        chat.stop()
         audioEncoder?.release()
         audioEncoder = null
         closeSources()
@@ -435,9 +514,25 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         serviceStarted = true
         newSession.start()
         liveStartedAt = System.nanoTime()
+        lowBitrate = LowBitrateWatch()
         _ui.update { it.copy(error = null) }
         monitor = scope.launch {
-            launch { newSession.state.collect { s -> _ui.update { it.copy(live = s) } } }
+            launch {
+                var wasLive = false
+                var previous = LiveState.CONNECTING
+                newSession.state.collect { s ->
+                    _ui.update { it.copy(live = s) }
+                    if (s == LiveState.LIVE && previous != LiveState.LIVE) {
+                        showAlert(AlertLevel.INFO, if (wasLive) "Stream reconnected" else "You are live")
+                        wasLive = true
+                    } else if (s == LiveState.RECONNECTING && previous == LiveState.LIVE) {
+                        showAlert(AlertLevel.ERROR, "Stream disconnected", newSession.lastError.value ?: "Reconnecting")
+                    } else if (s == LiveState.RECONNECTING && previous == LiveState.CONNECTING) {
+                        showAlert(AlertLevel.ERROR, "Could not connect", newSession.lastError.value ?: "Retrying")
+                    }
+                    previous = s
+                }
+            }
             launch { newSession.lastError.collect { e -> if (e != null) _ui.update { it.copy(error = e) } } }
             if (profile.adaptiveBitrate) launch { runAdaptiveBitrate(newSession, profile) }
             while (isActive) {
@@ -553,6 +648,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private fun onFatal(message: String) {
         scope.launch {
             stopLive()
+            showAlert(AlertLevel.ERROR, "Stream stopped", message)
             _ui.update { it.copy(error = message) }
         }
     }
@@ -570,6 +666,11 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             transportMeter.update(stats.bytesSent, System.nanoTime())
         } else {
             transportMeter.pause()
+        }
+        if (session.state.value == LiveState.LIVE && System.nanoTime() - liveStartedAt > 15_000_000_000L &&
+            lowBitrate.update(stats.sendBitrateBps)
+        ) {
+            showAlert(AlertLevel.WARNING, "Low bitrate", formatKbps(stats.sendBitrateBps))
         }
         val linkStats = (session.publisher as? SrtPublisher)?.linkStats().orEmpty()
         val shares = linkShares(linkBytes, linkStats)
@@ -778,6 +879,8 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
 }
 
 val CameraDescriptor.key: String get() = "$id:${physicalId.orEmpty()}"
+
+private fun formatKbps(bps: Long) = "${bps / 1000} kbps"
 
 fun outputSize(profile: StreamProfile): Pair<Int, Int> {
     return profile.resolution.width to profile.resolution.height

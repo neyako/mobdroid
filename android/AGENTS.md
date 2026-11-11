@@ -7,7 +7,7 @@ them, not code style.
 ## Layout
 
 - `engine/` — pure Kotlin/JVM, no Android imports. Everything that can run and be tested on the JVM:
-  muxers, transports, adaptive bitrate.
+  muxers, transports, adaptive bitrate, chat clients.
   - `media/` — `VideoFormat`, `AudioFormat`, `EncodedFrame`, `MediaSink`.
   - `net/` — `Publisher` (one-shot ingest connection), `NetworkLink`/`NetworkLinkProvider` (sockets
     pinned to an interface, used by SRTLA bonding).
@@ -118,6 +118,35 @@ them, not code style.
   needs runtime CAMERA permission first. Cameras the OS exposes through Camera2 `LENS_FACING_EXTERNAL`
   go through `camera/` instead. `UvcCamera.start` blocks on USB negotiation, so `StreamEngine` calls it
   outside its lock. A USB attach selects the attached camera only, never another one already plugged in.
+
+## Chat
+
+- `engine/chat/Chat.kt` is the contract. A `ChatClient` is long lived: `start()` connects and keeps
+  reconnecting with backoff until `stop()`. It reports every transition with `onConnected` and
+  `onDisconnected`. Listener calls come from the client's own threads and must not block. `stop()` closes
+  every socket and thread, and no listener call happens after it returns.
+- `ChatMessage.segments` are the text and the emotes in message order; `userColor` is `0xRRGGBB` or null.
+  `onMessageDeleted` removes one message, `onUserMessagesDeleted` every message of a banned or timed out
+  user.
+- `send` reports through its callback, null when the message was sent. `canSend` is false without a
+  login.
+- `onDisconnected` is reported once per outage: repeated failed attempts with the same reason stay silent
+  until the next `onConnected`. A Twitch client's `start()` is one shot, so the app builds new clients for
+  every start (`ChatController.start`).
+- Twitch reads over the anonymous IRC WebSocket and sends through Helix `chat/messages`; its own message
+  comes back over the read connection, so nothing is echoed locally. A 401 is reported as "Twitch login
+  expired". YouTube scrapes the live chat page for the continuation and polls `get_live_chat` every 200 to
+  3000 ms as Moblin does; it cannot send. A YouTube source starting with `@`, or anything that is not an
+  11 character video id, is a handle. Kick resolves the channel slug to `chatroom.id`, listens on Pusher
+  and sends with the `session_token` cookie of a kick.com web login as a Bearer token.
+- The app side: `chat/ChatController` batches events into `lines` (the newest 200) at most every 150 ms,
+  `ChatSpeech` reads messages aloud through Android's text to speech on the media stream, and `LoginStore`
+  keeps the Twitch and Kick logins in `logins.json`, outside the exported settings. The Twitch login is the
+  implicit flow in a WebView with Moblin's client id and the scopes `user:read:chat user:write:chat`.
+- Each platform lives in its own package (`chat/twitch`, `chat/kick`, `chat/youtube`) and ports the
+  behavior of Moblin's `Moblin/StreamingPlatforms/`. Parsing is pure functions tested with captured
+  payloads; the network goes through the `OkHttpClient` passed in; JSON is read as `JsonElement` trees
+  (`kotlinx.serialization.json`, no compiler plugin in the engine).
 
 ## UI
 

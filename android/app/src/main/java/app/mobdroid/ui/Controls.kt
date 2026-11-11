@@ -36,6 +36,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BatteryAlert
+import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.FlashlightOff
 import androidx.compose.material.icons.rounded.FlashlightOn
 import androidx.compose.material.icons.rounded.Mic
@@ -119,12 +120,15 @@ class QuickButton(val label: String, val icon: ImageVector, val checked: Boolean
 fun quickButtons(
     ui: UiState,
     hidden: Set<QuickButtonId>,
+    chatOpen: Boolean,
+    onChat: () -> Unit,
     onBitrate: () -> Unit,
     onStealth: () -> Unit,
     onMute: () -> Unit,
     onTorch: () -> Unit,
 ) = QuickButtonId.entries.filter { it !in hidden }.mapNotNull { id ->
     when (id) {
+        QuickButtonId.CHAT -> QuickButton(id.label, Icons.Rounded.ChatBubble, chatOpen, onChat)
         QuickButtonId.BITRATE -> QuickButton(id.label, Icons.Rounded.Speed, false, onBitrate)
         QuickButtonId.MIC -> QuickButton(id.label, if (ui.muted) Icons.Rounded.MicOff else Icons.Rounded.Mic, ui.muted, onMute)
         QuickButtonId.STEALTH -> QuickButton(id.label, Icons.Rounded.VisibilityOff, false, onStealth)
