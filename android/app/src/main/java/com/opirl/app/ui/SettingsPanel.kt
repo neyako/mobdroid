@@ -1010,6 +1010,7 @@ private val LICENSES = listOf(
     LicenseItem("libusb", "LGPL 2.1", "libusb.txt"),
     LicenseItem("libuvc", "BSD", "libuvc.txt"),
     LicenseItem("libjpeg-turbo", "BSD, IJG, zlib", "libjpeg-turbo.txt"),
+    LicenseItem("Bouncy Castle", "MIT", "bouncycastle.txt"),
     LicenseItem("OkHttp", "Apache 2.0", "apache-2.0.txt"),
     LicenseItem("Okio", "Apache 2.0", "apache-2.0.txt"),
     LicenseItem("Coil", "Apache 2.0", "apache-2.0.txt"),

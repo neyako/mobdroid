@@ -34,6 +34,7 @@ import com.opirl.app.camera.Stabilization
 import com.opirl.app.engine.abr.ADAPTIVE_BITRATE_UPDATE_INTERVAL_MS
 import com.opirl.app.engine.abr.AdaptiveBitrate
 import com.opirl.app.engine.abr.BelaboxAdaptiveBitrate
+import com.opirl.app.engine.abr.LossAdaptiveBitrate
 import com.opirl.app.engine.abr.QueueAdaptiveBitrate
 import com.opirl.app.engine.abr.RistAdaptiveBitrate
 import com.opirl.app.engine.abr.TransportBitrateMeter
@@ -41,6 +42,7 @@ import com.opirl.app.engine.abr.toStreamStats
 import com.opirl.app.engine.rist.RistPublisher
 import com.opirl.app.engine.rtmp.RtmpPublisher
 import com.opirl.app.engine.srt.SrtPublisher
+import com.opirl.app.engine.whip.WhipPublisher
 import com.opirl.app.settings.allowedCodecs
 import com.opirl.app.engine.media.VideoCodec
 import com.opirl.app.engine.mp4.Mp4Recorder
@@ -1112,6 +1114,13 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         Transport.SRTLA -> SrtPublisher(url, listener, links)
         Transport.SRT -> SrtPublisher(url, listener)
         Transport.RIST -> RistPublisher(url, listener, links.takeIf { bonded })
+        Transport.WHIP -> WhipPublisher(
+            url,
+            if (key.isBlank()) emptyMap() else mapOf("Authorization" to "Bearer ${key.trim()}"),
+            listener,
+            http,
+            requestKeyFrame,
+        )
         else -> throw IllegalArgumentException("Unsupported URL: $url")
     }
 
@@ -1343,6 +1352,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 abr = when (publisher) {
                     is SrtPublisher -> BelaboxAdaptiveBitrate(cap, min)
                     is RistPublisher -> RistAdaptiveBitrate(cap, min)
+                    is WhipPublisher -> LossAdaptiveBitrate(cap, min)
                     else -> QueueAdaptiveBitrate(cap, min)
                 }
                 max = cap
