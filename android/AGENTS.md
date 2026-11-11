@@ -308,9 +308,11 @@ them, not code style.
   selected panel, shown or hidden, so a hidden page keeps running, and is destroyed when the panel is closed
   or another panel takes its place, and with the activity. It is paused while the activity is stopped. A
   page whose renderer process dies is closed instead of taking the app down. Only `http`, `https` and
-  `about` links are followed. `browserAddress` turns the address field's text into a URL: a scheme is kept,
-  an IPv4 address or `localhost` gets `http://`, other text with a dot and no space gets `https://`, and
-  the rest is a Google search. The field shows the URL without `https://` and selects it all when tapped.
+  `about` links are followed. `browserAddress` turns the address field's text into a URL, and nothing else is ever
+  loaded: an `http` or `https` URL and `about:blank` are kept, an IPv4 address or `localhost` gets
+  `http://`, other text with a dot, no space and no scheme gets `https://`, and the rest, any other scheme
+  included, is a Google search. The field shows the URL without `https://`, otherwise unchanged so that Go
+  reloads the same page, and selects it all when tapped.
   The system back button goes back in the page's history before it closes the panel. Bookmarks
   (`AppSettings.bookmarks`) are listed where the page would be until one is loaded, and on their own page
   with "Add this page"; the page's sound plays on the phone and is not in the stream.

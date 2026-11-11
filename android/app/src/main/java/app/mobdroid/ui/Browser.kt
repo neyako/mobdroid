@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.view.ViewGroup
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
@@ -81,21 +83,22 @@ import app.mobdroid.settings.Bookmark
 import app.mobdroid.settings.SettingsStore
 import java.net.URLEncoder
 
-private val SCHEME = Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://")
-private val LOCAL_HOST = Regex("^(localhost|\\d{1,3}(\\.\\d{1,3}){3})(:\\d+)?(/.*)?$")
+private val SCHEME = Regex("^([a-zA-Z][a-zA-Z0-9+.-]*)://")
+private val LOCAL_HOST = Regex("^(localhost|\\d{1,3}(\\.\\d{1,3}){3})(:\\d+)?([/?#].*)?$")
 
 fun browserAddress(text: String): String {
     val trimmed = text.trim()
+    val scheme = SCHEME.find(trimmed)?.groupValues?.get(1)?.lowercase()
     return when {
-        trimmed.isEmpty() -> "about:blank"
-        SCHEME.containsMatchIn(trimmed) -> trimmed
-        LOCAL_HOST.matches(trimmed) -> "http://$trimmed"
-        ' ' !in trimmed && '.' in trimmed -> "https://$trimmed"
+        trimmed.isEmpty() || trimmed == "about:blank" -> "about:blank"
+        scheme == "http" || scheme == "https" -> trimmed
+        scheme == null && LOCAL_HOST.matches(trimmed) -> "http://$trimmed"
+        scheme == null && ' ' !in trimmed && '.' in trimmed -> "https://$trimmed"
         else -> "https://www.google.com/search?q=" + URLEncoder.encode(trimmed, "UTF-8")
     }
 }
 
-fun shortAddress(url: String): String = url.removePrefix("https://").removePrefix("www.").removeSuffix("/")
+fun shortAddress(url: String): String = url.removePrefix("https://")
 
 class BrowserState {
     var webView by mutableStateOf<WebView?>(null)
@@ -143,7 +146,7 @@ class BrowserState {
             override fun onPageFinished(view: WebView, url: String) = sync(view)
 
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
-                view.post { if (view === webView) close() }
+                Handler(Looper.getMainLooper()).post { if (view === webView) close() }
                 return true
             }
         }
