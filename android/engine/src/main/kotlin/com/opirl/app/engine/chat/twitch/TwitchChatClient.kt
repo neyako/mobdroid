@@ -286,6 +286,7 @@ class TwitchChatClient internal constructor(
     private fun joined(conn: Connection, joinedRoomId: String?) {
         if (joinedRoomId != null) {
             roomId = joinedRoomId
+            listener.onChannelId(joinedRoomId)
         }
         if (conn.joined) {
             return
