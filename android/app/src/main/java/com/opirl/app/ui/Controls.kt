@@ -282,8 +282,8 @@ fun QuickButtonGrid(buttons: List<QuickButton>, closedColumns: Int, open: () -> 
 }
 
 @Composable
-fun MoblinLogo(size: Dp = 40.dp) {
-    Image(painterResource(R.drawable.moblin_logo), "Moblin", Modifier.size(size))
+fun AppLogo(size: Dp = 40.dp) {
+    Image(painterResource(R.drawable.ic_logo), "opIRL", Modifier.size(size))
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
