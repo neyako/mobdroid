@@ -242,7 +242,8 @@ them, not code style.
   the pending requests stay bounded.
 - Between `CurrentSceneCollectionChanging` and `CurrentSceneCollectionChanged` nothing is sent (OBS can
   crash on requests then): requests fail at once, the screenshot timer stops, and everything is read again
-  afterwards.
+  afterwards. The check and the send of a request share one lock with those two events, because commands
+  are sent from other threads.
 - A mute event that arrives during an input refresh restarts the refresh, so an older answer cannot
   overwrite it.
 - The audio inputs are OBS's special inputs (desktop and mic devices) plus the enabled sources of the

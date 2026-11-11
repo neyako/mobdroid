@@ -148,6 +148,7 @@ class ObsClient(
         private val executor = Executors.newSingleThreadScheduledExecutor { Thread(it, "obs").apply { isDaemon = true } }
         private val pending = ConcurrentHashMap<String, (JsonObject?, String?) -> Unit>()
         private val nextId = AtomicInteger()
+        private val sendLock = Any()
 
         @Volatile private var closed = false
 
@@ -262,25 +263,33 @@ class ObsClient(
         }
 
         fun request(type: String, data: JsonObject? = null, onResult: (JsonObject?, String?) -> Unit) {
-            val current = socket
-            if (current == null || !identified || changing) {
-                onResult(null, if (changing) "OBS is changing its scene collection" else "OBS is not connected")
-                return
-            }
             val id = nextId.incrementAndGet().toString()
-            pending[id] = onResult
-            val sent = current.send(
-                buildJsonObject {
-                    put("op", 6)
-                    putJsonObject("d") {
-                        put("requestType", type)
-                        put("requestId", id)
-                        if (data != null) put("requestData", data)
+            val message = buildJsonObject {
+                put("op", 6)
+                putJsonObject("d") {
+                    put("requestType", type)
+                    put("requestId", id)
+                    if (data != null) put("requestData", data)
+                }
+            }.toString()
+            val failure = synchronized(sendLock) {
+                val current = socket
+                when {
+                    current == null || !identified -> "OBS is not connected"
+                    changing -> "OBS is changing its scene collection"
+                    else -> {
+                        pending[id] = onResult
+                        if (current.send(message)) {
+                            null
+                        } else {
+                            pending.remove(id)
+                            "OBS is not connected"
+                        }
                     }
-                }.toString(),
-            )
-            if (!sent) {
-                pending.remove(id)?.invoke(null, "OBS is not connected")
+                }
+            }
+            if (failure != null) {
+                onResult(null, failure)
                 return
             }
             runCatching {
@@ -362,13 +371,13 @@ class ObsClient(
                 }
                 "SceneListChanged", "SceneCreated", "SceneRemoved", "SceneNameChanged" -> requestScenes()
                 "CurrentSceneCollectionChanging" -> {
-                    changing = true
+                    synchronized(sendLock) { changing = true }
                     inputsRefresh++
                     refreshing = false
                     stopShooting()
                 }
                 "CurrentSceneCollectionChanged" -> {
-                    changing = false
+                    synchronized(sendLock) { changing = false }
                     requestScenes()
                     refreshInputs()
                     shoot()
