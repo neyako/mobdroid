@@ -44,10 +44,30 @@ enum class StatusItem(val label: String) {
     BITRATE("Bitrate"),
     BONDING("Bonding"),
     AUDIO_LEVEL("Audio level"),
+    RECORDING("Recording"),
 }
 
 @Serializable
-enum class QuickButtonId(val label: String) { CHAT("Chat"), BITRATE("Bitrate"), MIC("Mic"), STEALTH("Stealth"), TORCH("Torch") }
+enum class QuickButtonId(val label: String) {
+    CHAT("Chat"),
+    RECORD("Record"),
+    SNAPSHOT("Snapshot"),
+    BITRATE("Bitrate"),
+    MIC("Mic"),
+    STEALTH("Stealth"),
+    TORCH("Torch"),
+}
+
+@Serializable
+data class RecordingSettings(
+    val separate: Boolean = false,
+    val codec: VideoCodec? = null,
+    val bitrateKbps: Int = 20000,
+    val startWithStream: Boolean = false,
+    val stopWithStream: Boolean = false,
+)
+
+val RECORDING_CODECS = listOf(VideoCodec.HEVC, VideoCodec.H264, VideoCodec.AV1)
 
 @Serializable
 data class StreamProfile(
@@ -69,6 +89,7 @@ data class StreamProfile(
     val youtubeChannel: String = "",
     val srtLatencyMs: Int = 3000,
     val bondingNetworks: Set<LinkType> = BONDING_NETWORKS,
+    val recording: RecordingSettings = RecordingSettings(),
 )
 
 @Serializable

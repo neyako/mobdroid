@@ -13,6 +13,7 @@ them, not code style.
     pinned to an interface, used by SRTLA bonding).
   - `flv/`, `rtmp/` — FLV tags and the RTMP/RTMPS publisher. HEVC and AV1 use Enhanced RTMP.
   - `ts/` — MPEG-TS muxer (H264, HEVC, AV1, AAC).
+  - `mp4/` — the recorder: a crash-safe MP4 writer and the function that finishes or recovers a file.
   - `srt/` — SRT caller, a port of Moblin's own `SrtSender.swift`. `srtla/` — SRTLA bonding client,
     a port of `Moblin/Media/Srtla/Client`. `abr/` — adaptive bitrate (Belabox port).
 - `app/` — the Android app: camera sources, GL compositor, MediaCodec encoders, the foreground
@@ -148,6 +149,45 @@ them, not code style.
   payloads; the network goes through the `OkHttpClient` passed in; JSON is read as `JsonElement` trees
   (`kotlinx.serialization.json`, no compiler plugin in the engine).
 
+## Recording
+
+- `Mp4Recorder(input, output, onError)` is a `MediaSink` with its own writer thread and a bounded backlog
+  (32 MiB). `input` and `output` are channels of the same file: Android hands out a file descriptor, whose
+  read and write channels are separate, a JVM test passes one `RandomAccessFile` channel twice. On overflow
+  or an I/O error it stops taking frames, finishes what it wrote and calls `onError` once, from the thread
+  that hit it, so the handler must not call `stop()` from inside it. `stop()` blocks until the file is
+  finished, returns null when nothing was recorded and throws when the file could not be finished. Such a
+  file still holds its blocks: the app leaves it pending and `recover()` finishes it at a later start.
+- File layout: `ftyp`, one `mdat`, and `moov` at the end. Inside `mdat` the media is written in blocks of
+  about a second: a 16 byte header (magic `mdrb`, records length, data length, CRC32 of the records), the
+  records (the formats, then one 13 byte record per video sample, then per audio sample: tag, size, pts),
+  then the video samples and the audio samples. A block is one chunk per track. The blocks are the only
+  index while recording, so nothing but the encoded frames is kept in memory.
+- `finishMp4(input, output)` walks the blocks from the start, stops at the first one that is incomplete or
+  fails its CRC, truncates the file there, appends `moov` and patches the `mdat` size. Stopping a recording
+  and recovering one after a crash are this same call, and running it on a finished file rewrites the same
+  `moov`. It returns null when the file has no video sample.
+- A recording starts at the first key frame. Audio that arrives before that key frame is held (48 frames)
+  and kept when it is not more than 25 ms older than the key frame. The track that starts later gets an
+  empty edit, so sync holds. Video deltas come from the timestamps in a 90 kHz timescale; audio uses 1024
+  samples per frame and follows the timestamps only when they drift more than half a frame.
+- H264 and HEVC samples are length prefixed and keep their in-band parameter sets (`avc1`, `hvc1`); AV1
+  samples drop temporal delimiters and get the sequence header on key frames (`av01`).
+- The app side (`recording/RecordingStore`): a recording is a MediaStore video in `Movies/Mobdroid`,
+  pending while it is written and published when finished, so the gallery never shows a half written file.
+  `recover()` runs once at start, finishes every pending recording an earlier run of the app left behind
+  (older than this process, so never the one being written) and deletes the ones with nothing in them.
+  Snapshots go to `Pictures/Mobdroid`.
+- `StreamEngine` runs the encoders while it is live or recording (`busy`). `MediaTee` takes the output of
+  the stream video encoder and the audio encoder to the stream session and the recorder, and replays the
+  formats to a sink attached later. `RecordingSettings.separate` adds a second video encoder
+  (`VideoCompositor.setRecorder`) with its own codec and bitrate at the stream's resolution and frame rate;
+  otherwise the recorder gets the stream's frames, at the profile's bitrate while not live. `syncEncoders`
+  is the one place that creates and releases encoders for the current state. `fail` clears the recording
+  and the session before it reconciles, so a teardown never tries to create an encoder. The stream profile cannot
+  change while busy. Recording stops with an alert when free storage falls under 300 MiB.
+- The foreground service runs while live or recording; its notification title says which.
+
 ## UI
 
 - `ui/MainScreen.kt` lays the screen out the way Moblin does. Wide screens: the preview with rounded corners
@@ -174,6 +214,9 @@ them, not code style.
 - `streamUrl` adds the profile's SRT latency to an `srt`/`srtla` URL that does not name one.
   `StreamProfile.bondingNetworks` limits which networks SRTLA requests.
 - `mirrorFrontCameraOnStream` makes the encoder draw the same mirrored picture as the preview.
+- The Record quick button asks for a second tap to stop, like the End button. The recording time and size
+  are a status item. Recording settings are per stream (Streams, a stream, Recording); the recordings list
+  is Settings, Recordings.
 
 ## Commands
 

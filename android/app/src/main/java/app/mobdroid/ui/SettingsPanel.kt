@@ -9,6 +9,28 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import android.content.Intent
+import android.net.Uri
+import android.util.Size
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.rounded.Videocam
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import app.mobdroid.recording.Recording
+import app.mobdroid.settings.RECORDING_CODECS
+import app.mobdroid.settings.RecordingSettings
+import app.mobdroid.stream.formatBytes
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -105,6 +127,10 @@ private sealed interface Route {
 
     data class StreamChat(val id: String) : Route
 
+    data class StreamRecording(val id: String) : Route
+
+    data object Recordings : Route
+
     data object Chat : Route
 
     data object TwitchAccount : Route
@@ -145,6 +171,8 @@ private fun title(route: Route, settings: AppSettings) = when (route) {
     is Route.StreamAudio -> "Audio"
     is Route.StreamTransport -> settings.profile(route.id)?.let(::transportName).orEmpty()
     is Route.StreamChat -> "Chat"
+    is Route.StreamRecording -> "Recording"
+    Route.Recordings -> "Recordings"
     Route.Chat -> "Chat"
     Route.TwitchAccount -> "Twitch account"
     Route.KickAccount -> "Kick account"
@@ -245,6 +273,10 @@ fun SettingsPanel(store: SettingsStore, engine: StreamEngine, live: Boolean, onC
                                 }
                             }
                         }
+                        is Route.StreamRecording -> settings.profile(route.id)?.let {
+                            StreamRecording(store, it, editable(settings, it, live))
+                        }
+                        Route.Recordings -> RecordingsPage(engine)
                         Route.TwitchAccount -> TwitchAccountPage(engine)
                         Route.KickAccount -> KickAccountPage(engine)
                         Route.Chat -> ChatPage(store, settings, engine, push)
@@ -422,6 +454,11 @@ private fun Home(settings: AppSettings, push: (Route) -> Unit) {
     }
     Group {
         row {
+            NavRow(it, "Recordings", badge = Badge(Icons.Rounded.Videocam, Color(0xFF6FE3C8), MaterialShapes.Gem)) {
+                push(Route.Recordings)
+            }
+        }
+        row {
             NavRow(it, "Bitrate presets", badge = Badge(Icons.Rounded.Speed, Color(0xFFC3A6FF), MaterialShapes.Pentagon)) {
                 push(Route.BitratePresets)
             }
@@ -505,6 +542,7 @@ private fun StreamPage(
             val channels = listOf(profile.twitchChannel, profile.youtubeChannel, profile.kickChannel).count { it.isNotBlank() }
             NavRow(shapes, "Chat", if (channels == 0) "Off" else "$channels on") { push(Route.StreamChat(profile.id)) }
         }
+        row { NavRow(it, "Recording", recordingSummary(profile)) { push(Route.StreamRecording(profile.id)) } }
     }
     Group {
         row { shapes ->
@@ -604,6 +642,134 @@ private fun StreamAudio(store: SettingsStore, profile: StreamProfile, editable: 
                 store.updateProfile(profile.copy(audioBitrateKbps = it))
             }
         }
+    }
+}
+
+private fun recordingCodec(profile: StreamProfile): VideoCodec {
+    val (w, h) = outputSize(profile)
+    return CodecCatalog.choose(profile.recording.codec, RECORDING_CODECS, w, h, profile.fps)
+}
+
+private fun recordingSummary(profile: StreamProfile) = if (profile.recording.separate) {
+    "${recordingCodec(profile).label} ${formatMbps(profile.recording.bitrateKbps)} Mbps"
+} else {
+    "Same as stream"
+}
+
+@Composable
+private fun StreamRecording(store: SettingsStore, profile: StreamProfile, editable: Boolean) {
+    val recording = profile.recording
+    val update = { changed: RecordingSettings -> store.updateProfile(profile.copy(recording = changed)) }
+    val (w, h) = outputSize(profile)
+    Group {
+        row { shapes ->
+            ChoiceRow(
+                shapes,
+                "Quality",
+                listOf(false, true),
+                recording.separate,
+                { if (it) "Separate" else "Same as stream" },
+                enabled = editable,
+            ) { update(recording.copy(separate = it)) }
+        }
+        if (recording.separate) {
+            row { shapes ->
+                ChoiceRow(
+                    shapes,
+                    "Codec",
+                    listOf<VideoCodec?>(null) + RECORDING_CODECS.reversed(),
+                    recording.codec,
+                    { it?.label ?: "Auto ${recordingCodec(profile.copy(recording = recording.copy(codec = null))).label}" },
+                    { it == null || CodecCatalog.available(it, w, h, profile.fps) },
+                    editable,
+                ) { update(recording.copy(codec = it)) }
+            }
+            row { shapes ->
+                BitrateRow(shapes, "Bitrate", recording.bitrateKbps, 2000..60000, editable) { update(recording.copy(bitrateKbps = it)) }
+            }
+        }
+    }
+    Group {
+        row { shapes ->
+            SwitchRow(shapes, "Start when going live", recording.startWithStream, editable) {
+                update(recording.copy(startWithStream = it))
+            }
+        }
+        row { shapes ->
+            SwitchRow(shapes, "Stop when the stream ends", recording.stopWithStream, editable) {
+                update(recording.copy(stopWithStream = it))
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecordingThumbnail(uri: Uri) {
+    val context = LocalContext.current
+    val image by produceState<ImageBitmap?>(null, uri) {
+        value = withContext(Dispatchers.IO) {
+            runCatching { context.contentResolver.loadThumbnail(uri, Size(192, 108), null).asImageBitmap() }.getOrNull()
+        }
+    }
+    Box(Modifier.size(64.dp, 36.dp).clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest)) {
+        image?.let { Image(it, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun RecordingsPage(engine: StreamEngine) {
+    val recordings by engine.recordings.recordings.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var deleting by remember { mutableStateOf<Recording?>(null) }
+    LaunchedEffect(Unit) { withContext(Dispatchers.IO) { engine.recordings.refresh() } }
+    if (recordings.isEmpty()) {
+        Text("No recordings", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 12.dp))
+    } else {
+        Group {
+            recordings.forEach { recording ->
+                row { shapes ->
+                    SegmentedListItem(
+                        contentPadding = RowPadding,
+                        colors = rowColors(),
+                        shapes = shapes,
+                        onClick = {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW)
+                                        .setDataAndType(recording.uri, "video/mp4")
+                                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+                                )
+                            }
+                        },
+                        verticalAlignment = Alignment.CenterVertically,
+                        leadingContent = { RecordingThumbnail(recording.uri) },
+                        supportingContent = {
+                            Text("${formatUptime(recording.durationMs / 1000)}  ${formatBytes(recording.bytes)}", maxLines = 1)
+                        },
+                        trailingContent = {
+                            IconButton({ deleting = recording }) { Icon(Icons.Rounded.Delete, "Delete ${recording.name}") }
+                        },
+                    ) { Text(recording.name, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                }
+            }
+        }
+    }
+    Group { row { ValueRow(it, "Saved to", "Movies/Mobdroid") } }
+    deleting?.let { recording ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("Delete recording?") },
+            text = { Text(recording.name) },
+            confirmButton = {
+                TextButton({
+                    deleting = null
+                    scope.launch(Dispatchers.IO) { engine.recordings.delete(recording.uri) }
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton({ deleting = null }) { Text("Cancel") } },
+        )
     }
 }
 

@@ -63,6 +63,7 @@ import kotlinx.coroutines.delay
 fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
     val ui by engine.ui.collectAsStateWithLifecycle()
     val stats by engine.stats.collectAsStateWithLifecycle()
+    val recording by engine.recording.collectAsStateWithLifecycle()
     val appSettings by settings.settings.collectAsStateWithLifecycle()
     val profile = appSettings.selectedProfile
     var side by remember { mutableStateOf<Side?>(null) }
@@ -73,6 +74,8 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
     var showBitrate by remember { mutableStateOf(false) }
     var stealth by remember { mutableStateOf(false) }
     var confirmStop by remember { mutableStateOf(false) }
+    var confirmRecordStop by remember { mutableStateOf(false) }
+    val busy = ui.live != LiveState.OFFLINE || recording != null
     val (outW, outH) = outputSize(profile)
     val aspect = outW.toFloat() / outH
     val onLive = {
@@ -89,7 +92,20 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
         ui,
         appSettings.hiddenQuickButtons,
         chatOpen = side == Side.CHAT,
+        recording = recording != null,
+        confirmRecordStop = confirmRecordStop,
         onChat = { toggle(Side.CHAT) },
+        onRecord = {
+            when {
+                recording == null -> engine.startRecording()
+                confirmRecordStop -> {
+                    confirmRecordStop = false
+                    engine.stopRecording()
+                }
+                else -> confirmRecordStop = true
+            }
+        },
+        onSnapshot = engine::takeSnapshot,
         onBitrate = { showBitrate = true },
         onStealth = { stealth = true },
         onMute = { engine.setMuted(!ui.muted) },
@@ -118,7 +134,16 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                         Modifier.fillMaxWidth().height(52.dp).padding(start = 24.dp, end = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Status(ui, stats, engine.audioLevel, appSettings.hiddenStatusItems, engine::clearError, compact = true, Modifier.weight(1f))
+                        Status(
+                            ui,
+                            stats,
+                            recording,
+                            engine.audioLevel,
+                            appSettings.hiddenStatusItems,
+                            engine::clearError,
+                            compact = true,
+                            Modifier.weight(1f),
+                        )
                         MoblinLogo()
                         Spacer(Modifier.width(8.dp))
                         SettingsButton(showSettings) { toggle(Side.SETTINGS) }
@@ -174,6 +199,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                                 Status(
                                     ui,
                                     stats,
+                                    recording,
                                     engine.audioLevel,
                                     appSettings.hiddenStatusItems,
                                     engine::clearError,
@@ -199,7 +225,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                                 if (shownSide == Side.CHAT) {
                                     ChatPanel(engine, appSettings, onClose = { side = null })
                                 } else {
-                                    SettingsPanel(settings, engine, ui.live != LiveState.OFFLINE, onClose = { side = null })
+                                    SettingsPanel(settings, engine, busy, onClose = { side = null })
                                 }
                             }
                         }
@@ -245,10 +271,19 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                 ) {
                     if (shownSide == Side.CHAT) {
                         ChatPanel(engine, appSettings, onClose = { side = null }) {
-                            Status(ui, stats, engine.audioLevel, appSettings.hiddenStatusItems, engine::clearError, compact = true, Modifier)
+                            Status(
+                                ui,
+                                stats,
+                                recording,
+                                engine.audioLevel,
+                                appSettings.hiddenStatusItems,
+                                engine::clearError,
+                                compact = true,
+                                Modifier,
+                            )
                         }
                     } else {
-                        SettingsPanel(settings, engine, ui.live != LiveState.OFFLINE, onClose = { side = null })
+                        SettingsPanel(settings, engine, busy, onClose = { side = null })
                     }
                 }
             }
@@ -262,6 +297,14 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
         if (confirmStop) {
             delay(3000)
             confirmStop = false
+        }
+    }
+    LaunchedEffect(confirmRecordStop, recording == null) {
+        if (recording == null) {
+            confirmRecordStop = false
+        } else if (confirmRecordStop) {
+            delay(3000)
+            confirmRecordStop = false
         }
     }
     BackHandler(side != null) { side = null }

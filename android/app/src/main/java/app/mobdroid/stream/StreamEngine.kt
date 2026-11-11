@@ -33,6 +33,8 @@ import app.mobdroid.engine.rtmp.RtmpPublisher
 import app.mobdroid.engine.srt.SrtPublisher
 import app.mobdroid.settings.allowedCodecs
 import app.mobdroid.engine.media.VideoCodec
+import app.mobdroid.engine.mp4.Mp4Recorder
+import app.mobdroid.engine.mp4.Mp4Summary
 import app.mobdroid.engine.net.Publisher
 import app.mobdroid.engine.net.PublisherListener
 import app.mobdroid.media.AUDIO_LEVEL_FLOOR_DB
@@ -42,6 +44,10 @@ import app.mobdroid.media.VideoEncoder
 import app.mobdroid.media.gl.VideoCompositor
 import app.mobdroid.settings.LoginStore
 import app.mobdroid.settings.MicSource
+import app.mobdroid.settings.RECORDING_CODECS
+import app.mobdroid.settings.RecordingSettings
+import app.mobdroid.recording.RecordingFile
+import app.mobdroid.recording.RecordingStore
 import java.io.File
 import app.mobdroid.settings.SettingsStore
 import app.mobdroid.settings.streamUrl
@@ -103,6 +109,15 @@ data class UiState(
     val activeCamera: CameraDescriptor? get() = lens?.camera ?: camera
 }
 
+data class RecordingStats(val seconds: Long = 0, val bytes: Long = 0)
+
+private class ActiveRecording(
+    val file: RecordingFile,
+    val recorder: Mp4Recorder,
+    val settings: RecordingSettings,
+    val startedAt: Long,
+)
+
 class StreamEngine(private val context: Context, private val settings: SettingsStore) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -144,11 +159,19 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private var previewSurface: Surface? = null
     private var displayRotation = 0
     private var videoEncoder: VideoEncoder? = null
+    private var recordEncoder: VideoEncoder? = null
     private var audioEncoder: AudioEncoder? = null
+    private var audioLive = false
+    private val tee = MediaTee()
     private var session: StreamSession? = null
+    private var activeRecording: ActiveRecording? = null
     private var liveProfile: StreamProfile? = null
     private var liveCodec: VideoCodec? = null
-    private var monitor: Job? = null
+    private var liveJob: Job? = null
+    private var ticker: Job? = null
+    val recordings = RecordingStore(context)
+    private val _recording = MutableStateFlow<RecordingStats?>(null)
+    val recording: StateFlow<RecordingStats?> = _recording.asStateFlow()
     private var liveStartedAt = 0L
     private var targetBitrate = 0
     private var previewActive = false
@@ -168,7 +191,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 .drop(1)
                 .collect {
                     synchronized(this@StreamEngine) {
-                        if (isLive || !previewActive) return@collect
+                        if (busy || !previewActive) return@collect
                         val (w, h) = outputSize(settings.settings.value.selectedProfile)
                         compositor?.setOutputSize(w, h)
                         openCamera()
@@ -196,7 +219,13 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         }
         scope.launch {
             settings.settings.map { it.mic }.distinctUntilChanged().drop(1).collect {
-                synchronized(this@StreamEngine) { if (!isLive && previewActive) startAudioMeter() }
+                synchronized(this@StreamEngine) { if (!busy && previewActive) startAudioMeter() }
+            }
+        }
+        ioScope.launch {
+            val recovered = recordings.recover()
+            if (recovered > 0) {
+                showAlert(AlertLevel.INFO, if (recovered == 1) "Recording recovered" else "$recovered recordings recovered")
             }
         }
         powerManager.addThermalStatusListener(context.mainExecutor) { status ->
@@ -354,6 +383,8 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
 
     val isLive: Boolean get() = session != null
 
+    private val busy: Boolean get() = session != null || activeRecording != null
+
     fun startPreview() {
         synchronized(this) {
             if (previewActive) return
@@ -368,7 +399,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 _ui.update { it.copy(cameras = cameras, camera = selected, lens = selected?.let(::defaultLens)) }
                 ensureCompositor()
                 openCamera()
-                if (!isLive) {
+                if (!busy) {
                     startAudioMeter()
                     chat.start()
                 }
@@ -400,7 +431,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
 
     @Synchronized
     fun stopPreviewIfIdle() {
-        if (!previewActive || isLive) return
+        if (!previewActive || busy) return
         previewActive = false
         chat.stop()
         audioEncoder?.release()
@@ -462,61 +493,106 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
 
     fun setExposureCompensation(ev: Float) = camera.setExposureCompensation(ev)
 
-    @Synchronized
-    fun goLive() {
-        if (isLive) return
-        if (LIVE_PERMISSIONS.any { context.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }) {
-            _ui.update { it.copy(error = "Allow camera and microphone access to go live") }
-            return
-        }
-        val profile = settings.settings.value.selectedProfile
+    private fun hasLivePermissions(): Boolean {
+        if (LIVE_PERMISSIONS.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }) return true
+        _ui.update { it.copy(error = "Allow camera and microphone access") }
+        return false
+    }
+
+    private fun begin(profile: StreamProfile): Boolean {
         val (w, h) = outputSize(profile)
         val codec = CodecCatalog.choose(profile.codec, profile.allowedCodecs, w, h, profile.fps)
         if (CodecCatalog.encoders[codec] == null) {
             _ui.update { it.copy(error = "No hardware video encoder") }
-            return
+            return false
         }
         liveProfile = profile
         liveCodec = codec
         targetBitrate = profile.bitrateKbps * 1000
         liveMaxBitrate = targetBitrate.toLong()
-        transportMeter = TransportBitrateMeter(ADAPTIVE_BITRATE_START_BPS)
         ensureCompositor()
         if (!previewActive) startPreview()
         compositor!!.setOutputSize(w, h)
         compositor!!.setFrameRate(encoderFps(profile))
+        return true
+    }
+
+    private fun end() {
+        updateService()
+        if (busy) return
+        ticker?.cancel()
+        ticker = null
+        liveProfile = null
+        if (previewSurface == null) stopPreviewIfIdle() else if (previewActive) startAudioMeter()
+    }
+
+    private fun startTicker() {
+        if (ticker != null) return
+        ticker = scope.launch {
+            while (isActive) {
+                delay(1000)
+                tick()
+            }
+        }
+    }
+
+    private fun updateService() {
+        val title = when {
+            session != null && activeRecording != null -> "Live and recording"
+            session != null -> "Live"
+            activeRecording != null -> "Recording"
+            else -> null
+        }
+        val service = Intent(context, StreamService::class.java)
+        if (title != null) {
+            service.putExtra(StreamService.EXTRA_USB, uvcCamera != null).putExtra(StreamService.EXTRA_TITLE, title)
+            if (serviceStarted) {
+                runCatching { context.startForegroundService(service) }.onFailure { Log.w(TAG, "Service update failed", it) }
+            } else {
+                context.startForegroundService(service)
+                serviceStarted = true
+            }
+        } else if (serviceStarted) {
+            serviceStarted = false
+            try {
+                context.startService(service.setAction(StreamService.ACTION_STOP))
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, "Stopping the stream service directly", e)
+                context.stopService(service)
+            }
+        }
+    }
+
+    @Synchronized
+    fun goLive() {
+        if (isLive || !hasLivePermissions()) return
+        val profile = liveProfile ?: settings.settings.value.selectedProfile
+        if (!busy && !begin(profile)) return
+        targetBitrate = profile.bitrateKbps * 1000
+        liveMaxBitrate = targetBitrate.toLong()
+        transportMeter = TransportBitrateMeter(ADAPTIVE_BITRATE_START_BPS)
         val newSession = StreamSession(ioScope, { listener -> createPublisher(profile, listener) }) {
             videoEncoder?.requestKeyFrame()
         }
         session = newSession
+        tee.setStream(newSession)
         if (profile.url.startsWith("srtla://")) links.start(profile.bondingNetworks)
         linkBytes = emptyMap()
         try {
-            startVideoEncoder()
-            audioEncoder?.release()
-            audioEncoder = null
-            audioEncoder = AudioEncoder(
-                profile.audioBitrateKbps * 1000,
-                newSession,
-                micDevice(),
-                { _audioLevel.value = it },
-                ::onFatal,
-            ).also { it.muted = _ui.value.muted }
+            syncEncoders()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start encoders", e)
             stopLive()
             _ui.update { it.copy(error = e.message ?: "Encoder failed") }
             return
         }
-        context.startForegroundService(
-            Intent(context, StreamService::class.java).putExtra(StreamService.EXTRA_USB, uvcCamera != null),
-        )
-        serviceStarted = true
+        videoEncoder?.setBitrate(targetBitrate)
+        updateService()
         newSession.start()
         liveStartedAt = System.nanoTime()
         lowBitrate = LowBitrateWatch()
         _ui.update { it.copy(error = null) }
-        monitor = scope.launch {
+        liveJob = scope.launch {
             launch {
                 var wasLive = false
                 var previous = LiveState.CONNECTING
@@ -535,39 +611,119 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             }
             launch { newSession.lastError.collect { e -> if (e != null) _ui.update { it.copy(error = e) } } }
             if (profile.adaptiveBitrate) launch { runAdaptiveBitrate(newSession, profile) }
-            while (isActive) {
-                delay(1000)
-                tick(newSession)
-            }
         }
+        startTicker()
+        if (profile.recording.startWithStream) startRecording()
     }
 
     @Synchronized
     fun stopLive() {
-        monitor?.cancel()
-        monitor = null
+        val profile = liveProfile
+        val wasLive = session != null
+        liveJob?.cancel()
+        liveJob = null
         session?.stop()
         session = null
-        compositor?.setEncoder(null)
-        videoEncoder?.release()
-        videoEncoder = null
-        audioEncoder?.release()
-        audioEncoder = null
+        tee.setStream(null)
         links.stop()
-        liveProfile = null
         _ui.update { it.copy(live = LiveState.OFFLINE, error = null) }
         _stats.value = LiveStats()
-        if (serviceStarted) {
-            serviceStarted = false
-            val service = Intent(context, StreamService::class.java)
-            try {
-                context.startService(service.setAction(StreamService.ACTION_STOP))
-            } catch (e: IllegalStateException) {
-                Log.w(TAG, "Stopping the stream service directly", e)
-                context.stopService(service)
+        if (wasLive && profile?.recording?.stopWithStream == true) stopRecording()
+        if (profile != null) {
+            targetBitrate = profile.bitrateKbps * 1000
+            videoEncoder?.setBitrate(targetBitrate)
+        }
+        syncEncoders()
+        end()
+    }
+
+    @Synchronized
+    fun startRecording() {
+        if (activeRecording != null || !hasLivePermissions()) return
+        val profile = liveProfile ?: settings.settings.value.selectedProfile
+        if (recordings.freeBytes() < MIN_FREE_BYTES) {
+            showAlert(AlertLevel.WARNING, "Storage is full", "Recording not started")
+            return
+        }
+        val file = try {
+            recordings.create()
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not create a recording", e)
+            showAlert(AlertLevel.ERROR, "Could not start recording", e.message)
+            return
+        }
+        if (!busy && !begin(profile)) {
+            file.close()
+            recordings.delete(file.uri)
+            return
+        }
+        lateinit var active: ActiveRecording
+        val recorder = Mp4Recorder(file.input, file.output) { message ->
+            scope.launch { synchronized(this@StreamEngine) { if (activeRecording === active) stopRecording(message) } }
+        }
+        active = ActiveRecording(file, recorder, profile.recording, System.nanoTime())
+        activeRecording = active
+        recorder.start()
+        tee.setRecorder(recorder, video = !profile.recording.separate)
+        try {
+            syncEncoders()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start the recording encoders", e)
+            stopRecording(e.message ?: "Encoder failed")
+            return
+        }
+        videoEncoder?.requestKeyFrame()
+        _recording.value = RecordingStats()
+        startTicker()
+        updateService()
+        showAlert(AlertLevel.INFO, "Recording started")
+    }
+
+    @Synchronized
+    fun stopRecording(error: String? = null) {
+        val active = activeRecording ?: return
+        activeRecording = null
+        tee.setRecorder(null, video = false)
+        _recording.value = null
+        finishRecording(active, error)
+        syncEncoders()
+        end()
+    }
+
+    private fun finishRecording(active: ActiveRecording, error: String?) {
+        ioScope.launch {
+            val summary = try {
+                active.recorder.stop()
+            } catch (e: Exception) {
+                Log.e(TAG, "Recording not finished", e)
+                active.file.close()
+                showAlert(AlertLevel.ERROR, "Recording not finished", "It is recovered when the app next starts")
+                return@launch
+            }
+            active.file.close()
+            if (summary == null) {
+                recordings.delete(active.file.uri)
+                showAlert(AlertLevel.ERROR, "Recording failed", error ?: "Nothing was recorded")
+                return@launch
+            }
+            recordings.publish(active.file.uri)
+            if (error == null) {
+                showAlert(AlertLevel.INFO, "Recording saved", describe(summary))
+            } else {
+                showAlert(AlertLevel.ERROR, "Recording stopped", error)
             }
         }
-        if (previewSurface == null) stopPreviewIfIdle() else if (previewActive) startAudioMeter()
+    }
+
+    fun takeSnapshot() {
+        val compositor = synchronized(this) { compositor } ?: return
+        compositor.takeSnapshot { bitmap ->
+            ioScope.launch {
+                val saved = bitmap != null && recordings.saveSnapshot(bitmap)
+                bitmap?.recycle()
+                if (saved) showAlert(AlertLevel.INFO, "Snapshot saved") else showAlert(AlertLevel.ERROR, "Snapshot failed")
+            }
+        }
     }
 
     fun clearError() = _ui.update { it.copy(error = null) }
@@ -582,7 +738,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         synchronized(this) {
             val live = liveProfile ?: return
             liveMaxBitrate = kbps * 1000L
-            if (!live.adaptiveBitrate) {
+            if (session == null || !live.adaptiveBitrate) {
                 targetBitrate = kbps * 1000
                 videoEncoder?.setBitrate(targetBitrate)
             }
@@ -605,63 +761,126 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         }
     }
 
-    private fun startVideoEncoder() {
+    private fun syncEncoders() {
         val profile = liveProfile ?: return
-        val session = session ?: return
         val (w, h) = outputSize(profile)
-        val encoder = VideoEncoder(
-            codec = liveCodec!!,
-            width = w,
-            height = h,
-            fps = encoderFps(profile),
-            bitrateBps = targetBitrate,
-            keyFrameIntervalSeconds = profile.keyFrameIntervalSeconds,
-            sink = session,
-            onError = ::onEncoderError,
-        )
-        videoEncoder = encoder
-        compositor!!.setEncoder(encoder.inputSurface)
+        val recording = activeRecording
+        if (busy && !audioLive) {
+            audioEncoder?.release()
+            audioEncoder = null
+            audioEncoder = AudioEncoder(
+                profile.audioBitrateKbps * 1000,
+                tee,
+                micDevice(),
+                { _audioLevel.value = it },
+                ::onFatal,
+            ).also { it.muted = _ui.value.muted }
+            audioLive = true
+        } else if (!busy && audioLive) {
+            audioEncoder?.release()
+            audioEncoder = null
+            audioLive = false
+            tee.forgetAudioFormat()
+        }
+        if (session == null && recording?.settings?.separate != false) {
+            videoEncoder?.let {
+                compositor?.setEncoder(null)
+                it.release()
+                videoEncoder = null
+                tee.forgetVideoFormat()
+            }
+        } else if (videoEncoder == null) {
+            val encoder = VideoEncoder(
+                codec = liveCodec!!,
+                width = w,
+                height = h,
+                fps = encoderFps(profile),
+                bitrateBps = targetBitrate,
+                keyFrameIntervalSeconds = profile.keyFrameIntervalSeconds,
+                sink = tee,
+                onError = ::onEncoderError,
+            )
+            videoEncoder = encoder
+            compositor!!.setEncoder(encoder.inputSurface)
+        }
+        if (recording?.settings?.separate != true) {
+            recordEncoder?.let {
+                compositor?.setRecorder(null)
+                it.release()
+                recordEncoder = null
+            }
+        } else if (recordEncoder == null) {
+            val encoder = VideoEncoder(
+                codec = CodecCatalog.choose(recording.settings.codec, RECORDING_CODECS, w, h, profile.fps),
+                width = w,
+                height = h,
+                fps = encoderFps(profile),
+                bitrateBps = recording.settings.bitrateKbps * 1000,
+                keyFrameIntervalSeconds = profile.keyFrameIntervalSeconds,
+                sink = VideoOnlySink(recording.recorder),
+                onError = ::onEncoderError,
+            )
+            recordEncoder = encoder
+            compositor!!.setRecorder(encoder.inputSurface)
+        }
     }
 
     @Synchronized
-    private fun restartVideoEncoder(reason: String) {
-        if (!isLive) return
-        Log.w(TAG, "Restarting video encoder: $reason")
+    private fun restartVideoEncoders(reason: String) {
+        if (!busy) return
+        Log.w(TAG, "Restarting video encoders: $reason")
         compositor?.setEncoder(null)
-        val released = videoEncoder?.release(timeoutMs = 5000) ?: true
+        compositor?.setRecorder(null)
+        val released = (videoEncoder?.release(timeoutMs = 5000) ?: true) and (recordEncoder?.release(timeoutMs = 5000) ?: true)
         videoEncoder = null
+        recordEncoder = null
         if (!released) {
-            stopLive()
-            _ui.update { it.copy(error = "Video encoder stopped responding") }
+            fail("Video encoder stopped responding")
             return
         }
-        runCatching { startVideoEncoder() }.onFailure { onFatal("Video encoder: ${it.message}") }
+        runCatching { syncEncoders() }.onFailure { fail("Video encoder: ${it.message}") }
     }
 
     private fun onEncoderError(message: String) {
         scope.launch {
             delay(200)
-            restartVideoEncoder(message)
+            restartVideoEncoders(message)
         }
+    }
+
+    @Synchronized
+    private fun fail(message: String) {
+        val wasLive = session != null
+        val active = activeRecording
+        activeRecording = null
+        tee.setRecorder(null, video = false)
+        _recording.value = null
+        active?.let { finishRecording(it, message) }
+        stopLive()
+        if (wasLive) showAlert(AlertLevel.ERROR, "Stream stopped", message)
+        _ui.update { it.copy(error = message) }
     }
 
     private fun onFatal(message: String) {
-        scope.launch {
-            stopLive()
-            showAlert(AlertLevel.ERROR, "Stream stopped", message)
-            _ui.update { it.copy(error = message) }
+        scope.launch { fail(message) }
+    }
+
+    private fun tick() {
+        val now = System.nanoTime()
+        val stalled = { encoder: VideoEncoder? -> encoder != null && now - encoder.lastOutputNanos > 5_000_000_000L }
+        if (_ui.value.cameraState == CameraState.Streaming && (stalled(videoEncoder) || stalled(recordEncoder))) {
+            restartVideoEncoders("no output for 5 s")
+        }
+        session?.let(::tickLive)
+        synchronized(this) {
+            val active = activeRecording ?: return
+            _recording.value = RecordingStats((now - active.startedAt) / 1_000_000_000L, active.recorder.bytesWritten)
+            if (recordings.freeBytes() < MIN_FREE_BYTES) stopRecording("Storage is full")
         }
     }
 
-    private fun tick(session: StreamSession) {
-        val profile = liveProfile ?: return
+    private fun tickLive(session: StreamSession) {
         val stats = session.stats()
-        val encoder = videoEncoder
-        if (encoder != null && _ui.value.cameraState == CameraState.Streaming &&
-            System.nanoTime() - encoder.lastOutputNanos > 5_000_000_000L
-        ) {
-            restartVideoEncoder("no output for 5 s")
-        }
         if (session.state.value == LiveState.LIVE) {
             transportMeter.update(stats.bytesSent, System.nanoTime())
         } else {
@@ -874,6 +1093,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         const val TAG = "StreamEngine"
         const val UVC_PREFIX = "uvc:"
         const val ADAPTIVE_BITRATE_START_BPS = 1_000_000L
+        const val MIN_FREE_BYTES = 300L shl 20
         val LIVE_PERMISSIONS = arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
     }
 }
@@ -881,6 +1101,14 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
 val CameraDescriptor.key: String get() = "$id:${physicalId.orEmpty()}"
 
 private fun formatKbps(bps: Long) = "${bps / 1000} kbps"
+
+private fun describe(summary: Mp4Summary): String {
+    val seconds = summary.durationMs / 1000
+    return "%d:%02d:%02d, %s".format(seconds / 3600, seconds / 60 % 60, seconds % 60, formatBytes(summary.bytes))
+}
+
+fun formatBytes(bytes: Long): String =
+    if (bytes >= 1 shl 30) "%.2f GB".format(bytes / 1073741824.0) else "${bytes shr 20} MB"
 
 fun outputSize(profile: StreamProfile): Pair<Int, Int> {
     return profile.resolution.width to profile.resolution.height
