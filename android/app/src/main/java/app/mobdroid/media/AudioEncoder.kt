@@ -14,12 +14,12 @@ import android.util.Log
 import app.mobdroid.engine.media.AudioFormat
 import app.mobdroid.engine.media.EncodedFrame
 import app.mobdroid.engine.media.MediaSink
-import java.util.Arrays
 
 class AudioEncoder(
     bitrateBps: Int,
     private val sink: MediaSink?,
     device: AudioDeviceInfo?,
+    private val mix: AudioMix,
     private val onLevel: (Float) -> Unit,
     private val onError: (String) -> Unit,
 ) {
@@ -133,7 +133,8 @@ class AudioEncoder(
                 }
                 val ptsUs = (anchorNanos + (framesRead - anchorFrames) * 1_000_000_000L / sampleRate) / 1000
                 framesRead += 1024
-                if (muted) Arrays.fill(pcm, 0) else chunkPeak = maxOf(chunkPeak, peak(pcm))
+                mix.apply(pcm, muted)
+                chunkPeak = maxOf(chunkPeak, peak(pcm))
                 if (framesRead % (1024 * 5) == 0L) {
                     shownDb = maxOf(decibels(chunkPeak), shownDb - 6f)
                     chunkPeak = 0f

@@ -120,12 +120,21 @@ data class SceneWidget(
 )
 
 @Serializable
+data class SceneVideo(val uri: String, val name: String)
+
+@Serializable
 data class Scene(
     val id: String = UUID.randomUUID().toString(),
     val name: String = "Scene",
     val cameraKey: String? = null,
     val widgets: List<SceneWidget> = emptyList(),
-)
+    val video: Boolean = false,
+    val videos: List<SceneVideo> = emptyList(),
+    val videoVolume: Int = 100,
+    val micWithVideo: Boolean = true,
+) {
+    val playsVideo: Boolean get() = video && videos.isNotEmpty()
+}
 
 @Serializable
 data class Bookmark(val id: String = UUID.randomUUID().toString(), val name: String, val url: String)

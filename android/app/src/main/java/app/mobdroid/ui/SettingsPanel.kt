@@ -11,6 +11,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import android.content.Intent
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.util.Size
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -25,6 +26,7 @@ import app.mobdroid.scenes.withPlacement
 import app.mobdroid.scenes.withoutWidget
 import app.mobdroid.settings.Corner
 import app.mobdroid.settings.Scene
+import app.mobdroid.settings.SceneVideo
 import app.mobdroid.settings.SceneWidget
 import app.mobdroid.settings.Widget
 import app.mobdroid.settings.WidgetType
@@ -166,6 +168,8 @@ internal sealed interface Route {
 
     data class ScenePage(val id: String) : Route
 
+    data class SceneVideos(val id: String) : Route
+
     data class Placement(val sceneId: String, val widgetId: String) : Route
 
     data class WidgetPage(val id: String) : Route
@@ -215,6 +219,7 @@ private fun title(route: Route, settings: AppSettings) = when (route) {
     Route.Recordings -> "Recordings"
     Route.Scenes -> "Scenes"
     is Route.ScenePage -> settings.scenes.firstOrNull { it.id == route.id }?.name.orEmpty()
+    is Route.SceneVideos -> "Videos"
     is Route.Placement -> listOfNotNull(
         settings.widgets.firstOrNull { it.id == route.widgetId }?.name,
         settings.scenes.firstOrNull { it.id == route.sceneId }?.name,
@@ -338,6 +343,7 @@ fun SettingsPanel(
                         is Route.ScenePage -> settings.scenes.firstOrNull { it.id == route.id }?.let {
                             ScenePage(store, settings, it, engine, push, pop)
                         }
+                        is Route.SceneVideos -> settings.scenes.firstOrNull { it.id == route.id }?.let { SceneVideosPage(store, it) }
                         is Route.Placement -> {
                             val scene = settings.scenes.firstOrNull { it.id == route.sceneId }
                             val widget = settings.widgets.firstOrNull { it.id == route.widgetId }
@@ -724,7 +730,7 @@ private fun StreamAudio(store: SettingsStore, profile: StreamProfile, editable: 
 }
 
 private fun cameraLabel(engine: StreamEngine, scene: Scene): String =
-    engine.ui.value.cameras.firstOrNull { it.key == scene.cameraKey }?.label ?: "Default"
+    if (scene.video) "Video" else engine.ui.value.cameras.firstOrNull { it.key == scene.cameraKey }?.label ?: "Default"
 
 @Composable
 private fun ScenesPage(store: SettingsStore, settings: AppSettings, engine: StreamEngine, push: (Route) -> Unit) {
@@ -773,15 +779,20 @@ private fun ScenePage(
     val update = { changed: Scene -> store.update { s -> s.copy(scenes = s.scenes.map { if (it.id == scene.id) changed else it }) } }
     Group {
         row { TextRow(it, "Name", scene.name) { name -> update(scene.copy(name = name)) } }
-        if (cameras.size > 1) {
+        row { shapes ->
+            ChoiceRow(
+                shapes,
+                "Source",
+                cameras.map { it.key } + VIDEO_SOURCE,
+                if (scene.video) VIDEO_SOURCE else scene.cameraKey,
+                { key -> if (key == VIDEO_SOURCE) "Video" else cameras.firstOrNull { it.key == key }?.label.orEmpty() },
+            ) { update(if (it == VIDEO_SOURCE) scene.copy(video = true) else scene.copy(video = false, cameraKey = it)) }
+        }
+        if (scene.video) {
             row { shapes ->
-                ChoiceRow(
-                    shapes,
-                    "Camera",
-                    cameras.map { it.key },
-                    scene.cameraKey,
-                    { key -> cameras.firstOrNull { it.key == key }?.label.orEmpty() },
-                ) { update(scene.copy(cameraKey = it)) }
+                NavRow(shapes, "Videos", if (scene.videos.size == 1) "1 file" else "${scene.videos.size} files") {
+                    push(Route.SceneVideos(scene.id))
+                }
             }
         }
     }
@@ -819,6 +830,49 @@ private fun ScenePage(
                 }
             }
         }
+    }
+}
+
+private const val VIDEO_SOURCE = "video"
+
+@Composable
+private fun SceneVideosPage(store: SettingsStore, scene: Scene) {
+    val context = LocalContext.current
+    val update = { changed: Scene -> store.update { s -> s.copy(scenes = s.scenes.map { if (it.id == scene.id) changed else it }) } }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        val added = uris.filter { uri -> scene.videos.none { it.uri == uri.toString() } }.map { uri ->
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            val name = runCatching {
+                context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                    if (it.moveToFirst()) it.getString(0) else null
+                }
+            }.getOrNull()
+            SceneVideo(uri.toString(), name ?: uri.lastPathSegment ?: "Video")
+        }
+        if (added.isNotEmpty()) store.update { s -> s.copy(scenes = s.scenes.map { if (it.id == scene.id) it.copy(videos = it.videos + added) else it }) }
+    }
+    Group {
+        scene.videos.forEach { video ->
+            row { shapes ->
+                RemovableRow(shapes, video.name, "", null) {
+                    store.update { s ->
+                        s.copy(scenes = s.scenes.map { if (it.id == scene.id) it.copy(videos = it.videos - video) else it })
+                    }
+                    if (store.settings.value.scenes.none { other -> other.videos.any { it.uri == video.uri } }) {
+                        runCatching {
+                            context.contentResolver.releasePersistableUriPermission(Uri.parse(video.uri), Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                    }
+                }
+            }
+        }
+        row { ActionRow(it, "Add video", Icons.Rounded.Add) { pick.launch(arrayOf("video/*")) } }
+    }
+    Group {
+        row { shapes ->
+            SliderRow(shapes, "Video volume", scene.videoVolume, 0..100, "${scene.videoVolume}%") { update(scene.copy(videoVolume = it)) }
+        }
+        row { SwitchRow(it, "Mic while playing", scene.micWithVideo) { on -> update(scene.copy(micWithVideo = on)) } }
     }
 }
 

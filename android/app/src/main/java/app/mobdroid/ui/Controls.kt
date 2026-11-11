@@ -41,7 +41,11 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.Widgets
 import androidx.compose.material.icons.rounded.FiberManualRecord
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PhotoCamera
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material.icons.rounded.FlashlightOff
@@ -56,7 +60,11 @@ import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonGroupDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.SliderState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.IconToggleButton
@@ -67,6 +75,7 @@ import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -108,6 +117,7 @@ import app.mobdroid.camera.CameraDescriptor
 import app.mobdroid.camera.CameraState
 import app.mobdroid.engine.obs.ObsState
 import app.mobdroid.media.AUDIO_LEVEL_FLOOR_DB
+import app.mobdroid.media.VideoPlayer
 import app.mobdroid.settings.QuickButtonId
 import app.mobdroid.settings.Scene
 import app.mobdroid.settings.StatusItem
@@ -530,10 +540,49 @@ private fun AudioMeter(level: StateFlow<Float>, muted: Boolean) {
 }
 
 @Composable
-fun CameraControls(ui: UiState, scenes: List<Scene>, scene: Scene?, engine: StreamEngine, modifier: Modifier) {
+fun CameraControls(ui: UiState, scenes: List<Scene>, scene: Scene?, video: VideoPlayer?, engine: StreamEngine, modifier: Modifier) {
     Column(modifier, horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        ZoomStops(ui, engine::setZoom)
+        if (video != null) VideoStrip(video, Modifier.fillMaxWidth()) else ZoomStops(ui, engine::setZoom)
         SceneSwitch(scenes, scene, engine::selectScene, Modifier)
+    }
+}
+
+fun formatClock(ms: Long): String = "%d:%02d".format(ms / 60_000, ms / 1000 % 60)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun VideoStrip(video: VideoPlayer, modifier: Modifier) {
+    val state by video.state.collectAsStateWithLifecycle()
+    val duration = state.durationMs.coerceAtLeast(1)
+    val slider = remember { SliderState() }
+    LaunchedEffect(state.positionMs, duration) {
+        if (!slider.isDragging) slider.value = (state.positionMs.toFloat() / duration).coerceIn(0f, 1f)
+    }
+    Row(
+        modifier.height(40.dp).clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.55f)).padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CompactIconButton(Icons.Rounded.SkipPrevious, "Previous video", onClick = video::previous)
+        CompactIconButton(
+            if (state.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+            if (state.playing) "Pause video" else "Play video",
+            onClick = video::togglePlay,
+        )
+        CompactIconButton(Icons.Rounded.SkipNext, "Next video", onClick = video::next)
+        Text(
+            formatClock(if (slider.isDragging) (slider.value * duration).toLong() else state.positionMs),
+            style = statusStyle,
+            modifier = Modifier.padding(start = 4.dp),
+        )
+        Slider(
+            state = slider,
+            onValueChange = { slider.value = it },
+            modifier = Modifier.weight(1f).padding(horizontal = 10.dp).semantics { contentDescription = "Video position" },
+            onValueChangeFinished = { video.seekTo((slider.value * duration).toLong()) },
+            thumb = { Box(Modifier.size(12.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary)) },
+            track = { SliderDefaults.Track(it, Modifier.height(4.dp), thumbTrackGapSize = 0.dp, drawStopIndicator = null) },
+        )
+        Text(formatClock(state.durationMs), style = statusStyle, modifier = Modifier.padding(end = 10.dp))
     }
 }
 

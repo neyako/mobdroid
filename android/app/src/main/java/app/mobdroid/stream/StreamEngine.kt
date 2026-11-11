@@ -6,6 +6,7 @@ import android.content.Intent
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.BatteryManager
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -45,8 +46,11 @@ import app.mobdroid.engine.net.Publisher
 import app.mobdroid.engine.net.PublisherListener
 import app.mobdroid.media.AUDIO_LEVEL_FLOOR_DB
 import app.mobdroid.media.AudioEncoder
+import app.mobdroid.media.AudioMix
 import app.mobdroid.media.CodecCatalog
 import app.mobdroid.media.VideoEncoder
+import app.mobdroid.media.VideoFile
+import app.mobdroid.media.VideoPlayer
 import app.mobdroid.media.gl.BrowserPage
 import app.mobdroid.media.gl.Overlay
 import app.mobdroid.media.gl.VideoCompositor
@@ -56,6 +60,8 @@ import app.mobdroid.widgets.BrowserWidgets
 import app.mobdroid.widgets.WidgetRenderer
 import app.mobdroid.settings.LoginStore
 import app.mobdroid.settings.MicSource
+import app.mobdroid.settings.Scene
+import app.mobdroid.settings.SceneVideo
 import app.mobdroid.settings.ObsSettings
 import app.mobdroid.settings.RECORDING_CODECS
 import app.mobdroid.settings.RecordingSettings
@@ -188,6 +194,12 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private var liveJob: Job? = null
     private var ticker: Job? = null
     val recordings = RecordingStore(context)
+    private val audioMix = AudioMix()
+    private val _videoPlayer = MutableStateFlow<VideoPlayer?>(null)
+    val videoPlayer: StateFlow<VideoPlayer?> = _videoPlayer.asStateFlow()
+    private var videoSurface: Surface? = null
+    private var videoInput: Triple<Int, Int, Int>? = null
+    private var playingVideo: Pair<String, List<SceneVideo>>? = null
     private val _recording = MutableStateFlow<RecordingStats?>(null)
     val recording: StateFlow<RecordingStats?> = _recording.asStateFlow()
     private var liveStartedAt = 0L
@@ -222,15 +234,33 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             }
         }
         scope.launch {
-            settings.settings.map { it.selectedScene?.cameraKey }.distinctUntilChanged().drop(1).collect {
-                synchronized(this@StreamEngine) {
-                    val next = sceneCamera(_ui.value.cameras) ?: return@collect
-                    if (next.key != _ui.value.camera?.key) {
-                        _ui.update { it.copy(camera = next, lens = defaultLens(next), zoom = 1f, torch = false) }
-                        if (previewActive) openCamera()
+            var playing = settings.settings.value.selectedScene?.let(::videoKey)
+            settings.settings
+                .map { it.selectedScene?.cameraKey to it.selectedScene?.let(::videoKey) }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { (_, video) ->
+                    synchronized(this@StreamEngine) {
+                        val next = sceneCamera(_ui.value.cameras)
+                        val changed = next != null && next.key != _ui.value.camera?.key
+                        if (changed) _ui.update { it.copy(camera = next, lens = defaultLens(next!!), zoom = 1f, torch = false) }
+                        if (previewActive && (changed || video != playing)) openCamera()
+                        playing = video
                     }
                 }
-            }
+        }
+        scope.launch {
+            settings.settings.map { it.selectedScene?.let { scene -> scene.videoVolume to scene.micWithVideo } }
+                .distinctUntilChanged()
+                .collect { sound ->
+                    synchronized(this@StreamEngine) {
+                        val player = _videoPlayer.value
+                        if (sound != null && player != null) {
+                            player.volume = sound.first / 100f
+                            player.micWhilePlaying = sound.second
+                        }
+                    }
+                }
         }
         scope.launch {
             settings.settings.map { it.mirrorFrontCameraOnStream }.distinctUntilChanged().drop(1).collect {
@@ -479,7 +509,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         audioEncoder = null
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
         audioEncoder = runCatching {
-            AudioEncoder(0, null, micDevice(), { _audioLevel.value = it }) { Log.w(TAG, "Audio meter: $it") }
+            AudioEncoder(0, null, micDevice(), audioMix, { _audioLevel.value = it }) { Log.w(TAG, "Audio meter: $it") }
         }.onFailure { Log.w(TAG, "Audio meter failed", it) }.getOrNull()?.also { it.muted = _ui.value.muted }
     }
 
@@ -844,6 +874,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 profile.audioBitrateKbps * 1000,
                 tee,
                 micDevice(),
+                audioMix,
                 { _audioLevel.value = it },
                 ::onFatal,
             ).also { it.muted = _ui.value.muted }
@@ -1053,8 +1084,19 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         browsers.sync(pages, target)
     }
 
+    private fun videoKey(scene: Scene) = if (scene.playsVideo) scene.id to scene.videos else null
+
     private fun closeSources() {
         cameraGeneration++
+        _videoPlayer.value?.let { player ->
+            _videoPlayer.value = null
+            audioMix.source = null
+            player.release()
+        }
+        videoSurface?.release()
+        videoSurface = null
+        videoInput = null
+        playingVideo = null
         camera.close()
         uvcCamera?.let { uvc ->
             uvcCamera = null
@@ -1066,9 +1108,45 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         uvcSurface = null
     }
 
+    private fun openVideo(scene: Scene, compositor: VideoCompositor) {
+        val generation = cameraGeneration
+        cameraFps = 0
+        compositor.setFrameRate((liveProfile ?: settings.settings.value.selectedProfile).fps)
+        val surface = compositor.newInputSurface().also { videoSurface = it }
+        val player = VideoPlayer(
+            context,
+            scene.videos.map { VideoFile(Uri.parse(it.uri), it.name) },
+            surface,
+            { width, height, rotation ->
+                scope.launch {
+                    synchronized(this@StreamEngine) {
+                        if (generation == cameraGeneration) {
+                            videoInput = Triple(width, height, rotation)
+                            applyInputTransform()
+                        }
+                    }
+                }
+            },
+            compositor::repeatFrame,
+        ) { message -> _ui.update { it.copy(error = message) } }
+        player.volume = scene.videoVolume / 100f
+        player.micWhilePlaying = scene.micWithVideo
+        audioMix.source = player
+        _videoPlayer.value = player
+    }
+
     private fun openCamera() {
-        val descriptor = _ui.value.activeCamera ?: return
         val compositor = compositor ?: return
+        val scene = settings.settings.value.selectedScene
+        val video = scene?.let(::videoKey)
+        if (scene != null && video != null) {
+            if (video == playingVideo) return
+            closeSources()
+            openVideo(scene, compositor)
+            playingVideo = video
+            return
+        }
+        val descriptor = _ui.value.activeCamera ?: return
         closeSources()
         if (descriptor.id.startsWith(UVC_PREFIX)) {
             openUvc(descriptor, compositor)
@@ -1163,6 +1241,10 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     }
 
     private fun applyInputTransform() {
+        if (_videoPlayer.value != null) {
+            videoInput?.let { (width, height, rotation) -> compositor?.setInput(width, height, rotation, 0, false, false, false) }
+            return
+        }
         val descriptor = _ui.value.activeCamera ?: return
         val size = currentInputSize
         compositor?.setInput(
