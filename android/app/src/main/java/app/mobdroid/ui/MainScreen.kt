@@ -76,6 +76,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
     val recording by engine.recording.collectAsStateWithLifecycle()
     val appSettings by settings.settings.collectAsStateWithLifecycle()
     val profile = appSettings.selectedProfile
+    val video by engine.videoPlayer.collectAsStateWithLifecycle()
     val obsState by engine.obs.state.collectAsStateWithLifecycle()
     val obs = obsState.takeIf { profile.obs.enabled }
     var side by remember { mutableStateOf<Side?>(null) }
@@ -204,7 +205,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                             Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(8.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
-                            ZoomStops(ui, engine::setZoom)
+                            video?.let { VideoStrip(it, Modifier.weight(1f)) } ?: ZoomStops(ui, engine::setZoom)
                             Spacer(Modifier.width(8.dp))
                             SceneSwitch(appSettings.scenes, appSettings.selectedScene, engine::selectScene, Modifier.weight(1f, fill = false))
                         }
@@ -258,6 +259,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                                         ui,
                                         appSettings.scenes,
                                         appSettings.selectedScene,
+                                        video,
                                         engine,
                                         Modifier.align(Alignment.BottomEnd).padding(10.dp),
                                     )
@@ -268,6 +270,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                                     ui,
                                     appSettings.scenes,
                                     appSettings.selectedScene,
+                                    video,
                                     engine,
                                     Modifier.width(width).padding(top = 8.dp),
                                 )

@@ -124,6 +124,8 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
 
     fun newInputSurface(): Surface = Surface(surfaceTexture)
 
+    fun repeatFrame() = handler.post { render(System.nanoTime()) }
+
     fun setInput(
         width: Int,
         height: Int,
@@ -293,7 +295,7 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         if (posted) done.await()
     }
 
-    private fun render() {
+    private fun render(repeatNs: Long = 0) {
         if (released) return
         egl.makeNothingCurrent()
         surfaceTexture.updateTexImage()
@@ -307,7 +309,7 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
                 overlay.surfaceTexture.getTransformMatrix(overlay.matrix)
             }
         }
-        val ts = toMonotonic(surfaceTexture.timestamp)
+        val ts = if (repeatNs != 0L) repeatNs else toMonotonic(surfaceTexture.timestamp)
         lastFrameNanos = SystemClock.elapsedRealtimeNanos()
         countFps()
         Matrix.multiplyMM(drawMatrix, 0, stMatrix, 0, sourceMatrix, 0)

@@ -15,6 +15,7 @@ them, not code style.
   - `ts/` — MPEG-TS muxer (H264, HEVC, AV1, AAC).
   - `mp4/` — the recorder: a crash-safe MP4 writer and the function that finishes or recovers a file.
   - `obs/` — the obs-websocket 5 client.
+  - `audio/` — PCM helpers for the video player: the resampler and the timed ring buffer.
   - `srt/` — SRT caller, a port of Moblin's own `SrtSender.swift`. `srtla/` — SRTLA bonding client,
     a port of `Moblin/Media/Srtla/Client`. `abr/` — adaptive bitrate (Belabox port).
 - `app/` — the Android app: camera sources, GL compositor, MediaCodec encoders, the foreground
@@ -196,7 +197,7 @@ them, not code style.
   one scene per built-in camera is created, named after it, so the row reads Back and Front as the camera
   row did. An external camera (USB) is not a
   scene: while one is attached it replaces the camera of every scene (`sceneCamera`), and with several
-  attached the one in use stays in use.
+  attached the one in use stays in use. A scene that plays videos (see Video scenes) keeps playing them.
 - `AppSettings.widgets` are global; a `SceneWidget` places one in a scene: on or off, a corner, X and Y
   offsets from that corner in percent of the picture, and a size in percent of its width. Text widgets
   ignore the size, their text size sets it. `Widget.previewOnly` keeps a widget out of the stream, the
@@ -222,6 +223,43 @@ them, not code style.
 - `VideoCompositor.setOverlays` draws them over the camera with premultiplied alpha blending: all of them
   on the preview, the ones that are not preview only on the encoder and recorder surfaces and in snapshots.
   They are never mirrored.
+
+## Video scenes
+
+- A scene with `video` on and at least one file in `videos` (`Scene.playsVideo`) shows those files in
+  place of the camera: `StreamEngine.openCamera` closes the camera and starts a `media/VideoPlayer`, which
+  feeds the compositor's input surface like a camera does. Leaving the scene or the preview releases it:
+  `release()` interrupts the player thread and waits up to a second for it; the thread itself releases the
+  decoders and then the surface. If it has not stopped by then (a stalled file read), the engine opens the
+  new source anyway and opens it once more when the thread has finished, since the old decoder may still
+  have held the surface.
+  `openCamera` keeps a running player when called again for the same scene and file list, so a USB camera
+  or a settings change does not restart the video; a changed list restarts it.
+- `VideoPlayer` is one thread that demuxes and decodes with two `MediaExtractor`s and `MediaCodec`s, no
+  library: video to the surface, audio to PCM. The files play in order and loop. The first decoder start
+  is retried for up to 2 seconds because the camera lets go of the surface asynchronously. A file that
+  cannot be played sets the status error and the next one is tried.
+- The clock starts at the first decoded frame. A frame is released when the clock reaches its time, with
+  that exact time as its timestamp (so the compositor's frame pacing sees even spacing), and dropped when
+  it is more than 150 ms late. While nothing new is shown for 50 ms (paused, between files) the player
+  calls `VideoCompositor.repeatFrame`, so widgets keep updating and the encoder keeps getting frames.
+- Rotation metadata is applied by the decoder; the engine passes the size and rotation to
+  `VideoCompositor.setInput`, which fills the picture and crops the rest, as for a camera.
+- Sound: the audio track is decoded, resampled to 48 kHz stereo (`engine/audio/PcmConverter`, linear) and
+  written with its time to a one second `PcmRing`, kept 300 ms ahead of the clock. The ring keeps one
+  timestamp gap (audio written more than 20 ms away from where the buffered audio ends starts a new
+  segment at its own time, and a late read never drops past that point), and a write larger than the ring
+  keeps its end at the right time. `AudioEncoder` hands
+  every microphone buffer to `AudioMix`, which mutes the mic if the mic button is on or the scene's "Mic
+  while playing" is off, then adds the video's sound at the scene's volume. So the sound is in the stream
+  and the recording and is not played on the phone. The phone's audio clock and its system clock differ
+  (0.17% on the vivo), so each mix nudges the player's clock by a sixteenth of the difference between the
+  ring's time and the clock; a difference over 80 ms (a seek, a stall) skips or waits instead.
+- The strip over the preview (`VideoStrip`, in place of the zoom stops) has previous, play or pause, next
+  and a seek bar. A seek goes to the previous key frame and decodes without showing up to the target.
+- Videos are added with the system file picker and played from where they are; the app keeps a persisted
+  read permission for each and releases it when no scene uses the file any more (a file removed from a
+  list, a scene deleted).
 
 ## OBS remote
 
@@ -296,8 +334,8 @@ them, not code style.
   `StreamProfile.bondingNetworks` limits which networks SRTLA requests.
 - `mirrorFrontCameraOnStream` makes the encoder draw the same mirrored picture as the preview.
 - The Widgets quick button opens a panel that turns the selected scene's widgets on and off. Scenes and
-  widgets are edited under Settings, Scenes: a scene page lists every widget with a switch, and tapping one
-  opens its placement in that scene.
+  widgets are edited under Settings, Scenes: a scene page has the source (a camera or Video), the video list when the source is
+  Video, and every widget with a switch; tapping a widget opens its placement in that scene.
 - The OBS quick button (OBS's own logo, `ObsLogo`) opens the OBS panel: the program picture with the
   stream and record buttons beside it, the scenes as toggle buttons, the audio inputs with their mute
   state. Stopping an output takes a second tap within 3 seconds. A stream without OBS set up gets the URL

@@ -17,18 +17,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -42,18 +39,13 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bookmarks
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.ListItemShapes
-import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SegmentedListItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -67,7 +59,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
@@ -198,15 +189,15 @@ fun BrowserPanel(store: SettingsStore, settings: AppSettings, browser: BrowserSt
                 Bookmarks(store, settings, browser, add = true, open)
             } else {
                 Row(Modifier.fillMaxWidth().height(PanelHeaderHeight).padding(start = 4.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ToolButton(Icons.AutoMirrored.Rounded.ArrowBack, "Previous page", browser.canGoBack) { view?.goBack() }
-                    ToolButton(Icons.AutoMirrored.Rounded.ArrowForward, "Next page", browser.canGoForward) { view?.goForward() }
+                    CompactIconButton(Icons.AutoMirrored.Rounded.ArrowBack, "Previous page", browser.canGoBack) { view?.goBack() }
+                    CompactIconButton(Icons.AutoMirrored.Rounded.ArrowForward, "Next page", browser.canGoForward) { view?.goForward() }
                     AddressField(browser.url, Modifier.weight(1f), open)
                     if (browser.progress < 100) {
-                        ToolButton(Icons.Rounded.Close, "Stop loading") { view?.stopLoading() }
+                        CompactIconButton(Icons.Rounded.Close, "Stop loading") { view?.stopLoading() }
                     } else {
-                        ToolButton(Icons.Rounded.Refresh, "Reload", view != null) { view?.reload() }
+                        CompactIconButton(Icons.Rounded.Refresh, "Reload", view != null) { view?.reload() }
                     }
-                    ToolButton(Icons.Rounded.Bookmarks, "Bookmarks") { showBookmarks = true }
+                    CompactIconButton(Icons.Rounded.Bookmarks, "Bookmarks") { showBookmarks = true }
                     Spacer(Modifier.width(4.dp))
                     PanelButtons(hidden = false, onHide, onClose)
                 }
@@ -230,13 +221,6 @@ fun BrowserPanel(store: SettingsStore, settings: AppSettings, browser: BrowserSt
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun ToolButton(icon: ImageVector, label: String, enabled: Boolean = true, onClick: () -> Unit) {
-    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
-        IconButton(onClick, Modifier.size(36.dp, 44.dp), enabled) { Icon(icon, label, Modifier.size(20.dp)) }
     }
 }
 
@@ -312,7 +296,12 @@ private fun Bookmarks(store: SettingsStore, settings: AppSettings, browser: Brow
             Group {
                 settings.bookmarks.forEach { bookmark ->
                     row { shapes ->
-                        BookmarkRow(shapes, bookmark, { onOpen(bookmark.url) }) {
+                        RemovableRow(
+                            shapes,
+                            bookmark.name,
+                            Uri.parse(bookmark.url).host?.removePrefix("www.").orEmpty(),
+                            { onOpen(bookmark.url) },
+                        ) {
                             store.update { s -> s.copy(bookmarks = s.bookmarks.filterNot { it.id == bookmark.id }) }
                         }
                     }
@@ -320,29 +309,4 @@ private fun Bookmarks(store: SettingsStore, settings: AppSettings, browser: Brow
             }
         }
     }
-}
-
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun BookmarkRow(shapes: ListItemShapes, bookmark: Bookmark, onClick: () -> Unit, onRemove: () -> Unit) {
-    SegmentedListItem(
-        contentPadding = PaddingValues(start = 14.dp, top = 4.dp, end = 4.dp, bottom = 4.dp),
-        colors = rowColors(),
-        onClick = onClick,
-        shapes = shapes,
-        modifier = Modifier.heightIn(max = RowHeight),
-        trailingContent = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    Uri.parse(bookmark.url).host?.removePrefix("www.").orEmpty(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 120.dp),
-                )
-                ToolButton(Icons.Rounded.Close, "Remove ${bookmark.name}", onClick = onRemove)
-            }
-        },
-    ) { Text(bookmark.name, style = RowTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }
 }
