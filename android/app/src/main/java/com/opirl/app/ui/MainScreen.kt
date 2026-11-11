@@ -73,6 +73,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.opirl.app.settings.SettingsStore
+import com.opirl.app.settings.Transport
+import com.opirl.app.settings.transportOf
 import com.opirl.app.stream.LiveState
 import com.opirl.app.stream.StreamEngine
 import com.opirl.app.stream.outputSize
@@ -133,7 +135,9 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
     var stealth by remember { mutableStateOf(false) }
     var confirmStop by remember { mutableStateOf(false) }
     var confirmRecordStop by remember { mutableStateOf(false) }
-    val busy = ui.live != LiveState.OFFLINE || recording != null
+    val replay by engine.replay.collectAsStateWithLifecycle()
+    val monitoring by engine.monitoring.collectAsStateWithLifecycle()
+    val busy = ui.live != LiveState.OFFLINE || recording != null || monitoring
     val (outW, outH) = outputSize(profile)
     val aspect = outW.toFloat() / outH
     val onLive = {
@@ -155,6 +159,11 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
         widgetsOpen = side == Side.WIDGETS && !panelHidden,
         obsOpen = side == Side.OBS && !panelHidden,
         browserOpen = side == Side.BROWSER && !panelHidden,
+        replay = replay.takeIf { profile.replay.enabled },
+        monitoring = monitoring.takeIf { transportOf(profile.previewStream.url) == Transport.WHIP },
+        onInstantReplay = engine::instantReplay,
+        onSaveReplay = engine::saveReplay,
+        onMonitor = engine::toggleMonitor,
         onWidgets = { toggle(Side.WIDGETS) },
         onObs = { toggle(Side.OBS) },
         onBrowser = { toggle(Side.BROWSER) },

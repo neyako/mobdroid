@@ -11,7 +11,7 @@ class MediaTee : MediaSink {
     private var audioFormat: AudioFormat? = null
 
     @Volatile
-    private var stream: MediaSink? = null
+    private var streams = emptyArray<MediaSink>()
 
     @Volatile
     private var recorder: MediaSink? = null
@@ -19,12 +19,13 @@ class MediaTee : MediaSink {
     @Volatile
     private var recorderVideo = false
 
-    fun setStream(sink: MediaSink?) = synchronized(lock) {
-        if (sink != null) {
+    fun setStreams(sinks: List<MediaSink>) = synchronized(lock) {
+        for (sink in sinks) {
+            if (streams.any { it === sink }) continue
             videoFormat?.let(sink::setVideoFormat)
             audioFormat?.let(sink::setAudioFormat)
         }
-        stream = sink
+        streams = sinks.toTypedArray()
     }
 
     fun setRecorder(sink: MediaSink?, video: Boolean) = synchronized(lock) {
@@ -42,23 +43,23 @@ class MediaTee : MediaSink {
 
     override fun setVideoFormat(format: VideoFormat): Unit = synchronized(lock) {
         videoFormat = format
-        stream?.setVideoFormat(format)
+        for (sink in streams) sink.setVideoFormat(format)
         if (recorderVideo) recorder?.setVideoFormat(format)
     }
 
     override fun setAudioFormat(format: AudioFormat): Unit = synchronized(lock) {
         audioFormat = format
-        stream?.setAudioFormat(format)
+        for (sink in streams) sink.setAudioFormat(format)
         recorder?.setAudioFormat(format)
     }
 
     override fun writeVideo(frame: EncodedFrame) {
-        stream?.writeVideo(frame)
+        for (sink in streams) sink.writeVideo(frame)
         if (recorderVideo) recorder?.writeVideo(frame)
     }
 
     override fun writeAudio(frame: EncodedFrame) {
-        stream?.writeAudio(frame)
+        for (sink in streams) sink.writeAudio(frame)
         recorder?.writeAudio(frame)
     }
 }
@@ -71,4 +72,14 @@ class VideoOnlySink(private val sink: MediaSink) : MediaSink {
     override fun writeVideo(frame: EncodedFrame) = sink.writeVideo(frame)
 
     override fun writeAudio(frame: EncodedFrame) = Unit
+}
+
+class AudioOnlySink(private val sink: MediaSink) : MediaSink {
+    override fun setVideoFormat(format: VideoFormat) = Unit
+
+    override fun setAudioFormat(format: AudioFormat) = sink.setAudioFormat(format)
+
+    override fun writeVideo(frame: EncodedFrame) = Unit
+
+    override fun writeAudio(frame: EncodedFrame) = sink.writeAudio(frame)
 }

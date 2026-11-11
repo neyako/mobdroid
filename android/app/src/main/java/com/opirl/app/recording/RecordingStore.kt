@@ -46,8 +46,8 @@ class RecordingStore(private val context: Context) {
     private val _recordings = MutableStateFlow<List<Recording>>(emptyList())
     val recordings: StateFlow<List<Recording>> = _recordings.asStateFlow()
 
-    fun create(): RecordingFile {
-        val uri = insert(videos, "mp4", "video/mp4", Environment.DIRECTORY_MOVIES)
+    fun create(replay: Boolean = false): RecordingFile {
+        val uri = insert(videos, "mp4", "video/mp4", Environment.DIRECTORY_MOVIES, if (replay) "Replay " else "")
         val descriptor = try {
             resolver.openFileDescriptor(uri, "rw") ?: throw IOException("Storage unavailable")
         } catch (e: Exception) {
@@ -112,8 +112,8 @@ class RecordingStore(private val context: Context) {
     fun freeBytes(): Long = runCatching { StatFs(Environment.getExternalStorageDirectory().path).availableBytes }
         .getOrDefault(Long.MAX_VALUE)
 
-    private fun insert(collection: Uri, extension: String, mime: String, directory: String): Uri {
-        val name = "opIRL ${SimpleDateFormat("yyyy-MM-dd HH.mm.ss", Locale.US).format(Date())}.$extension"
+    private fun insert(collection: Uri, extension: String, mime: String, directory: String, label: String = ""): Uri {
+        val name = "opIRL $label${SimpleDateFormat("yyyy-MM-dd HH.mm.ss", Locale.US).format(Date())}.$extension"
         return resolver.insert(
             collection,
             ContentValues().apply {

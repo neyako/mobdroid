@@ -47,6 +47,9 @@ class VideoPlayer(
     private val surface: Surface,
     private val onFormat: (width: Int, height: Int, rotation: Int) -> Unit,
     private val onIdle: () -> Unit,
+    private val loop: Boolean = true,
+    private val speed: Float = 1f,
+    private val onFinished: () -> Unit = {},
     private val onError: (String) -> Unit,
 ) {
     private val _state = MutableStateFlow(VideoState(name = files.first().name))
@@ -119,7 +122,8 @@ class VideoPlayer(
 
     fun awaitStopped() = thread.join()
 
-    private fun positionUs(): Long = if (clockRunning) baseUs + slewUs + (System.nanoTime() - startNs) / 1000 else baseUs
+    private fun positionUs(): Long =
+        if (clockRunning) baseUs + slewUs + ((System.nanoTime() - startNs) / 1000 * speed).toLong() else baseUs
 
     private fun stopClock() {
         val position = positionUs()
@@ -148,10 +152,12 @@ class VideoPlayer(
                 pause(if (failures >= files.size) 3000 else 300)
                 1
             }
+            if (!loop && index + step !in files.indices) break
             index = (index + step + files.size) % files.size
         }
         clockRunning = false
         surface.release()
+        if (running) onFinished()
     }
 
     private fun pause(ms: Long) {
@@ -221,7 +227,7 @@ class VideoPlayer(
             connected = true
             audio.setDataSource(context, file.uri, null)
             val audioTrack = track(audio, "audio/")
-            if (audioTrack >= 0) {
+            if (audioTrack >= 0 && speed == 1f) {
                 audioCodec = runCatching { decoder(audio, audioTrack, null) }
                     .onFailure { Log.w(TAG, "No audio decoder for ${file.name}", it) }
                     .getOrNull()
@@ -311,7 +317,7 @@ class VideoPlayer(
                         } else {
                             videoCodec.releaseOutputBuffer(
                                 pendingIndex,
-                                if (clockRunning) startNs + (pendingPtsUs - baseUs - slewUs) * 1000 else now,
+                                if (clockRunning) startNs + ((pendingPtsUs - baseUs - slewUs) * 1000 / speed).toLong() else now,
                             )
                             lastRenderNs = now
                         }

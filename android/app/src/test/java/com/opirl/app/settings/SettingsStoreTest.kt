@@ -1,5 +1,6 @@
 package com.opirl.app.settings
 
+import com.opirl.app.engine.media.VideoCodec
 import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
@@ -60,5 +61,28 @@ class SettingsStoreTest {
         assertEquals(true, store.decode("""{"keepScreenOn":false}""").setupDone)
         assertEquals(false, store.decode("""{"setupDone":false}""").setupDone)
         assertEquals(false, AppSettings().setupDone)
+    }
+
+    @Test
+    fun `the old microphone choice becomes a mic key`() {
+        assertEquals("USB", store.decode("""{"mic":"USB"}""").micKey)
+        assertEquals("PHONE", store.decode("""{"mic":"BUILT_IN"}""").micKey)
+        assertEquals(null, store.decode("""{"mic":"AUTO"}""").micKey)
+        assertEquals("PHONE:back", store.decode("""{"mic":"USB","micKey":"PHONE:back"}""").micKey)
+    }
+
+    @Test
+    fun `the url names the transport and what it can carry`() {
+        assertEquals(Transport.WHIP, transportOf(" whips://x/whip "))
+        assertEquals(Transport.RIST, transportOf("rist://x:5000"))
+        assertEquals(null, transportOf("x:5000"))
+        val custom = StreamProfile(platform = Platform.CUSTOM)
+        assertEquals(Platform.CUSTOM.codecs, custom.copy(url = "rtmp://x/app").allowedCodecs)
+        assertEquals(false, VideoCodec.AV1 in custom.copy(url = "whip://x/whip").allowedCodecs)
+        assertEquals(false, VideoCodec.AV1 in custom.copy(url = "rist://x:1").allowedCodecs)
+        assertEquals(true, custom.copy(url = "srtla://x:1").bonded)
+        assertEquals(false, custom.copy(url = "rist://x:1").bonded)
+        assertEquals(true, custom.copy(url = "rist://x:1", ristBonding = true).bonded)
+        assertEquals("rist://x:1", streamUrl(custom.copy(url = "rist://x:1")))
     }
 }

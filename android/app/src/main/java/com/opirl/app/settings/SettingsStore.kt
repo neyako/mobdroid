@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 
 class SettingsStore(private val file: File, scope: CoroutineScope) {
@@ -44,8 +45,14 @@ class SettingsStore(private val file: File, scope: CoroutineScope) {
     internal fun decode(text: String): AppSettings {
         val tree = json.parseToJsonElement(text).jsonObject
         val decoded = json.decodeFromJsonElement(AppSettings.serializer(), tree)
-        val settings = if ("setupDone" in tree) decoded else decoded.copy(setupDone = true)
+        val setUp = if ("setupDone" in tree) decoded else decoded.copy(setupDone = true)
+        val oldMic = (tree["mic"] as? JsonPrimitive)?.content
+        val settings = if ("micKey" in tree) setUp else setUp.copy(micKey = OLD_MICS[oldMic])
         return if (settings.profiles.isEmpty()) settings.copy(profiles = AppSettings().profiles) else settings
+    }
+
+    private companion object {
+        val OLD_MICS = mapOf("BUILT_IN" to "PHONE", "USB" to "USB", "WIRED" to "WIRED")
     }
 
     private fun write(settings: AppSettings) {

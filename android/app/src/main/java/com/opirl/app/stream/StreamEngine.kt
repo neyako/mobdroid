@@ -6,8 +6,6 @@ import androidx.annotation.StringRes
 import android.Manifest
 import android.content.Context
 import android.content.Intent
-import android.media.AudioDeviceInfo
-import android.media.AudioManager
 import android.os.BatteryManager
 import android.net.Uri
 import android.os.Handler
@@ -45,11 +43,18 @@ import com.opirl.app.settings.allowedCodecs
 import com.opirl.app.engine.media.VideoCodec
 import com.opirl.app.engine.mp4.Mp4Recorder
 import com.opirl.app.engine.mp4.Mp4Summary
+import com.opirl.app.engine.replay.ReplayBuffer
+import com.opirl.app.engine.replay.ReplayClip
+import com.opirl.app.engine.media.MediaSink
+import com.opirl.app.engine.net.BondedPublisher
 import com.opirl.app.engine.net.Publisher
 import com.opirl.app.engine.net.PublisherListener
 import com.opirl.app.media.AUDIO_LEVEL_FLOOR_DB
 import com.opirl.app.media.AudioEncoder
 import com.opirl.app.media.AudioMix
+import com.opirl.app.media.Mic
+import com.opirl.app.media.MicCatalog
+import com.opirl.app.media.MicInput
 import com.opirl.app.media.CodecCatalog
 import com.opirl.app.media.VideoEncoder
 import com.opirl.app.media.VideoFile
@@ -62,11 +67,11 @@ import com.opirl.app.scenes.sceneCamera
 import com.opirl.app.widgets.BrowserWidgets
 import com.opirl.app.widgets.WidgetRenderer
 import com.opirl.app.settings.LoginStore
-import com.opirl.app.settings.MicSource
 import com.opirl.app.settings.Scene
 import com.opirl.app.settings.SceneVideo
 import com.opirl.app.settings.ObsSettings
 import com.opirl.app.settings.RECORDING_CODECS
+import com.opirl.app.settings.REPLAY_SECONDS
 import com.opirl.app.settings.RecordingSettings
 import com.opirl.app.recording.RecordingFile
 import com.opirl.app.recording.RecordingStore
@@ -75,6 +80,10 @@ import com.opirl.app.settings.SettingsStore
 import com.opirl.app.settings.streamUrl
 import com.opirl.app.settings.StabilizationSetting
 import com.opirl.app.settings.StreamProfile
+import com.opirl.app.settings.Transport
+import com.opirl.app.settings.bonded
+import com.opirl.app.settings.transport
+import com.opirl.app.settings.transportOf
 import com.opirl.app.settings.WidgetType
 import com.opirl.app.widgets.NowPlaying
 import com.opirl.app.uvc.UvcCamera
@@ -96,6 +105,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -134,6 +144,13 @@ data class UiState(
 }
 
 data class RecordingStats(val seconds: Long = 0, val bytes: Long = 0)
+
+enum class ReplayState { IDLE, PENDING, PLAYING }
+
+private class LiveOutput(val id: String, val name: String, val session: StreamSession, opus: Boolean) {
+    val sink: MediaSink = if (opus) VideoOnlySink(session) else session
+    val opusSink: MediaSink? = if (opus) AudioOnlySink(session) else null
+}
 
 private class ActiveRecording(
     val file: RecordingFile,
@@ -179,7 +196,9 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private var lowBitrate = LowBitrateWatch()
     private val _audioLevel = MutableStateFlow(AUDIO_LEVEL_FLOOR_DB)
     val audioLevel: StateFlow<Float> = _audioLevel.asStateFlow()
-    private val audioManager = context.getSystemService(AudioManager::class.java)
+    private val micCatalog = MicCatalog(context)
+    val mics: StateFlow<List<Mic>> = micCatalog.mics
+    private var micInput = MicInput(null)
     private var linkBytes = emptyMap<String, Long>()
 
     private var compositor: VideoCompositor? = null
@@ -194,7 +213,22 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private var audioEncoder: AudioEncoder? = null
     private var audioLive = false
     private val tee = MediaTee()
+    private val opusTee = MediaTee()
     private var session: StreamSession? = null
+    private var mainOutput: LiveOutput? = null
+    private var extraOutputs = emptyList<LiveOutput>()
+    private var monitorOutput: LiveOutput? = null
+    private var monitorEncoder: VideoEncoder? = null
+    private var monitorJob: Job? = null
+    private val _monitoring = MutableStateFlow(false)
+    val monitoring: StateFlow<Boolean> = _monitoring.asStateFlow()
+    private val _destinations = MutableStateFlow<Map<String, LiveState>>(emptyMap())
+    val destinations: StateFlow<Map<String, LiveState>> = _destinations.asStateFlow()
+    private var replayBuffer: ReplayBuffer? = null
+    private var replayJob: Job? = null
+    private var replayPlaying: SceneVideo? = null
+    private val _replay = MutableStateFlow(ReplayState.IDLE)
+    val replay: StateFlow<ReplayState> = _replay.asStateFlow()
     private var activeRecording: ActiveRecording? = null
     private var liveProfile: StreamProfile? = null
     private var liveCodec: VideoCodec? = null
@@ -302,8 +336,8 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             logins.logins.drop(1).collect { synchronized(this@StreamEngine) { if (previewActive || isLive) chat.start() } }
         }
         scope.launch {
-            settings.settings.map { it.mic }.distinctUntilChanged().drop(1).collect {
-                synchronized(this@StreamEngine) { if (!busy && previewActive) startAudioMeter() }
+            combine(settings.settings.map { it.micKey }.distinctUntilChanged(), micCatalog.mics) { key, _ -> key }.drop(1).collect {
+                synchronized(this@StreamEngine) { audioEncoder?.let { it.input = openMic() } }
             }
         }
         ioScope.launch {
@@ -504,7 +538,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
 
     val isLive: Boolean get() = session != null
 
-    private val busy: Boolean get() = session != null || activeRecording != null
+    private val busy: Boolean get() = session != null || activeRecording != null || monitorOutput != null
 
     fun startPreview() {
         synchronized(this) {
@@ -530,14 +564,10 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         }
     }
 
-    private fun micDevice(): AudioDeviceInfo? {
-        val types = when (settings.settings.value.mic) {
-            MicSource.AUTO -> return null
-            MicSource.BUILT_IN -> listOf(AudioDeviceInfo.TYPE_BUILTIN_MIC)
-            MicSource.USB -> listOf(AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET)
-            MicSource.WIRED -> listOf(AudioDeviceInfo.TYPE_WIRED_HEADSET)
-        }
-        return audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull { it.type in types }
+    private fun openMic(): MicInput {
+        val next = micCatalog.open(settings.settings.value.micKey)
+        if (next.device?.id != micInput.device?.id || next.source != micInput.source) micInput = next
+        return micInput
     }
 
     private fun startAudioMeter() {
@@ -545,7 +575,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         audioEncoder = null
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
         audioEncoder = runCatching {
-            AudioEncoder(0, null, micDevice(), audioMix, { _audioLevel.value = it }) { Log.w(TAG, "Audio meter: $it") }
+            AudioEncoder(0, null, openMic(), audioMix, { _audioLevel.value = it }) { Log.w(TAG, "Audio meter: $it") }
         }.onFailure { Log.w(TAG, "Audio meter failed", it) }.getOrNull()?.also { it.muted = _ui.value.muted }
     }
 
@@ -561,6 +591,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         nowPlaying.setEnabled(false)
         audioEncoder?.release()
         audioEncoder = null
+        micCatalog.close()
         closeSources()
         val closing = compositor
         compositor = null
@@ -643,6 +674,9 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         ticker?.cancel()
         ticker = null
         liveProfile = null
+        stopReplay()
+        replayBuffer = null
+        syncSinks()
         scope.launch { applyThermal(_ui.value.thermal) }
         if (previewSurface == null) stopPreviewIfIdle() else if (previewActive) startAudioMeter()
     }
@@ -662,6 +696,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             session != null && activeRecording != null -> text(R.string.notification_live_recording)
             session != null -> text(R.string.notification_live)
             activeRecording != null -> text(R.string.recording_now)
+            monitorOutput != null -> text(R.string.notification_preview_stream)
             else -> null
         }
         val service = Intent(context, StreamService::class.java)
@@ -692,12 +727,30 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         targetBitrate = profile.bitrateKbps * 1000
         liveMaxBitrate = targetBitrate.toLong()
         transportMeter = TransportBitrateMeter(ADAPTIVE_BITRATE_START_BPS)
-        val newSession = StreamSession(ioScope, { listener -> createPublisher(profile, listener) }) {
-            videoEncoder?.requestKeyFrame()
-        }
+        val requestKeyFrame: () -> Unit = { videoEncoder?.requestKeyFrame() }
+        val newSession = StreamSession(
+            ioScope,
+            { listener -> createPublisher(streamUrl(profile), profile.streamKey, profile.bonded, requestKeyFrame, listener) },
+            requestKeyFrame,
+        )
         session = newSession
-        tee.setStream(newSession)
-        if (profile.url.startsWith("srtla://")) links.start(profile.bondingNetworks)
+        mainOutput = LiveOutput(profile.id, profile.name, newSession, profile.transport == Transport.WHIP)
+        extraOutputs = profile.destinations.filter { it.enabled && it.url.isNotBlank() }.map { destination ->
+            LiveOutput(
+                destination.id,
+                destination.name,
+                StreamSession(
+                    ioScope,
+                    { listener -> createPublisher(destination.url.trim(), destination.streamKey, false, requestKeyFrame, listener) },
+                    requestKeyFrame,
+                ),
+                transportOf(destination.url) == Transport.WHIP,
+            )
+        }
+        if (profile.replay.enabled && replayBuffer == null) {
+            replayBuffer = ReplayBuffer((REPLAY_SECONDS.max() + profile.replay.delaySeconds) * 1_000_000L, REPLAY_MAX_BYTES)
+        }
+        if (profile.bonded) links.start(profile.bondingNetworks)
         linkBytes = emptyMap()
         try {
             syncEncoders()
@@ -710,6 +763,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         videoEncoder?.setBitrate(targetBitrate)
         updateService()
         newSession.start()
+        extraOutputs.forEach { it.session.start() }
         liveStartedAt = System.nanoTime()
         lowBitrate = LowBitrateWatch()
         _ui.update { it.copy(error = null) }
@@ -731,6 +785,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 }
             }
             launch { newSession.lastError.collect { e -> if (e != null) _ui.update { it.copy(error = e) } } }
+            for (output in extraOutputs) launch { watchDestination(output) }
             if (profile.adaptiveBitrate) launch { runAdaptiveBitrate(newSession, profile) }
         }
         startTicker()
@@ -762,7 +817,10 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         liveJob = null
         session?.stop()
         session = null
-        tee.setStream(null)
+        mainOutput = null
+        extraOutputs.forEach { it.session.stop() }
+        extraOutputs = emptyList()
+        _destinations.value = emptyMap()
         links.stop()
         _ui.update { it.copy(live = LiveState.OFFLINE, error = null) }
         _stats.value = LiveStats()
@@ -859,6 +917,147 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         }
     }
 
+    fun instantReplay() = startReplay(play = true)
+
+    fun saveReplay() = startReplay(play = false)
+
+    @Synchronized
+    private fun startReplay(play: Boolean) {
+        if (_replay.value == ReplayState.PLAYING) {
+            stopReplay()
+            return
+        }
+        val buffer = replayBuffer
+        val profile = liveProfile
+        if (_replay.value != ReplayState.IDLE) return
+        if (buffer == null || profile == null) {
+            showAlert(AlertLevel.WARNING, text(R.string.alert_replay_unavailable), text(R.string.alert_replay_unavailable_detail))
+            return
+        }
+        _replay.value = ReplayState.PENDING
+        if (profile.replay.delaySeconds > 0) {
+            showAlert(AlertLevel.INFO, text(R.string.alert_replay_in, profile.replay.delaySeconds))
+        }
+        replayJob = ioScope.launch {
+            delay(profile.replay.delaySeconds * 1000L)
+            val clip = buffer.clip(profile.replay.seconds * 1_000_000L)
+            val saved = clip?.let {
+                runCatching { writeReplay(it) }.onFailure { Log.e(TAG, "Replay not saved", it) }.getOrNull()
+            }
+            synchronized(this@StreamEngine) {
+                if (replayJob?.isActive != true) {
+                    return@launch
+                }
+                if (saved == null) {
+                    _replay.value = ReplayState.IDLE
+                    showAlert(AlertLevel.ERROR, text(R.string.alert_replay_failed))
+                } else if (play && previewActive) {
+                    replayPlaying = SceneVideo(saved.toString(), "Replay")
+                    _replay.value = ReplayState.PLAYING
+                    openCamera()
+                } else {
+                    _replay.value = ReplayState.IDLE
+                    showAlert(AlertLevel.INFO, text(R.string.alert_replay_saved))
+                }
+            }
+        }
+    }
+
+    private fun writeReplay(clip: ReplayClip): Uri? {
+        val file = recordings.create(replay = true)
+        val summary = try {
+            val recorder = Mp4Recorder(file.input, file.output, Int.MAX_VALUE) { Log.w(TAG, "Replay: $it") }
+            recorder.start()
+            clip.writeTo(recorder)
+            recorder.stop()
+        } catch (e: Exception) {
+            file.close()
+            recordings.delete(file.uri)
+            throw e
+        }
+        file.close()
+        if (summary == null) {
+            recordings.delete(file.uri)
+            return null
+        }
+        recordings.publish(file.uri)
+        return file.uri
+    }
+
+    @Synchronized
+    private fun stopReplay() {
+        replayJob?.cancel()
+        replayJob = null
+        _replay.value = ReplayState.IDLE
+        if (replayPlaying == null) return
+        replayPlaying = null
+        if (previewActive) openCamera()
+    }
+
+    @Synchronized
+    fun toggleMonitor() {
+        if (monitorOutput != null) {
+            stopMonitor()
+            return
+        }
+        if (!hasLivePermissions()) return
+        val profile = liveProfile ?: settings.settings.value.selectedProfile
+        val wanted = profile.previewStream
+        if (transportOf(wanted.url) != Transport.WHIP || CodecCatalog.encoders[VideoCodec.H264] == null) {
+            showAlert(AlertLevel.WARNING, text(R.string.alert_preview_stream_not_set))
+            return
+        }
+        if (!busy && !begin(profile)) return
+        val requestKeyFrame: () -> Unit = { monitorEncoder?.requestKeyFrame() }
+        val session = StreamSession(
+            ioScope,
+            { listener -> createPublisher(wanted.url.trim(), wanted.token, false, requestKeyFrame, listener) },
+            requestKeyFrame,
+        )
+        monitorOutput = LiveOutput("monitor", text(R.string.preview_stream), session, true)
+        try {
+            syncEncoders()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start the preview stream encoder", e)
+            stopMonitor()
+            _ui.update { it.copy(error = e.message ?: text(R.string.error_encoder)) }
+            return
+        }
+        _monitoring.value = true
+        updateService()
+        session.start()
+        monitorJob = scope.launch {
+            var previous = LiveState.CONNECTING
+            session.state.collect { state ->
+                if (state == LiveState.RECONNECTING && previous != LiveState.RECONNECTING) {
+                    showAlert(
+                        AlertLevel.ERROR,
+                        text(R.string.alert_destination_failed, text(R.string.preview_stream)),
+                        session.lastError.value ?: text(R.string.retrying),
+                    )
+                }
+                previous = state
+            }
+        }
+    }
+
+    private fun clearMonitor(): Boolean {
+        val output = monitorOutput ?: return false
+        monitorJob?.cancel()
+        monitorJob = null
+        output.session.stop()
+        monitorOutput = null
+        _monitoring.value = false
+        return true
+    }
+
+    @Synchronized
+    private fun stopMonitor() {
+        if (!clearMonitor()) return
+        runCatching { syncEncoders() }
+        end()
+    }
+
     fun takeSnapshot() {
         val compositor = synchronized(this) { compositor } ?: return
         compositor.takeSnapshot { bitmap ->
@@ -899,17 +1098,44 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         compositor?.setPreview(if (enabled) previewSurface else null)
     }
 
-    private fun createPublisher(profile: StreamProfile, listener: PublisherListener): Publisher {
-        val url = streamUrl(profile)
-        return when {
-            url.startsWith("rtmp://") || url.startsWith("rtmps://") -> RtmpPublisher(url, profile.streamKey.trim(), listener)
-            url.startsWith("srtla://") -> SrtPublisher(url, listener, links)
-            url.startsWith("srt://") -> SrtPublisher(url, listener)
-            else -> throw IllegalArgumentException("Unsupported URL: $url")
+    private fun createPublisher(
+        url: String,
+        key: String,
+        bonded: Boolean,
+        requestKeyFrame: () -> Unit,
+        listener: PublisherListener,
+    ): Publisher = when (transportOf(url)) {
+        Transport.RTMP -> RtmpPublisher(url, key.trim(), listener)
+        Transport.SRTLA -> SrtPublisher(url, listener, links)
+        Transport.SRT -> SrtPublisher(url, listener)
+        else -> throw IllegalArgumentException("Unsupported URL: $url")
+    }
+
+    private suspend fun watchDestination(output: LiveOutput) {
+        var previous = LiveState.CONNECTING
+        output.session.state.collect { state ->
+            _destinations.update { it + (output.id to state) }
+            if (state == LiveState.LIVE && previous != LiveState.LIVE) {
+                showAlert(AlertLevel.INFO, text(R.string.alert_live_at, output.name))
+            } else if (state == LiveState.RECONNECTING && previous != LiveState.RECONNECTING) {
+                showAlert(
+                    AlertLevel.ERROR,
+                    text(R.string.alert_destination_failed, output.name),
+                    output.session.lastError.value ?: text(R.string.retrying),
+                )
+            }
+            previous = state
         }
     }
 
+    private fun syncSinks() {
+        val outputs = listOfNotNull(mainOutput) + extraOutputs
+        tee.setStreams(outputs.map { it.sink } + listOfNotNull(replayBuffer))
+        opusTee.setStreams((outputs + listOfNotNull(monitorOutput)).mapNotNull { it.opusSink })
+    }
+
     private fun syncEncoders() {
+        syncSinks()
         val profile = liveProfile ?: return
         val (w, h) = outputSize(profile)
         val recording = activeRecording
@@ -919,7 +1145,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             audioEncoder = AudioEncoder(
                 profile.audioBitrateKbps * 1000,
                 tee,
-                micDevice(),
+                openMic(),
                 audioMix,
                 { _audioLevel.value = it },
                 ::onFatal,
@@ -930,7 +1156,9 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             audioEncoder = null
             audioLive = false
             tee.forgetAudioFormat()
+            opusTee.forgetAudioFormat()
         }
+        if (audioLive) audioEncoder?.opusSink = opusTee.takeIf { mainOutput?.opusSink != null || monitorOutput != null || extraOutputs.any { it.opusSink != null } }
         if (session == null && recording?.settings?.separate != false) {
             videoEncoder?.let {
                 compositor?.setEncoder(null)
@@ -972,6 +1200,28 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             recordEncoder = encoder
             compositor!!.setRecorder(encoder.inputSurface)
         }
+        val monitor = monitorOutput
+        if (monitor == null) {
+            monitorEncoder?.let {
+                compositor?.setMonitor(null)
+                it.release()
+                monitorEncoder = null
+            }
+        } else if (monitorEncoder == null) {
+            val settings = profile.previewStream
+            val encoder = VideoEncoder(
+                codec = VideoCodec.H264,
+                width = if (profile.portrait) settings.resolution.height else settings.resolution.width,
+                height = if (profile.portrait) settings.resolution.width else settings.resolution.height,
+                fps = encoderFps(profile),
+                bitrateBps = settings.bitrateKbps * 1000,
+                keyFrameIntervalSeconds = 2,
+                sink = monitor.sink,
+                onError = ::onEncoderError,
+            )
+            monitorEncoder = encoder
+            compositor!!.setMonitor(encoder.inputSurface)
+        }
     }
 
     @Synchronized
@@ -980,9 +1230,12 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         Log.w(TAG, "Restarting video encoders: $reason")
         compositor?.setEncoder(null)
         compositor?.setRecorder(null)
-        val released = (videoEncoder?.release(timeoutMs = 5000) ?: true) and (recordEncoder?.release(timeoutMs = 5000) ?: true)
+        compositor?.setMonitor(null)
+        val released = (videoEncoder?.release(timeoutMs = 5000) ?: true) and (recordEncoder?.release(timeoutMs = 5000) ?: true) and
+            (monitorEncoder?.release(timeoutMs = 5000) ?: true)
         videoEncoder = null
         recordEncoder = null
+        monitorEncoder = null
         if (!released) {
             fail(text(R.string.error_encoder_stalled))
             return
@@ -1005,6 +1258,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         tee.setRecorder(null, video = false)
         _recording.value = null
         active?.let { finishRecording(it, message) }
+        clearMonitor()
         stopLive()
         if (wasLive) showAlert(AlertLevel.ERROR, text(R.string.alert_stream_stopped), message)
         _ui.update { it.copy(error = message) }
@@ -1017,7 +1271,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private fun tick() {
         val now = System.nanoTime()
         val stalled = { encoder: VideoEncoder? -> encoder != null && now - encoder.lastOutputNanos > 5_000_000_000L }
-        if (_ui.value.cameraState == CameraState.Streaming && (stalled(videoEncoder) || stalled(recordEncoder))) {
+        if (_ui.value.cameraState == CameraState.Streaming && (stalled(videoEncoder) || stalled(recordEncoder) || stalled(monitorEncoder))) {
             restartVideoEncoders("no output for 5 s")
         }
         session?.let(::tickLive)
@@ -1040,7 +1294,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         ) {
             showAlert(AlertLevel.WARNING, text(R.string.alert_low_bitrate), formatKbps(stats.sendBitrateBps))
         }
-        val linkStats = (session.publisher as? SrtPublisher)?.linkStats().orEmpty()
+        val linkStats = (session.publisher as? BondedPublisher)?.linkUsage().orEmpty()
         val shares = linkShares(linkBytes, linkStats)
         linkBytes = linkStats.associate { it.id to it.bytesSent }
         val live = LiveStats(
@@ -1173,13 +1427,31 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         uvcSurface = null
     }
 
-    private fun openVideo(scene: Scene, compositor: VideoCompositor) {
+    private fun openReplay(clip: SceneVideo, compositor: VideoCompositor) {
+        val speed = (liveProfile ?: settings.settings.value.selectedProfile).replay.speedPercent / 100f
+        openPlayer(listOf(clip), compositor, 1f, true, false, speed) {
+            scope.launch { synchronized(this@StreamEngine) { if (replayPlaying === clip) stopReplay() } }
+        }
+    }
+
+    private fun openVideo(scene: Scene, compositor: VideoCompositor) =
+        openPlayer(scene.videos, compositor, scene.videoVolume / 100f, scene.micWithVideo, true, 1f) {}
+
+    private fun openPlayer(
+        videos: List<SceneVideo>,
+        compositor: VideoCompositor,
+        volume: Float,
+        micWhilePlaying: Boolean,
+        loop: Boolean,
+        speed: Float,
+        onFinished: () -> Unit,
+    ) {
         val generation = cameraGeneration
         cameraFps = 0
         compositor.setFrameRate(thermalGuard.fps((liveProfile ?: settings.settings.value.selectedProfile).fps))
         val player = VideoPlayer(
             context,
-            scene.videos.map { VideoFile(Uri.parse(it.uri), it.name) },
+            videos.map { VideoFile(Uri.parse(it.uri), it.name) },
             compositor.newInputSurface(),
             { width, height, rotation ->
                 scope.launch {
@@ -1192,15 +1464,27 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 }
             },
             compositor::repeatFrame,
+            loop,
+            speed,
+            onFinished,
         ) { message -> _ui.update { it.copy(error = message) } }
-        player.volume = scene.videoVolume / 100f
-        player.micWhilePlaying = scene.micWithVideo
+        player.volume = volume
+        player.micWhilePlaying = micWhilePlaying
         audioMix.source = player
         _videoPlayer.value = player
     }
 
     private fun openCamera() {
         val compositor = compositor ?: return
+        val replay = replayPlaying
+        if (replay != null) {
+            val key = REPLAY_KEY to listOf(replay)
+            if (key == playingVideo) return
+            closeSources()
+            openReplay(replay, compositor)
+            playingVideo = key
+            return
+        }
         val scene = settings.settings.value.selectedScene
         val video = scene?.let(::videoKey)
         if (scene != null && video != null) {
@@ -1343,6 +1627,8 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         const val UVC_PREFIX = "uvc:"
         const val ADAPTIVE_BITRATE_START_BPS = 1_000_000L
         const val MIN_FREE_BYTES = 300L shl 20
+        const val REPLAY_MAX_BYTES = 96L shl 20
+        const val REPLAY_KEY = "replay"
         val LIVE_PERMISSIONS = arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
     }
 }

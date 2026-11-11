@@ -299,6 +299,29 @@
         <item quantity="one">%d file</item>
         <item quantity="other">%d files</item>
     </plurals>
+    <string name="quick_instant_replay">Replay</string>
+    <string name="quick_save_replay">Save replay</string>
+    <string name="quick_preview_stream">Preview</string>
+    <string name="mic_bluetooth" translatable="false">Bluetooth</string>
+    <string name="mic_not_connected">Not connected</string>
+    <string name="destinations">Destinations</string>
+    <string name="add_destination">Add destination</string>
+    <string name="destination_default_name">Destination %1$d</string>
+    <string name="replay">Replay</string>
+    <string name="replay_length">Length</string>
+    <string name="replay_delay">Delay</string>
+    <string name="replay_speed">Speed</string>
+    <string name="preview_stream">Preview stream</string>
+    <string name="token" translatable="false">Token</string>
+    <string name="notification_preview_stream">Preview stream on</string>
+    <string name="alert_live_at">Live at %1$s</string>
+    <string name="alert_destination_failed">%1$s failed</string>
+    <string name="alert_replay_unavailable">Replay not available</string>
+    <string name="alert_replay_unavailable_detail">Turn on Replay for this stream and go live</string>
+    <string name="alert_replay_in">Replay in %1$d s</string>
+    <string name="alert_replay_failed">Replay failed</string>
+    <string name="alert_replay_saved">Replay saved</string>
+    <string name="alert_preview_stream_not_set">Preview stream not set up</string>
     <plurals name="recordings_recovered">
         <item quantity="one">Recording recovered</item>
         <item quantity="other">%d recordings recovered</item>

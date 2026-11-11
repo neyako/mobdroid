@@ -40,6 +40,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BatteryAlert
+import androidx.compose.material.icons.rounded.CastConnected
+import androidx.compose.material.icons.rounded.Replay
+import androidx.compose.material.icons.rounded.SaveAlt
 import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Visibility
@@ -128,6 +131,7 @@ import com.opirl.app.settings.StatusItem
 import com.opirl.app.stream.LiveState
 import com.opirl.app.stream.LiveStats
 import com.opirl.app.stream.RecordingStats
+import com.opirl.app.stream.ReplayState
 import com.opirl.app.stream.formatBytes
 import com.opirl.app.stream.StreamEngine
 import com.opirl.app.stream.UiState
@@ -162,6 +166,11 @@ fun quickButtons(
     widgetsOpen: Boolean,
     obsOpen: Boolean,
     browserOpen: Boolean,
+    replay: ReplayState?,
+    monitoring: Boolean?,
+    onInstantReplay: () -> Unit,
+    onSaveReplay: () -> Unit,
+    onMonitor: () -> Unit,
     onWidgets: () -> Unit,
     onObs: () -> Unit,
     onBrowser: () -> Unit,
@@ -183,6 +192,16 @@ fun quickButtons(
             onRecord,
         )
         QuickButtonId.SNAPSHOT -> QuickButton(id.label, Icons.Rounded.PhotoCamera, false, onClick = onSnapshot)
+        QuickButtonId.INSTANT_REPLAY -> replay?.let {
+            QuickButton(
+                if (it == ReplayState.PLAYING) R.string.stop else id.label,
+                if (it == ReplayState.PLAYING) Icons.Rounded.Stop else Icons.Rounded.Replay,
+                it != ReplayState.IDLE,
+                onClick = onInstantReplay,
+            )
+        }
+        QuickButtonId.SAVE_REPLAY -> replay?.let { QuickButton(id.label, Icons.Rounded.SaveAlt, false, onClick = onSaveReplay) }
+        QuickButtonId.PREVIEW_STREAM -> monitoring?.let { QuickButton(id.label, Icons.Rounded.CastConnected, it, onClick = onMonitor) }
         QuickButtonId.WIDGETS -> QuickButton(id.label, Icons.Rounded.Widgets, widgetsOpen, onClick = onWidgets)
         QuickButtonId.OBS -> QuickButton(id.label, ObsLogo, obsOpen, onClick = onObs)
         QuickButtonId.BROWSER -> QuickButton(id.label, Icons.Rounded.Language, browserOpen, onClick = onBrowser)

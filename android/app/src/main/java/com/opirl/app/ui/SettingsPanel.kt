@@ -119,7 +119,18 @@ import com.opirl.app.media.label
 import com.opirl.app.settings.AppSettings
 import com.opirl.app.settings.BONDING_NETWORKS
 import com.opirl.app.settings.ChatTextSize
-import com.opirl.app.settings.MicSource
+import com.opirl.app.media.Mic
+import com.opirl.app.media.MicKind
+import com.opirl.app.media.findMic
+import com.opirl.app.settings.Destination
+import com.opirl.app.settings.PREVIEW_RESOLUTIONS
+import com.opirl.app.settings.REPLAY_SECONDS
+import com.opirl.app.settings.REPLAY_SPEEDS
+import com.opirl.app.settings.Transport
+import com.opirl.app.settings.bonded
+import com.opirl.app.settings.transport
+import com.opirl.app.settings.transportOf
+import com.opirl.app.stream.LiveState
 import com.opirl.app.settings.Platform
 import com.opirl.app.settings.QuickButtonId
 import com.opirl.app.settings.Resolution
@@ -167,6 +178,14 @@ internal sealed interface Route {
 
     data class StreamObs(val id: String) : Route
 
+    data class StreamDestinations(val id: String) : Route
+
+    data class StreamDestination(val id: String, val destinationId: String) : Route
+
+    data class StreamReplay(val id: String) : Route
+
+    data class StreamPreview(val id: String) : Route
+
     data object Recordings : Route
 
     data object Scenes : Route
@@ -208,10 +227,17 @@ internal sealed interface Route {
 
 private fun AppSettings.profile(id: String) = profiles.firstOrNull { it.id == id }
 
-private fun transportName(profile: StreamProfile) = when {
-    profile.url.startsWith("srtla") -> "SRTLA"
-    profile.url.startsWith("srt") -> "SRT"
-    else -> "RTMP"
+private fun transportName(profile: StreamProfile) = (profile.transport ?: Transport.RTMP).label
+
+@Composable
+private fun micLabel(mic: Mic): String =
+    if (mic.name.isEmpty()) stringResource(mic.kind.label) else "${stringResource(mic.kind.label)}: ${mic.name}"
+
+@Composable
+private fun micLabel(mics: List<Mic>, key: String?): String = when {
+    key == null -> stringResource(R.string.mic_auto)
+    else -> findMic(mics, key)?.let { micLabel(it) }
+        ?: MicKind.entries.firstOrNull { key.startsWith(it.name) }?.let { stringResource(it.label) }.orEmpty()
 }
 
 @Composable
@@ -226,6 +252,11 @@ private fun title(route: Route, settings: AppSettings) = when (route) {
     is Route.StreamChat -> stringResource(R.string.chat)
     is Route.StreamRecording -> stringResource(R.string.recording)
     is Route.StreamObs -> stringResource(R.string.obs_remote)
+    is Route.StreamDestinations -> stringResource(R.string.destinations)
+    is Route.StreamDestination ->
+        settings.profile(route.id)?.destinations?.firstOrNull { it.id == route.destinationId }?.name.orEmpty()
+    is Route.StreamReplay -> stringResource(R.string.replay)
+    is Route.StreamPreview -> stringResource(R.string.preview_stream)
     Route.Recordings -> stringResource(R.string.recordings)
     Route.Scenes -> stringResource(R.string.scenes)
     is Route.ScenePage -> settings.scenes.firstOrNull { it.id == route.id }?.name.orEmpty()
@@ -326,7 +357,7 @@ fun SettingsPanel(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     when (route) {
-                        Route.Home -> Home(settings, push)
+                        Route.Home -> Home(settings, engine, push)
                         Route.Streams -> Streams(store, settings, live, push)
                         is Route.Stream -> settings.profile(route.id)?.let { StreamPage(store, settings, it, live, push, pop) }
                         is Route.StreamUrl -> settings.profile(route.id)?.let { StreamUrl(store, it, editable(settings, it, live)) }
@@ -358,6 +389,16 @@ fun SettingsPanel(
                             StreamRecording(store, it, editable(settings, it, live))
                         }
                         is Route.StreamObs -> settings.profile(route.id)?.let { StreamObs(store, it) }
+                        is Route.StreamDestinations -> settings.profile(route.id)?.let {
+                            StreamDestinations(store, it, engine, editable(settings, it, live), push)
+                        }
+                        is Route.StreamDestination -> settings.profile(route.id)?.let { profile ->
+                            profile.destinations.firstOrNull { it.id == route.destinationId }?.let {
+                                StreamDestination(store, profile, it, editable(settings, profile, live), pop)
+                            }
+                        }
+                        is Route.StreamReplay -> settings.profile(route.id)?.let { StreamReplay(store, it, editable(settings, it, live)) }
+                        is Route.StreamPreview -> settings.profile(route.id)?.let { StreamPreview(store, it, editable(settings, it, live)) }
                         Route.Recordings -> RecordingsPage(engine)
                         Route.Scenes -> ScenesPage(store, settings, engine, push)
                         is Route.ScenePage -> settings.scenes.firstOrNull { it.id == route.id }?.let {
@@ -395,20 +436,7 @@ fun SettingsPanel(
                             }
                         }
                         Route.Camera -> Camera(store, settings)
-                        Route.Audio -> Group {
-                            row { shapes ->
-                                ChoiceRow(
-                                    shapes,
-                                    stringResource(R.string.microphone),
-                                    MicSource.entries,
-                                    settings.mic,
-                                    { stringResource(it.label) },
-                                    enabled = !live,
-                                ) { mic ->
-                                    store.update { it.copy(mic = mic) }
-                                }
-                            }
-                        }
+                        Route.Audio -> Microphones(store, settings, engine)
                         Route.BitratePresets -> BitratePresetsPage(store, settings)
                         Route.About -> Group {
                             row { ValueRow(it, stringResource(R.string.version), BuildConfig.VERSION_NAME) }
@@ -537,7 +565,8 @@ private fun editable(settings: AppSettings, profile: StreamProfile, live: Boolea
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun Home(settings: AppSettings, push: (Route) -> Unit) {
+private fun Home(settings: AppSettings, engine: StreamEngine, push: (Route) -> Unit) {
+    val mics by engine.mics.collectAsStateWithLifecycle()
     Group {
         row {
             NavRow(
@@ -574,7 +603,7 @@ private fun Home(settings: AppSettings, push: (Route) -> Unit) {
             NavRow(
                 it,
                 stringResource(R.string.audio),
-                stringResource(settings.mic.label),
+                micLabel(mics, settings.micKey),
                 Badge(Icons.Rounded.GraphicEq, Color(0xFFFFC46B), MaterialShapes.Sunny),
             ) {
                 push(Route.Audio)
@@ -701,6 +730,27 @@ private fun StreamPage(
     }
     Group {
         row { shapes ->
+            val on = profile.destinations.count { it.enabled }
+            NavRow(
+                shapes,
+                stringResource(R.string.destinations),
+                if (on == 0) stringResource(R.string.off) else stringResource(R.string.channels_on, on),
+            ) { push(Route.StreamDestinations(profile.id)) }
+        }
+        row { shapes ->
+            NavRow(shapes, stringResource(R.string.replay), stringResource(if (profile.replay.enabled) R.string.on else R.string.off)) {
+                push(Route.StreamReplay(profile.id))
+            }
+        }
+        row { shapes ->
+            val host = profile.previewStream.url.substringAfter("://", "").substringBefore('/')
+            NavRow(shapes, stringResource(R.string.preview_stream), host.ifEmpty { stringResource(R.string.off) }) {
+                push(Route.StreamPreview(profile.id))
+            }
+        }
+    }
+    Group {
+        row { shapes ->
             val name = stringResource(R.string.copy_name, profile.name)
             ActionRow(shapes, stringResource(R.string.duplicate), Icons.Rounded.ContentCopy) {
                 val copy = profile.copy(id = UUID.randomUUID().toString(), name = name)
@@ -746,13 +796,13 @@ private fun StreamUrl(store: SettingsStore, profile: StreamProfile, editable: Bo
             }
         }
         row { shapes ->
-            TextRow(shapes, "URL", profile.url, "rtmps://, srt://, srtla://", editable, KeyboardType.Uri) {
+            TextRow(shapes, "URL", profile.url, "rtmps://, srt://, srtla://, rist://, whip://", editable, KeyboardType.Uri) {
                 update(profile.copy(url = it.trim()))
             }
         }
-        if (profile.url.startsWith("rtmp")) {
+        keyLabel(profile.url)?.let { label ->
             row { shapes ->
-                TextRow(shapes, stringResource(R.string.stream_key), profile.streamKey, enabled = editable, keyboard = KeyboardType.Password) {
+                TextRow(shapes, stringResource(label), profile.streamKey, enabled = editable, keyboard = KeyboardType.Password) {
                     update(profile.copy(streamKey = it.trim()))
                 }
             }
@@ -1369,7 +1419,7 @@ private fun StreamTransport(store: SettingsStore, profile: StreamProfile, editab
             }
         }
     }
-    if (profile.url.startsWith("srt")) {
+    if (profile.transport == Transport.SRT || profile.transport == Transport.SRTLA) {
         Group {
             row { shapes ->
                 ChoiceRow(
@@ -1383,7 +1433,16 @@ private fun StreamTransport(store: SettingsStore, profile: StreamProfile, editab
             }
         }
     }
-    if (profile.url.startsWith("srtla")) {
+    if (profile.transport == Transport.RIST) {
+        Group {
+            row { shapes ->
+                SwitchRow(shapes, stringResource(R.string.status_bonding), profile.ristBonding, editable) { on ->
+                    update(profile.copy(ristBonding = on))
+                }
+            }
+        }
+    }
+    if (profile.bonded) {
         Group {
             val networks = listOf(
                 LinkType.WIFI to R.string.network_wifi,
@@ -1559,5 +1618,197 @@ private fun ImportExport(store: SettingsStore, live: Boolean) {
             },
             dismissButton = { TextButton({ confirmReset = false }) { Text(stringResource(R.string.cancel)) } },
         )
+    }
+}
+
+private fun keyLabel(url: String): Int? = when (transportOf(url)) {
+    Transport.RTMP -> R.string.stream_key
+    Transport.WHIP -> R.string.token
+    else -> null
+}
+
+@Composable
+private fun Microphones(store: SettingsStore, settings: AppSettings, engine: StreamEngine) {
+    val mics by engine.mics.collectAsStateWithLifecycle()
+    val selected = findMic(mics, settings.micKey)
+    Group {
+        row { shapes ->
+            NavRow(
+                shapes,
+                stringResource(R.string.mic_auto),
+                leading = { RadioButton(settings.micKey == null, { store.update { it.copy(micKey = null) } }) },
+            ) { store.update { it.copy(micKey = null) } }
+        }
+        mics.forEach { mic ->
+            row { shapes ->
+                NavRow(
+                    shapes,
+                    micLabel(mic),
+                    leading = { RadioButton(mic == selected, { store.update { it.copy(micKey = mic.key) } }) },
+                ) { store.update { it.copy(micKey = mic.key) } }
+            }
+        }
+        if (settings.micKey != null && selected == null) {
+            row { shapes ->
+                NavRow(
+                    shapes,
+                    micLabel(mics, settings.micKey),
+                    leading = { RadioButton(true, {}) },
+                    supporting = stringResource(R.string.mic_not_connected),
+                ) {}
+            }
+        }
+    }
+}
+
+@Composable
+private fun StreamDestinations(
+    store: SettingsStore,
+    profile: StreamProfile,
+    engine: StreamEngine,
+    editable: Boolean,
+    push: (Route) -> Unit,
+) {
+    val states by engine.destinations.collectAsStateWithLifecycle()
+    if (profile.destinations.isNotEmpty()) {
+        Group {
+            profile.destinations.forEach { destination ->
+                row { shapes ->
+                    val state = states[destination.id]
+                    if (state != null) {
+                        ValueRow(shapes, destination.name, stringResource(liveStateLabel(state)))
+                    } else {
+                        SwitchNavRow(
+                            shapes,
+                            destination.name,
+                            destination.enabled,
+                            { on ->
+                                if (editable) {
+                                    store.updateProfile(
+                                        profile.copy(
+                                            destinations = profile.destinations.map {
+                                                if (it.id == destination.id) it.copy(enabled = on) else it
+                                            },
+                                        ),
+                                    )
+                                }
+                            },
+                        ) { push(Route.StreamDestination(profile.id, destination.id)) }
+                    }
+                }
+            }
+        }
+    }
+    Group {
+        row { shapes ->
+            val name = stringResource(R.string.destination_default_name, profile.destinations.size + 1)
+            ActionRow(shapes, stringResource(R.string.add_destination), Icons.Rounded.Add, enabled = editable) {
+                val destination = Destination(name = name)
+                store.updateProfile(profile.copy(destinations = profile.destinations + destination))
+                push(Route.StreamDestination(profile.id, destination.id))
+            }
+        }
+    }
+}
+
+private fun liveStateLabel(state: LiveState) = when (state) {
+    LiveState.LIVE -> R.string.notification_live
+    LiveState.OFFLINE -> R.string.off
+    LiveState.CONNECTING -> R.string.connecting
+    LiveState.RECONNECTING -> R.string.reconnecting
+}
+
+@Composable
+private fun StreamDestination(
+    store: SettingsStore,
+    profile: StreamProfile,
+    destination: Destination,
+    editable: Boolean,
+    pop: () -> Unit,
+) {
+    val update = { changed: Destination ->
+        store.updateProfile(profile.copy(destinations = profile.destinations.map { if (it.id == changed.id) changed else it }))
+    }
+    Group {
+        row { TextRow(it, stringResource(R.string.name), destination.name) { name -> update(destination.copy(name = name)) } }
+    }
+    Group {
+        row { shapes ->
+            TextRow(shapes, "URL", destination.url, "rtmps://", editable, KeyboardType.Uri) { update(destination.copy(url = it.trim())) }
+        }
+        keyLabel(destination.url)?.let { label ->
+            row { shapes ->
+                TextRow(shapes, stringResource(label), destination.streamKey, enabled = editable, keyboard = KeyboardType.Password) {
+                    update(destination.copy(streamKey = it.trim()))
+                }
+            }
+        }
+    }
+    Group {
+        row { shapes ->
+            ActionRow(shapes, stringResource(R.string.delete), Icons.Rounded.Delete, MaterialTheme.colorScheme.error, editable) {
+                pop()
+                store.updateProfile(profile.copy(destinations = profile.destinations.filterNot { it.id == destination.id }))
+            }
+        }
+    }
+}
+
+@Composable
+private fun StreamReplay(store: SettingsStore, profile: StreamProfile, editable: Boolean) {
+    val replay = profile.replay
+    val update = { changed: com.opirl.app.settings.ReplaySettings -> store.updateProfile(profile.copy(replay = changed)) }
+    Group {
+        row { SwitchRow(it, stringResource(R.string.enabled), replay.enabled, editable) { on -> update(replay.copy(enabled = on)) } }
+    }
+    Group {
+        row { shapes ->
+            ChoiceRow(shapes, stringResource(R.string.replay_length), REPLAY_SECONDS, replay.seconds, { "$it s" }) {
+                update(replay.copy(seconds = it))
+            }
+        }
+        row { shapes ->
+            ChoiceRow(shapes, stringResource(R.string.replay_delay), listOf(0, 1, 2, 3, 5), replay.delaySeconds, { "$it s" }) {
+                update(replay.copy(delaySeconds = it))
+            }
+        }
+        row { shapes ->
+            ChoiceRow(shapes, stringResource(R.string.replay_speed), REPLAY_SPEEDS, replay.speedPercent, { "${it / 100f}x" }) {
+                update(replay.copy(speedPercent = it))
+            }
+        }
+    }
+}
+
+@Composable
+private fun StreamPreview(store: SettingsStore, profile: StreamProfile, editable: Boolean) {
+    val preview = profile.previewStream
+    val update = { changed: com.opirl.app.settings.PreviewStreamSettings -> store.updateProfile(profile.copy(previewStream = changed)) }
+    Group {
+        row { shapes ->
+            TextRow(shapes, "URL", preview.url, "whip://", editable, KeyboardType.Uri) { update(preview.copy(url = it.trim())) }
+        }
+        row { shapes ->
+            TextRow(shapes, stringResource(R.string.token), preview.token, enabled = editable, keyboard = KeyboardType.Password) {
+                update(preview.copy(token = it.trim()))
+            }
+        }
+    }
+    Group {
+        row { shapes ->
+            ChoiceRow(shapes, stringResource(R.string.resolution), PREVIEW_RESOLUTIONS, preview.resolution, { it.label }, enabled = editable) {
+                update(preview.copy(resolution = it))
+            }
+        }
+        row { shapes ->
+            ChoiceRow(
+                shapes,
+                "Bitrate (kbps)",
+                listOf(250, 500, 1000, 1500, 2500),
+                preview.bitrateKbps,
+                { "$it" },
+                enabled = editable,
+            ) { update(preview.copy(bitrateKbps = it)) }
+        }
     }
 }
