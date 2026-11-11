@@ -37,6 +37,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BatteryAlert
 import androidx.compose.material.icons.rounded.ChatBubble
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.FiberManualRecord
 import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.material.icons.rounded.Stop
@@ -57,6 +59,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.ToggleButtonDefaults
@@ -83,6 +86,9 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.util.lerp
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
@@ -192,8 +198,8 @@ private fun BarButton(icon: ImageVector, label: String, checked: Boolean, size: 
 }
 
 @Composable
-fun QuickButtonView(button: QuickButton, size: Dp = 44.dp) {
-    Column(Modifier.width(size + 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+fun QuickButtonView(button: QuickButton, size: Dp, width: Dp) {
+    Column(Modifier.width(width), horizontalAlignment = Alignment.CenterHorizontally) {
         BarButton(button.icon, button.label, button.checked, size, button.color, button.onClick)
         Text(button.label, fontSize = 10.sp, lineHeight = 12.sp, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
     }
@@ -202,6 +208,54 @@ fun QuickButtonView(button: QuickButton, size: Dp = 44.dp) {
 @Composable
 fun SettingsButton(open: Boolean, size: Dp = 40.dp, onChange: (Boolean) -> Unit) {
     BarButton(Icons.Rounded.Settings, "Settings", open, size, onClick = { onChange(!open) })
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun PanelButtons(hidden: Boolean, onHide: () -> Unit, onClose: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = IconButtonDefaults.filledIconButtonColors(
+        containerColor = if (hidden) Color.Black.copy(alpha = 0.55f) else MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = Color.White,
+    )
+    val size = Modifier.size(IconButtonDefaults.extraSmallContainerSize())
+    val icon = Modifier.size(IconButtonDefaults.extraSmallIconSize)
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        FilledIconButton(onHide, IconButtonDefaults.shapes(), size, colors = colors) {
+            Icon(
+                if (hidden) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
+                if (hidden) "Show panel" else "Hide panel",
+                icon,
+            )
+        }
+        FilledIconButton(onClose, IconButtonDefaults.shapes(), size, colors = colors) {
+            Icon(Icons.Rounded.Close, "Close", icon)
+        }
+    }
+}
+
+fun quickButtonX(index: Int, count: Int, columns: Int, width: Int, cell: Int): Int =
+    (width - minOf(columns, count - index / columns * columns) * cell) / 2 + index % columns * cell
+
+@Composable
+fun QuickButtonGrid(buttons: List<QuickButton>, closedColumns: Int, open: () -> Float, modifier: Modifier) {
+    Layout({ buttons.forEach { QuickButtonView(it, 40.dp, 48.dp) } }, modifier) { measurables, constraints ->
+        val placeables = measurables.map { it.measure(Constraints()) }
+        val cell = 50.dp.roundToPx()
+        val rowHeight = (placeables.maxOfOrNull { it.height } ?: 0) + 6.dp.roundToPx()
+        val width = constraints.maxWidth
+        val count = placeables.size
+        val fraction = open()
+        val x = { index: Int, columns: Int -> quickButtonX(index, count, columns, width, cell) + 1.dp.roundToPx() }
+        val height = { columns: Int -> (count + columns - 1) / columns * rowHeight }
+        layout(width, lerp(height(closedColumns), height(2), fraction).coerceAtLeast(0)) {
+            placeables.forEachIndexed { index, placeable ->
+                placeable.place(
+                    lerp(x(index, closedColumns), x(index, 2), fraction),
+                    lerp(index / closedColumns * rowHeight, index / 2 * rowHeight, fraction),
+                )
+            }
+        }
+    }
 }
 
 @Composable

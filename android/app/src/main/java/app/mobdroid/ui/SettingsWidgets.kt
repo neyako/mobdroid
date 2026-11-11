@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -36,6 +37,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -49,7 +53,19 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.graphics.shapes.RoundedPolygon
 
-val RowPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
+val RowPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp)
+val RowHeight: Dp
+    @Composable get() = 44.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)
+
+val TwoLineRowHeight: Dp
+    @Composable get() = 56.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)
+val PanelHeaderHeight = 44.dp
+
+val RowTitle: TextStyle
+    @Composable get() = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp)
+
+val PanelTitle: TextStyle
+    @Composable get() = MaterialTheme.typography.titleMediumEmphasized.copy(fontSize = 15.sp)
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -77,8 +93,8 @@ fun Group(build: GroupBuilder.() -> Unit) {
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun BadgeIcon(badge: Badge) {
-    Box(Modifier.size(32.dp).clip(badge.shape.toShape()).background(badge.color), contentAlignment = Alignment.Center) {
-        Icon(badge.icon, null, tint = Color.Black, modifier = Modifier.size(18.dp))
+    Box(Modifier.size(26.dp).clip(badge.shape.toShape()).background(badge.color), contentAlignment = Alignment.Center) {
+        Icon(badge.icon, null, tint = Color.Black, modifier = Modifier.size(15.dp))
     }
 }
 
@@ -94,6 +110,7 @@ fun NavRow(
     onClick: () -> Unit,
 ) {
     SegmentedListItem(
+        modifier = Modifier.heightIn(max = if (supporting == null) RowHeight else TwoLineRowHeight),
         contentPadding = RowPadding,
         colors = rowColors(),
         onClick = onClick,
@@ -116,20 +133,21 @@ fun NavRow(
                 Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
-    ) { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+    ) { Text(title, style = RowTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ValueRow(shapes: ListItemShapes, title: String, value: String) {
     SegmentedListItem(
+        modifier = Modifier.heightIn(max = RowHeight),
         contentPadding = RowPadding,
         colors = rowColors(),
         shapes = shapes,
         trailingContent = {
             Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         },
-    ) { Text(title) }
+    ) { Text(title, style = RowTitle) }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -148,8 +166,9 @@ fun ActionRow(
         onClick = onClick,
         shapes = shapes,
         enabled = enabled,
-        leadingContent = { Icon(icon, null, tint = if (enabled) color else color.copy(alpha = 0.38f)) },
-    ) { Text(title, color = if (enabled) color else color.copy(alpha = 0.38f)) }
+        modifier = Modifier.heightIn(max = RowHeight),
+        leadingContent = { Icon(icon, null, Modifier.size(20.dp), tint = if (enabled) color else color.copy(alpha = 0.38f)) },
+    ) { Text(title, style = RowTitle, color = if (enabled) color else color.copy(alpha = 0.38f)) }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -161,8 +180,9 @@ fun SwitchRow(shapes: ListItemShapes, title: String, checked: Boolean, enabled: 
         onClick = { onChange(!checked) },
         shapes = shapes,
         enabled = enabled,
-        trailingContent = { Switch(checked, null, enabled = enabled) },
-    ) { Text(title) }
+        modifier = Modifier.heightIn(max = RowHeight),
+        trailingContent = { Switch(checked, null, Modifier.scale(0.85f), enabled = enabled) },
+    ) { Text(title, style = RowTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -179,9 +199,9 @@ fun <T> ChoiceRow(
 ) {
     SegmentedListItem(shapes = shapes, contentPadding = RowPadding, colors = rowColors()) {
         Column {
-            Text(title)
+            Text(title, style = RowTitle)
             Row(
-                Modifier.fillMaxWidth().padding(top = 6.dp),
+                Modifier.fillMaxWidth().padding(top = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween),
             ) {
                 values.forEachIndexed { index, value ->
@@ -196,7 +216,7 @@ fun <T> ChoiceRow(
                         },
                         colors = ToggleButtonDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
                         contentPadding = PaddingValues(horizontal = 4.dp),
-                        modifier = Modifier.weight(label(value).length + 2f).height(36.dp),
+                        modifier = Modifier.weight(label(value).length + 2f).height(32.dp),
                     ) {
                         Text(label(value), maxLines = 1, style = MaterialTheme.typography.labelMedium)
                     }
@@ -219,7 +239,7 @@ fun BitrateRow(
     SegmentedListItem(shapes = shapes, contentPadding = RowPadding, colors = rowColors()) {
         Column {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(title)
+                Text(title, style = RowTitle)
                 Text(
                     "${formatMbps(kbps)} Mbps",
                     style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),

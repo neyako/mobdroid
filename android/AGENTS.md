@@ -190,19 +190,31 @@ them, not code style.
 
 ## UI
 
-- `ui/MainScreen.kt` lays the screen out the way Moblin does. Wide screens: the preview with rounded corners
-  against the start edge, under a display cutout there (only the end side keeps its cutout inset), the
-  status in its top right (temperature and uptime, bitrate, bonding share, audio meter, in that order), the
-  zoom stops and the camera row in its bottom right, and a control bar that takes the width the preview
-  leaves (104 to 200 dp, with larger buttons from 150 dp) with the Moblin logo and the settings button on
-  top, the quick buttons under them and the Go Live button at the bottom. Near-square
-  screens (the Flip cover, `maxWidth / maxHeight < 1.5`): status, logo and settings button in a top band,
-  the preview with zoom stops left and cameras right, quick buttons and Go Live in a bottom band.
+- `ui/MainScreen.kt` lays the screen out the way Moblin does, with Moblin's sizes. Wide screens: the preview
+  with rounded corners against the start edge, under a display cutout there (only the end side keeps its
+  cutout inset), the status in its top right (temperature and uptime, recording, bitrate, bonding share,
+  audio meter, in that order), the zoom stops and the camera row in its bottom right, and a control bar at
+  the far end with the Moblin logo and the settings button on top, the quick buttons under them and the Go
+  Live button at the bottom. Quick buttons are 40 dp in 48 dp cells. With no panel the bar takes the width
+  the preview leaves (100 to 250 dp) and shows as many button columns as fit (three on the vivo); with a
+  panel open it is 100 dp with two columns, as in Moblin. Near-square screens (the Flip cover,
+  `maxWidth / maxHeight < 1.5`): status, logo and settings button in a top band, the preview with zoom
+  stops left and cameras right, quick buttons and Go Live in a bottom band.
 - The preview `SurfaceView` has exactly the output aspect, so the corner mask drawn over it rounds the
-  picture. Never animate its size: opening settings resizes it once and only the panel slides.
-- Settings (`SettingsPanel.kt`) sit between the preview and the control bar on wide screens (350 dp) and fill the
-  screen on near-square ones. The pages follow Moblin's categories and drill down with a back stack. Rows
-  are `SegmentedListItem`s built with `Group { row { ... } }` from `SettingsWidgets.kt`.
+  picture. Never animate its size: it takes its final size the moment a panel opens or closes, and the
+  rest moves over it. The control bar's width and the quick buttons' positions follow one spring
+  (`QuickButtonGrid` places each button between its place in the wide and the two column layout), read in
+  the layout phase only, while the panel slides out from behind the bar or fades away over the preview.
+- Panels (settings, chat) sit between the preview and the control bar on wide screens (350 dp, Moblin's
+  `settingsHalfWidth`) and fill the screen on near-square ones. Their header is 44 dp with `PanelButtons`:
+  hide and close, extra small filled icon buttons with the expressive shape morph. They are 32 dp with
+  16 dp between them, so their 48 dp touch targets do not overlap. Hide takes the panel off the screen and
+  keeps the settings page (`SettingsPages`, reset once the panel has closed) and the chat draft, which
+  live in `MainScreen`; the two buttons then float in the preview's top right and the status moves under
+  them. Settings pages follow Moblin's categories and drill down with a back stack. Rows are
+  `SegmentedListItem`s built with `Group { row { ... } }` from `SettingsWidgets.kt`, capped at 44 dp (56 dp
+  with a supporting line) times the font scale, with 15 sp titles. The cap is a
+  `heightIn(max)`, because the list item's own minimum is 56 dp.
 - The microphone is open whenever the preview runs, so the audio meter works before going live: an
   `AudioEncoder` without a sink only reads and meters. It reports the peak level in dB about nine times a
   second to `StreamEngine.audioLevel`, which the meter reads in its draw phase only.

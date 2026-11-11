@@ -24,7 +24,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Send
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
@@ -33,6 +32,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -145,7 +145,14 @@ fun ChatOverlay(engine: StreamEngine, sizeSp: Int, count: Int, modifier: Modifie
 }
 
 @Composable
-fun ChatPanel(engine: StreamEngine, settings: AppSettings, onClose: () -> Unit, header: (@Composable () -> Unit)? = null) {
+fun ChatPanel(
+    engine: StreamEngine,
+    settings: AppSettings,
+    draft: MutableState<String>,
+    onHide: () -> Unit,
+    onClose: () -> Unit,
+    header: (@Composable () -> Unit)? = null,
+) {
     val lines by engine.chat.lines.collectAsStateWithLifecycle()
     val connected by engine.chat.connected.collectAsStateWithLifecycle()
     val canSend by engine.chat.canSend.collectAsStateWithLifecycle()
@@ -156,15 +163,18 @@ fun ChatPanel(engine: StreamEngine, settings: AppSettings, onClose: () -> Unit, 
     }
     Surface(Modifier.fillMaxSize(), color = Color.Black) {
         Column(Modifier.imePadding()) {
-            Row(Modifier.fillMaxWidth().height(52.dp).padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.fillMaxWidth().height(PanelHeaderHeight).padding(start = 16.dp, end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Box(Modifier.weight(1f)) {
                     if (header != null) {
                         header()
                     } else {
-                        Text("Chat", style = MaterialTheme.typography.titleMediumEmphasized)
+                        Text("Chat", style = PanelTitle)
                     }
                 }
-                IconButton(onClose) { Icon(Icons.Rounded.Close, "Close") }
+                PanelButtons(hidden = false, onHide, onClose)
             }
             val waiting = connected.filterValues { !it }.keys
             val note = when {
@@ -192,14 +202,20 @@ fun ChatPanel(engine: StreamEngine, settings: AppSettings, onClose: () -> Unit, 
                     ChatMessageText(it, settings.chatTextSize.sp, shadow = false, platformDot = connected.size > 1)
                 }
             }
-            if (canSend.isNotEmpty()) ChatInput(canSend) { platform, text, onResult -> engine.chat.send(platform, text, onResult) }
+            if (canSend.isNotEmpty()) {
+                ChatInput(canSend, draft) { platform, text, onResult -> engine.chat.send(platform, text, onResult) }
+            }
         }
     }
 }
 
 @Composable
-private fun ChatInput(platforms: List<ChatPlatform>, onSend: (ChatPlatform, String, (String?) -> Unit) -> Unit) {
-    var text by remember { mutableStateOf("") }
+private fun ChatInput(
+    platforms: List<ChatPlatform>,
+    draft: MutableState<String>,
+    onSend: (ChatPlatform, String, (String?) -> Unit) -> Unit,
+) {
+    var text by draft
     var error by remember { mutableStateOf<String?>(null) }
     var platform by remember(platforms) { mutableStateOf(platforms.first()) }
     val send = {

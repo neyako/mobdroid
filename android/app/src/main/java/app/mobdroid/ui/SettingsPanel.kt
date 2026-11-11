@@ -38,9 +38,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -110,7 +112,15 @@ import app.mobdroid.stream.StreamEngine
 import app.mobdroid.stream.outputSize
 import java.util.UUID
 
-private sealed interface Route {
+class SettingsPages {
+    internal val stack = mutableStateListOf<Route>(Route.Home)
+
+    fun reset() {
+        if (stack.size > 1) stack.removeRange(1, stack.size)
+    }
+}
+
+internal sealed interface Route {
     data object Home : Route
 
     data object Streams : Route
@@ -194,9 +204,16 @@ private fun videoSummary(profile: StreamProfile): String {
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun SettingsPanel(store: SettingsStore, engine: StreamEngine, live: Boolean, onClose: () -> Unit) {
+fun SettingsPanel(
+    store: SettingsStore,
+    engine: StreamEngine,
+    live: Boolean,
+    pages: SettingsPages,
+    onHide: () -> Unit,
+    onClose: () -> Unit,
+) {
     val settings by store.settings.collectAsStateWithLifecycle()
-    val stack = remember { mutableStateListOf<Route>(Route.Home) }
+    val stack = pages.stack
     val push: (Route) -> Unit = { stack += it }
     val pop = { if (stack.size > 1) stack.removeAt(stack.lastIndex) }
     BackHandler(stack.size > 1) { pop() }
@@ -210,21 +227,23 @@ fun SettingsPanel(store: SettingsStore, engine: StreamEngine, live: Boolean, onC
         color = Color.Black,
     ) {
         Column {
-            Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (stack.size > 1) {
-                    IconButton({ pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Navigate back") }
-                } else {
-                    Spacer(Modifier.size(48.dp))
+            Row(Modifier.fillMaxWidth().height(PanelHeaderHeight).padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.width(70.dp)) {
+                    if (stack.size > 1) {
+                        IconButton({ pop() }, Modifier.size(44.dp)) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Navigate back", Modifier.size(20.dp))
+                        }
+                    }
                 }
                 Text(
                     title(stack.last(), settings),
-                    style = MaterialTheme.typography.titleMediumEmphasized,
+                    style = PanelTitle,
                     textAlign = TextAlign.Center,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                IconButton(onClose) { Icon(Icons.Rounded.Close, "Close") }
+                PanelButtons(hidden = false, onHide, onClose)
             }
             AnimatedContent(
                 targetState = stack.size to stack.last(),
@@ -743,6 +762,7 @@ private fun RecordingsPage(engine: StreamEngine) {
                                 )
                             }
                         },
+                        modifier = Modifier.heightIn(max = TwoLineRowHeight),
                         verticalAlignment = Alignment.CenterVertically,
                         leadingContent = { RecordingThumbnail(recording.uri) },
                         supportingContent = {
@@ -751,7 +771,7 @@ private fun RecordingsPage(engine: StreamEngine) {
                         trailingContent = {
                             IconButton({ deleting = recording }) { Icon(Icons.Rounded.Delete, "Delete ${recording.name}") }
                         },
-                    ) { Text(recording.name, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    ) { Text(recording.name, style = RowTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 }
             }
         }
@@ -879,13 +899,14 @@ private fun BitratePresetsPage(store: SettingsStore, settings: AppSettings) {
                     contentPadding = RowPadding,
                     colors = rowColors(),
                     shapes = shapes,
+                    modifier = Modifier.heightIn(max = RowHeight),
                     trailingContent = {
                         IconButton(
                             { store.update { it.copy(bitratePresetsKbps = it.bitratePresetsKbps - preset) } },
                             enabled = settings.bitratePresetsKbps.size > 1,
                         ) { Icon(Icons.Rounded.Delete, "Delete ${formatMbps(preset)} Mbps") }
                     },
-                ) { Text("${formatMbps(preset)} Mbps") }
+                ) { Text("${formatMbps(preset)} Mbps", style = RowTitle) }
             }
         }
     }
