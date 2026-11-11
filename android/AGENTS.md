@@ -7,13 +7,14 @@ them, not code style.
 ## Layout
 
 - `engine/` — pure Kotlin/JVM, no Android imports. Everything that can run and be tested on the JVM:
-  muxers, transports, adaptive bitrate, chat clients.
+  muxers, transports, adaptive bitrate, chat clients, the OBS remote.
   - `media/` — `VideoFormat`, `AudioFormat`, `EncodedFrame`, `MediaSink`.
   - `net/` — `Publisher` (one-shot ingest connection), `NetworkLink`/`NetworkLinkProvider` (sockets
     pinned to an interface, used by SRTLA bonding).
   - `flv/`, `rtmp/` — FLV tags and the RTMP/RTMPS publisher. HEVC and AV1 use Enhanced RTMP.
   - `ts/` — MPEG-TS muxer (H264, HEVC, AV1, AAC).
   - `mp4/` — the recorder: a crash-safe MP4 writer and the function that finishes or recovers a file.
+  - `obs/` — the obs-websocket 5 client.
   - `srt/` — SRT caller, a port of Moblin's own `SrtSender.swift`. `srtla/` — SRTLA bonding client,
     a port of `Moblin/Media/Srtla/Client`. `abr/` — adaptive bitrate (Belabox port).
 - `app/` — the Android app: camera sources, GL compositor, MediaCodec encoders, the foreground
@@ -222,12 +223,46 @@ them, not code style.
   on the preview, the ones that are not preview only on the encoder and recorder surfaces and in snapshots.
   They are never mirrored.
 
+## OBS remote
+
+- `engine/obs/ObsClient` speaks obs-websocket 5 (RPC version 1) over OkHttp. One instance lives in
+  `StreamEngine` for the app's life; `start(url, password)` replaces the connection (a call with the same
+  values keeps it) and `stop()` closes it. It is connected while the preview runs or the app is live or
+  recording, for the selected stream's `ObsSettings` (`enabled`, a URL `obsUrl` accepts, the password).
+- All connection state lives on one single-thread executor per connection, shut down on stop. `state`
+  (scenes in OBS's order top to bottom, the program scene, stream and record output states with the time
+  they started on the client's clock, the audio inputs) and `screenshot` are `StateFlow`s that reset on
+  stop. A lost connection sets `error` ("Cannot reach OBS", OBS's close reason, or "Wrong password" for close
+  code 4009) and reconnects every 5 seconds.
+- Commands (`setScene`, `startStream`, `stopStream`, `startRecord`, `stopRecord`, `setMuted`) are sent from
+  the calling thread and the socket closes gracefully, so a command sent right before `stop()` still
+  reaches OBS (ending a stream from the background stops the preview in the same call). A failed command
+  reports OBS's comment through `onError`, which shows an alert. The state changes only from OBS's events,
+  never optimistically. A request OBS does not answer within 10 seconds fails with "OBS did not answer", so
+  the pending requests stay bounded.
+- Between `CurrentSceneCollectionChanging` and `CurrentSceneCollectionChanged` nothing is sent (OBS can
+  crash on requests then): requests fail at once, the screenshot timer stops, and everything is read again
+  afterwards. The check and the send of a request share one lock with those two events, because commands
+  are sent from other threads.
+- A mute event that arrives during an input refresh restarts the refresh, so an older answer cannot
+  overwrite it.
+- The audio inputs are OBS's special inputs (desktop and mic devices) plus the enabled sources of the
+  program scene, kept only when `GetInputMute` succeeds, which is how OBS tells a source has audio.
+- `setScreenshots(true)` fetches a 480 px wide JPEG of the program scene, then again 2 seconds after each
+  answer and at once on a scene change. Every fetch cancels the timer and the answer of the one before, so
+  there is one timer chain however often the panel is shown. The OBS panel turns it on only while it is on screen and the
+  activity is started; nothing is fetched in the background.
+- `StreamProfile.obs` also holds four switches that start and stop OBS's stream and recording with Go Live
+  and End. They act only when the client is connected to the selected stream's OBS (`isFor`) and the
+  output is in the opposite state. End sends them before it stops the local recording, which can stop the
+  preview and with it the client.
+
 ## UI
 
 - `ui/MainScreen.kt` lays the screen out the way Moblin does, with Moblin's sizes. Wide screens: the preview
   with rounded corners against the start edge, under a display cutout there (only the end side keeps its
-  cutout inset), the status in its top right (temperature and uptime, recording, bitrate, bonding share,
-  audio meter, in that order), the zoom stops and the scene row in its bottom right, and a control bar at
+  cutout inset), the status in its top right (OBS, temperature and uptime, recording, bitrate, bonding
+  share, audio meter, in that order), the zoom stops and the scene row in its bottom right, and a control bar at
   the far end with the Moblin logo and the settings button on top, the quick buttons under them and the Go
   Live button at the bottom. Quick buttons are 40 dp in 48 dp cells. With no panel the bar takes the width
   the preview leaves (100 to 250 dp) and shows as many button columns as fit (three on the vivo); with a
@@ -239,7 +274,7 @@ them, not code style.
   rest moves over it. The control bar's width and the quick buttons' positions follow one spring
   (`QuickButtonGrid` places each button between its place in the wide and the two column layout), read in
   the layout phase only, while the panel slides out from behind the bar or fades away over the preview.
-- Panels (settings, chat) sit between the preview and the control bar on wide screens (350 dp, Moblin's
+- Panels (settings, chat, widgets, OBS) sit between the preview and the control bar on wide screens (350 dp, Moblin's
   `settingsHalfWidth`) and fill the screen on near-square ones. Their header is 44 dp with `PanelButtons`:
   hide and close, extra small filled icon buttons with the expressive shape morph. They are 32 dp with
   16 dp between them, so their 48 dp touch targets do not overlap. Hide takes the panel off the screen and
@@ -263,6 +298,11 @@ them, not code style.
 - The Widgets quick button opens a panel that turns the selected scene's widgets on and off. Scenes and
   widgets are edited under Settings, Scenes: a scene page lists every widget with a switch, and tapping one
   opens its placement in that scene.
+- The OBS quick button (OBS's own logo, `ObsLogo`) opens the OBS panel: the program picture with the
+  stream and record buttons beside it, the scenes as toggle buttons, the audio inputs with their mute
+  state. Stopping an output takes a second tap within 3 seconds. A stream without OBS set up gets the URL
+  and password fields in the panel; an unreachable OBS shows why and a link to Streams, the stream, OBS
+  remote. The OBS status item (scene, live, rec, or offline) shows while OBS is enabled for the stream.
 - The Record quick button asks for a second tap to stop, like the End button. The recording time and size
   are a status item. Recording settings are per stream (Streams, a stream, Recording); the recordings list
   is Settings, Recordings.

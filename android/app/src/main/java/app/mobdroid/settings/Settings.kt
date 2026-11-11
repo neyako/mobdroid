@@ -45,6 +45,7 @@ enum class StatusItem(val label: String) {
     BONDING("Bonding"),
     AUDIO_LEVEL("Audio level"),
     RECORDING("Recording"),
+    OBS("OBS"),
 }
 
 @Serializable
@@ -53,6 +54,7 @@ enum class QuickButtonId(val label: String) {
     RECORD("Record"),
     SNAPSHOT("Snapshot"),
     WIDGETS("Widgets"),
+    OBS("OBS"),
     BITRATE("Bitrate"),
     MIC("Mic"),
     STEALTH("Stealth"),
@@ -66,6 +68,17 @@ data class RecordingSettings(
     val bitrateKbps: Int = 20000,
     val startWithStream: Boolean = false,
     val stopWithStream: Boolean = false,
+)
+
+@Serializable
+data class ObsSettings(
+    val enabled: Boolean = false,
+    val url: String = "",
+    val password: String = "",
+    val startStream: Boolean = false,
+    val stopStream: Boolean = false,
+    val startRecording: Boolean = false,
+    val stopRecording: Boolean = false,
 )
 
 val RECORDING_CODECS = listOf(VideoCodec.HEVC, VideoCodec.H264, VideoCodec.AV1)
@@ -134,6 +147,7 @@ data class StreamProfile(
     val srtLatencyMs: Int = 3000,
     val bondingNetworks: Set<LinkType> = BONDING_NETWORKS,
     val recording: RecordingSettings = RecordingSettings(),
+    val obs: ObsSettings = ObsSettings(),
 )
 
 @Serializable

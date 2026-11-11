@@ -74,6 +74,8 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
     val recording by engine.recording.collectAsStateWithLifecycle()
     val appSettings by settings.settings.collectAsStateWithLifecycle()
     val profile = appSettings.selectedProfile
+    val obsState by engine.obs.state.collectAsStateWithLifecycle()
+    val obs = obsState.takeIf { profile.obs.enabled }
     var side by remember { mutableStateOf<Side?>(null) }
     var shownSide by remember { mutableStateOf(Side.SETTINGS) }
     side?.let { shownSide = it }
@@ -92,6 +94,12 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
     val floatingButtons: @Composable (Modifier) -> Unit = { modifier ->
         if (side != null && panelHidden) {
             PanelButtons(hidden = true, onHide = { panelHidden = false }, onClose = closePanel, modifier)
+        }
+    }
+    val obsPanel: @Composable () -> Unit = {
+        ObsPanel(settings, engine.obs, appSettings, onHide = { panelHidden = true }, onClose = closePanel) {
+            settingsPages.open(Route.Streams, Route.Stream(profile.id), Route.StreamObs(profile.id))
+            side = Side.SETTINGS
         }
     }
     var showBitrate by remember { mutableStateOf(false) }
@@ -118,7 +126,9 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
         recording = recording != null,
         confirmRecordStop = confirmRecordStop,
         widgetsOpen = side == Side.WIDGETS && !panelHidden,
+        obsOpen = side == Side.OBS && !panelHidden,
         onWidgets = { toggle(Side.WIDGETS) },
+        onObs = { toggle(Side.OBS) },
         onChat = { toggle(Side.CHAT) },
         onRecord = {
             when {
@@ -163,6 +173,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                             ui,
                             stats,
                             recording,
+                            obs,
                             engine.audioLevel,
                             appSettings.hiddenStatusItems,
                             engine::clearError,
@@ -229,6 +240,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                                     ui,
                                     stats,
                                     recording,
+                                    obs,
                                     engine.audioLevel,
                                     appSettings.hiddenStatusItems,
                                     engine::clearError,
@@ -277,6 +289,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                                 when (shownSide) {
                                     Side.CHAT -> ChatPanel(engine, appSettings, chatDraft, onHide = { panelHidden = true }, onClose = closePanel)
                                     Side.WIDGETS -> WidgetsPanel(settings, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
+                                    Side.OBS -> obsPanel()
                                     Side.SETTINGS -> SettingsPanel(
                                         settings,
                                         engine,
@@ -340,6 +353,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                                 ui,
                                 stats,
                                 recording,
+                                obs,
                                 engine.audioLevel,
                                 appSettings.hiddenStatusItems,
                                 engine::clearError,
@@ -349,6 +363,8 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                         }
                     } else if (shownSide == Side.WIDGETS) {
                         WidgetsPanel(settings, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
+                    } else if (shownSide == Side.OBS) {
+                        obsPanel()
                     } else {
                         SettingsPanel(settings, engine, busy, settingsPages, onHide = { panelHidden = true }, onClose = closePanel)
                     }
@@ -393,7 +409,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
     }
 }
 
-private enum class Side { SETTINGS, CHAT, WIDGETS }
+private enum class Side { SETTINGS, CHAT, WIDGETS, OBS }
 
 fun formatBitrate(bps: Long): String = if (bps >= 1_000_000) "%.1f Mbps".format(bps / 1e6) else "${bps / 1000} kbps"
 

@@ -18,6 +18,10 @@ import app.mobdroid.camera.CameraCatalog
 import app.mobdroid.chat.ChatController
 import app.mobdroid.chat.ChatSpeech
 import app.mobdroid.chat.createChatClients
+import app.mobdroid.engine.obs.ObsClient
+import app.mobdroid.engine.obs.ObsOutput
+import app.mobdroid.engine.obs.ObsState
+import app.mobdroid.engine.obs.obsUrl
 import okhttp3.OkHttpClient
 import app.mobdroid.camera.CameraController
 import app.mobdroid.camera.CameraDescriptor
@@ -52,6 +56,7 @@ import app.mobdroid.widgets.BrowserWidgets
 import app.mobdroid.widgets.WidgetRenderer
 import app.mobdroid.settings.LoginStore
 import app.mobdroid.settings.MicSource
+import app.mobdroid.settings.ObsSettings
 import app.mobdroid.settings.RECORDING_CODECS
 import app.mobdroid.settings.RecordingSettings
 import app.mobdroid.recording.RecordingFile
@@ -152,6 +157,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             if (current.chatSpeech) speech.say(message, current.chatSpeechNames)
         },
     )
+    val obs = ObsClient(http, { showAlert(AlertLevel.ERROR, "OBS", it) })
     private val _alert = MutableStateFlow<Alert?>(null)
     val alert: StateFlow<Alert?> = _alert.asStateFlow()
     private val vibrator = context.getSystemService(Vibrator::class.java)
@@ -241,6 +247,14 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 .drop(1)
                 .debounce(1000)
                 .collect { synchronized(this@StreamEngine) { if (previewActive || isLive) chat.start() } }
+        }
+        scope.launch {
+            settings.settings
+                .map { s -> s.selectedProfile.obs.let { Triple(it.enabled, it.url, it.password) } }
+                .distinctUntilChanged()
+                .drop(1)
+                .debounce(1000)
+                .collect { synchronized(this@StreamEngine) { syncObs() } }
         }
         scope.launch {
             logins.logins.drop(1).collect { synchronized(this@StreamEngine) { if (previewActive || isLive) chat.start() } }
@@ -445,6 +459,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                     startAudioMeter()
                     chat.start()
                 }
+                syncObs()
             }
         }
     }
@@ -476,6 +491,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         if (!previewActive || busy) return
         previewActive = false
         chat.stop()
+        obs.stop()
         audioEncoder?.release()
         audioEncoder = null
         closeSources()
@@ -651,6 +667,19 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         }
         startTicker()
         if (profile.recording.startWithStream) startRecording()
+        val wanted = settings.settings.value.selectedProfile.obs
+        val remote = connectedObs(wanted)
+        if (wanted.startStream && remote?.stream == ObsOutput.STOPPED) obs.startStream()
+        if (wanted.startRecording && remote?.record == ObsOutput.STOPPED) obs.startRecord()
+    }
+
+    private fun connectedObs(wanted: ObsSettings): ObsState? =
+        obs.state.value.takeIf { it.connected && wanted.enabled && obs.isFor(obsUrl(wanted.url), wanted.password) }
+
+    private fun syncObs() {
+        val wanted = settings.settings.value.selectedProfile.obs
+        val url = if (wanted.enabled && (previewActive || busy)) obsUrl(wanted.url) else null
+        if (url == null) obs.stop() else obs.start(url, wanted.password)
     }
 
     @Synchronized
@@ -665,6 +694,12 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         links.stop()
         _ui.update { it.copy(live = LiveState.OFFLINE, error = null) }
         _stats.value = LiveStats()
+        if (wasLive) {
+            val wanted = settings.settings.value.selectedProfile.obs
+            val remote = connectedObs(wanted)
+            if (wanted.stopStream && remote?.stream == ObsOutput.STARTED) obs.stopStream()
+            if (wanted.stopRecording && remote?.record == ObsOutput.STARTED) obs.stopRecord()
+        }
         if (wasLive && profile?.recording?.stopWithStream == true) stopRecording()
         if (profile != null) {
             targetBitrate = profile.bitrateKbps * 1000
