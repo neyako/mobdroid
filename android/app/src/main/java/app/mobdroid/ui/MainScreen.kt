@@ -44,6 +44,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -59,6 +60,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.mobdroid.settings.SettingsStore
 import app.mobdroid.stream.LiveState
@@ -82,6 +84,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
     var panelHidden by remember { mutableStateOf(false) }
     val settingsPages = remember { SettingsPages() }
     val chatDraft = remember { mutableStateOf("") }
+    val browser = remember { BrowserState() }
     val showSettings = side == Side.SETTINGS
     val toggle = { target: Side ->
         side = if (side == target && !panelHidden) null else target
@@ -127,8 +130,10 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
         confirmRecordStop = confirmRecordStop,
         widgetsOpen = side == Side.WIDGETS && !panelHidden,
         obsOpen = side == Side.OBS && !panelHidden,
+        browserOpen = side == Side.BROWSER && !panelHidden,
         onWidgets = { toggle(Side.WIDGETS) },
         onObs = { toggle(Side.OBS) },
+        onBrowser = { toggle(Side.BROWSER) },
         onChat = { toggle(Side.CHAT) },
         onRecord = {
             when {
@@ -290,6 +295,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                                     Side.CHAT -> ChatPanel(engine, appSettings, chatDraft, onHide = { panelHidden = true }, onClose = closePanel)
                                     Side.WIDGETS -> WidgetsPanel(settings, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
                                     Side.OBS -> obsPanel()
+                                    Side.BROWSER -> BrowserPanel(settings, appSettings, browser, onHide = { panelHidden = true }, onClose = closePanel)
                                     Side.SETTINGS -> SettingsPanel(
                                         settings,
                                         engine,
@@ -365,6 +371,8 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                         WidgetsPanel(settings, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
                     } else if (shownSide == Side.OBS) {
                         obsPanel()
+                    } else if (shownSide == Side.BROWSER) {
+                        BrowserPanel(settings, appSettings, browser, onHide = { panelHidden = true }, onClose = closePanel)
                     } else {
                         SettingsPanel(settings, engine, busy, settingsPages, onHide = { panelHidden = true }, onClose = closePanel)
                     }
@@ -374,8 +382,16 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
         }
     }
 
-    val settingsLeft = side != Side.SETTINGS && (side != null || (panel.isIdle && !panel.currentState))
+    val left = { target: Side -> side != target && (side != null || (panel.isIdle && !panel.currentState)) }
+    val settingsLeft = left(Side.SETTINGS)
     LaunchedEffect(settingsLeft) { if (settingsLeft) settingsPages.reset() }
+    val browserLeft = left(Side.BROWSER)
+    LaunchedEffect(browserLeft) { if (browserLeft) browser.close() }
+    DisposableEffect(browser) { onDispose { browser.close() } }
+    LifecycleStartEffect(browser) {
+        browser.webView?.onResume()
+        onStopOrDispose { browser.webView?.onPause() }
+    }
     val chatOnly = banded && side == Side.CHAT && !panelHidden
     LaunchedEffect(stealth, chatOnly) { engine.setPreviewEnabled(!stealth && !chatOnly) }
     LaunchedEffect(confirmStop) {
@@ -409,7 +425,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
     }
 }
 
-private enum class Side { SETTINGS, CHAT, WIDGETS, OBS }
+private enum class Side { SETTINGS, CHAT, WIDGETS, OBS, BROWSER }
 
 fun formatBitrate(bps: Long): String = if (bps >= 1_000_000) "%.1f Mbps".format(bps / 1e6) else "${bps / 1000} kbps"
 
