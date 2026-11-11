@@ -20,11 +20,11 @@
 
     <application
         android:name=".App"
-        android:label="Mobdroid"
+        android:label="opIRL"
         android:icon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
-        android:theme="@style/Theme.Mobdroid">
+        android:theme="@style/Theme.Opirl">
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"

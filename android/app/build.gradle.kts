@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -5,12 +7,12 @@ plugins {
 }
 
 android {
-    namespace = "app.mobdroid"
+    namespace = "com.opirl.app"
     compileSdk = 37
     ndkVersion = "29.0.14206865"
 
     defaultConfig {
-        applicationId = "app.mobdroid"
+        applicationId = "com.opirl.app"
         minSdk = 29
         targetSdk = 37
         versionCode = 1
@@ -32,12 +34,29 @@ android {
         }
     }
 
+    val signing = file(
+        providers.gradleProperty("opirl.signing").orNull
+            ?: System.getenv("OPIRL_SIGNING")
+            ?: "${System.getProperty("user.home")}/.config/opirl/signing.properties",
+    )
+    if (signing.isFile) {
+        val keys = Properties().apply { signing.inputStream().use(::load) }
+        signingConfigs {
+            create("release") {
+                storeFile = file(keys.getProperty("storeFile"))
+                storePassword = keys.getProperty("storePassword")
+                keyAlias = keys.getProperty("keyAlias")
+                keyPassword = keys.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 
