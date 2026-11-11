@@ -168,7 +168,17 @@ private class Draft(
 
 private fun lensStop(ratio: Float): Float = if (ratio < 1f) (ratio * 10f).roundToInt() / 10f else niceRatio(ratio)
 
-internal fun buildCatalog(cameras: List<RawCamera>): List<CatalogEntry> {
+class CameraWords(
+    val back: String = "Back",
+    val front: String = "Front",
+    val ultraWide: String = "Ultra wide",
+    val wide: String = "Wide",
+    val telephoto: String = "Telephoto %sx",
+    val frontLens: String = "Front %s",
+    val usb: String = "USB camera",
+)
+
+internal fun buildCatalog(cameras: List<RawCamera>, words: CameraWords = CameraWords()): List<CatalogEntry> {
     val physicalIds = cameras.filter { Capability.LOGICAL_MULTI_CAMERA in it.capabilities }
         .flatMapTo(HashSet()) { camera -> camera.physicalLenses.map { it.id } }
     val candidates = cameras
@@ -214,18 +224,18 @@ internal fun buildCatalog(cameras: List<RawCamera>): List<CatalogEntry> {
             }
         }
     }
-    return label(drafts.sortedBy { it.camera.facing.ordinal })
+    return label(drafts.sortedBy { it.camera.facing.ordinal }, words)
 }
 
-private fun label(drafts: List<Draft>): List<CatalogEntry> {
+private fun label(drafts: List<Draft>, words: CameraWords): List<CatalogEntry> {
     val reference = HashMap<Facing, Float>()
     for (draft in drafts) {
         if (hasFov(draft.lens)) reference.putIfAbsent(draft.camera.facing, fov(draft.lens))
     }
     val seen = HashMap<String, Int>()
-    val total = drafts.groupingBy { name(it, reference) }.eachCount()
+    val total = drafts.groupingBy { name(it, reference, words) }.eachCount()
     return drafts.map { draft ->
-        val base = name(draft, reference)
+        val base = name(draft, reference, words)
         val index = (seen[base] ?: 0) + 1
         seen[base] = index
         val label = if (total.getValue(base) > 1 && index > 1) "$base $index" else base
@@ -244,21 +254,21 @@ private fun label(drafts: List<Draft>): List<CatalogEntry> {
 private fun Pair<Float, Draft>.toLens(label: String) =
     CatalogLens(first, CatalogEntry(second.camera, second.physicalId, label, second.zoomRange, emptyList()))
 
-private fun name(draft: Draft, reference: Map<Facing, Float>): String {
+private fun name(draft: Draft, reference: Map<Facing, Float>, words: CameraWords): String {
     val facing = draft.camera.facing
-    if (facing == Facing.EXTERNAL) return "USB camera"
-    if (draft.zoomStops.isNotEmpty()) return if (facing == Facing.FRONT) "Front" else "Back"
+    if (facing == Facing.EXTERNAL) return words.usb
+    if (draft.zoomStops.isNotEmpty()) return if (facing == Facing.FRONT) words.front else words.back
     val base = reference[facing]
     val ratio = if (base != null && hasFov(draft.lens)) fov(draft.lens) / base else 1f
     val lens = when {
-        ratio < ULTRA_WIDE_BELOW -> "Ultra wide"
-        ratio <= TELEPHOTO_ABOVE -> "Wide"
-        else -> "Telephoto ${formatRatio(niceRatio(ratio))}x"
+        ratio < ULTRA_WIDE_BELOW -> words.ultraWide
+        ratio <= TELEPHOTO_ABOVE -> words.wide
+        else -> words.telephoto.format(formatRatio(niceRatio(ratio)))
     }
     return when {
         facing != Facing.FRONT -> lens
-        lens == "Wide" -> "Front"
-        else -> "Front ${lens.lowercase()}"
+        lens == words.wide -> words.front
+        else -> words.frontLens.format(lens.lowercase())
     }
 }
 

@@ -47,7 +47,9 @@ import kotlinx.coroutines.launch
 
 private data class Placed(val widget: Widget, val placement: SceneWidget)
 
-private data class Inputs(val placed: List<Placed>, val width: Int, val height: Int, val chatTextSize: Int)
+private data class Inputs(val placed: List<Placed>, val width: Int, val height: Int, val chatTextSize: Int) {
+    val textScale: Float get() = minOf(width, height) / 400f
+}
 
 private class Rendered(val key: Any, val bitmap: Bitmap)
 
@@ -109,8 +111,8 @@ class WidgetRenderer(
                 when (widget.type) {
                     WidgetType.TEXT -> {
                         val text = expandText(widget.text, LocalDateTime.now())
-                        cached(widget.id, Triple(text, widget.textSize, input.height)) {
-                            text(text, widget.textSize * input.height / 400f, input.width, input.height)
+                        cached(widget.id, Triple(text, widget.textSize, input.width to input.height)) {
+                            text(text, widget.textSize * input.textScale, input.width, input.height)
                         }
                     }
                     WidgetType.IMAGE -> cached(widget.id, widget.image to input.width) {
@@ -119,15 +121,15 @@ class WidgetRenderer(
                     WidgetType.CHAT -> {
                         val shown = lines.takeLast(CHAT_LINES)
                         val width = input.width * placement.size / 100
-                        cached(widget.id, Triple(shown.map { it.key }, width, input.chatTextSize * input.height)) {
-                            chat(shown, width, input.chatTextSize * input.height / 400f, input.height)
+                        cached(widget.id, Triple(shown.map { it.key }, width, input.chatTextSize * input.textScale)) {
+                            chat(shown, width, input.chatTextSize * input.textScale, input.height)
                         }
                     }
                     WidgetType.BROWSER -> null
                     WidgetType.MUSIC -> track?.takeIf { it.playing || !widget.hideWhenPaused }?.let { shown ->
                         val art = shown.cover.takeIf { widget.cover }
-                        val size = widget.textSize.coerceIn(8, 60) * input.height / 400f
-                        cached(widget.id, listOf(shown.title, shown.artist, art, size)) {
+                        val size = widget.textSize.coerceIn(8, 60) * input.textScale
+                        cached(widget.id, listOf(shown.title, shown.artist, art, size, input.width)) {
                             music(shown.title, shown.artist, art, size, input.width, input.height)
                         }
                     }

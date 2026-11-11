@@ -23,7 +23,7 @@ class StreamService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val stop = intent?.action == ACTION_STOP
         if (!stop || !foreground) {
-            enterForeground(intent?.getBooleanExtra(EXTRA_USB, false) == true, intent?.getStringExtra(EXTRA_TITLE) ?: "Live")
+            enterForeground(intent?.getBooleanExtra(EXTRA_USB, false) == true, intent?.getStringExtra(EXTRA_TITLE) ?: getString(R.string.notification_live))
             foreground = true
         }
         if (stop) {
@@ -47,7 +47,7 @@ class StreamService : Service() {
     private fun enterForeground(usb: Boolean, title: String) {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL, "Live stream", NotificationManager.IMPORTANCE_LOW),
+            NotificationChannel(CHANNEL, getString(R.string.notification_channel), NotificationManager.IMPORTANCE_LOW),
         )
         val notification = Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_live)

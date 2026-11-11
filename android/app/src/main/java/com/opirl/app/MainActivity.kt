@@ -1,6 +1,7 @@
 package com.opirl.app
 
 import android.Manifest
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.hardware.display.DisplayManager
 import android.os.Build
@@ -10,7 +11,18 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.window.layout.FoldingFeature
+import androidx.window.layout.WindowInfoTracker
+import com.opirl.app.ui.Wizard
+import com.opirl.app.ui.rememberAccess
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -34,9 +46,8 @@ class MainActivity : ComponentActivity() {
         override fun onDisplayChanged(displayId: Int) = updateRotation()
     }
 
-    private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        if (hasPermissions() && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) app.engine.startPreview()
-    }
+    private var portrait = false
+    private var fold by mutableStateOf<FoldingFeature?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(SystemBarStyle.dark(android.graphics.Color.BLACK), SystemBarStyle.dark(android.graphics.Color.BLACK))
@@ -58,8 +69,43 @@ class MainActivity : ComponentActivity() {
                     }
             }
         }
-        setContent { OpirlTheme { MainScreen(app.engine, app.settings) } }
-        if (!hasPermissions()) permissionLauncher.launch(PERMISSIONS)
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.CREATED) {
+                app.settings.settings.map { it.selectedProfile.portrait }.distinctUntilChanged().collect {
+                    portrait = it
+                    updateOrientation()
+                }
+            }
+        }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                WindowInfoTracker.getOrCreate(this@MainActivity).windowLayoutInfo(this@MainActivity).collect { info ->
+                    fold = info.displayFeatures.filterIsInstance<FoldingFeature>()
+                        .firstOrNull { it.state == FoldingFeature.State.HALF_OPENED }
+                    updateOrientation()
+                }
+            }
+        }
+        portrait = app.settings.settings.value.selectedProfile.portrait
+        updateOrientation()
+        setContent {
+            OpirlTheme {
+                val settings by app.settings.settings.collectAsStateWithLifecycle()
+                val access = rememberAccess { if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) app.engine.startPreview() }
+                val motion = MaterialTheme.motionScheme
+                MainScreen(
+                    app.engine,
+                    app.settings,
+                    access,
+                    fold?.takeIf { it.orientation == FoldingFeature.Orientation.HORIZONTAL }?.bounds,
+                )
+                AnimatedVisibility(
+                    !settings.setupDone,
+                    enter = fadeIn(motion.defaultEffectsSpec()),
+                    exit = fadeOut(motion.defaultEffectsSpec()),
+                ) { Wizard(app.settings, access) }
+            }
+        }
     }
 
     override fun onStart() {
@@ -75,16 +121,28 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
 
-    private fun updateRotation() {
+    private fun updateOrientation() {
+        val hinge = fold
+        val foldsLikeAFlip = hinge != null &&
+            (hinge.orientation == FoldingFeature.Orientation.HORIZONTAL) != (currentRotation() % 180 != 0)
+        requestedOrientation = when {
+            foldsLikeAFlip -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            portrait -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            else -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
+    }
+
+    private fun currentRotation(): Int {
         @Suppress("DEPRECATION")
         val rotation = if (Build.VERSION.SDK_INT >= 30) display.rotation else windowManager.defaultDisplay.rotation
-        app.engine.setDisplayRotation(rotation * 90)
+        return rotation * 90
     }
+
+    private fun updateRotation() = app.engine.setDisplayRotation(currentRotation())
 
     private fun hasPermissions() = REQUIRED.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
 
     private companion object {
         val REQUIRED = arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
-        val PERMISSIONS = if (Build.VERSION.SDK_INT >= 33) REQUIRED + Manifest.permission.POST_NOTIFICATIONS else REQUIRED
     }
 }

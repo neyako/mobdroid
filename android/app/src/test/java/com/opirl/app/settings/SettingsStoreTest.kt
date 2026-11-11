@@ -54,4 +54,11 @@ class SettingsStoreTest {
         assertEquals(false, store.settings.value.keepScreenOn)
         assertEquals(setOf(StatusItem.BONDING), store.settings.value.hiddenStatusItems)
     }
+
+    @Test
+    fun `settings from before the setup wizard count as set up`() {
+        assertEquals(true, store.decode("""{"keepScreenOn":false}""").setupDone)
+        assertEquals(false, store.decode("""{"setupDone":false}""").setupDone)
+        assertEquals(false, AppSettings().setupDone)
+    }
 }

@@ -1,5 +1,7 @@
 package com.opirl.app.ui
 
+import com.opirl.app.R
+import androidx.compose.ui.res.stringResource
 import android.annotation.SuppressLint
 import android.net.Uri
 import android.webkit.CookieManager
@@ -57,7 +59,7 @@ private fun LoginDialog(title: String, url: String, onClose: () -> Unit, onRedir
             Column(Modifier.safeDrawingPadding()) {
                 Row(Modifier.fillMaxWidth().height(48.dp).padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    IconButton(onClose) { Icon(Icons.Rounded.Close, "Close") }
+                    IconButton(onClose) { Icon(Icons.Rounded.Close, stringResource(R.string.close)) }
                 }
                 AndroidView(
                     factory = { context ->
@@ -87,16 +89,16 @@ private fun LoginDialog(title: String, url: String, onClose: () -> Unit, onRedir
 fun TwitchLoginDialog(http: OkHttpClient, onAccount: (TwitchAccount) -> Unit, onClose: () -> Unit) {
     val state = remember { UUID.randomUUID().toString() }
     val scope = rememberCoroutineScope()
-    var error by remember { mutableStateOf<String?>(null) }
-    LoginDialog(error ?: "Log in to Twitch", twitchAuthUrl(state), onClose) { url ->
+    var error by remember { mutableStateOf<Int?>(null) }
+    LoginDialog(stringResource(error ?: R.string.login_twitch), twitchAuthUrl(state), onClose) { url ->
         if (url.host != TWITCH_REDIRECT_HOST) return@LoginDialog false
         val token = twitchAccessToken(url.encodedFragment, state)
         if (token == null) {
-            error = "Twitch did not grant access"
+            error = R.string.twitch_denied
         } else {
             scope.launch {
                 val account = withContext(Dispatchers.IO) { validateTwitchToken(http, token) }
-                if (account == null) error = "Could not check the Twitch login" else onAccount(account)
+                if (account == null) error = R.string.twitch_check_failed else onAccount(account)
             }
         }
         true
@@ -114,5 +116,5 @@ fun KickLoginDialog(http: OkHttpClient, onAccount: (KickAccount) -> Unit, onClos
             return@LaunchedEffect
         }
     }
-    LoginDialog("Log in to Kick", "https://kick.com/login", onClose) { false }
+    LoginDialog(stringResource(R.string.login_kick), "https://kick.com/login", onClose) { false }
 }

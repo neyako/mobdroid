@@ -1,5 +1,6 @@
 package com.opirl.app.chat
 
+import com.opirl.app.R
 import android.content.Context
 import android.media.AudioAttributes
 import android.speech.tts.TextToSpeech
@@ -53,16 +54,16 @@ class ChatSpeech(private val context: Context) {
     fun say(message: ChatMessage, names: Boolean) {
         val engine = tts ?: return
         if (!ready || queued.get() >= 10) return
-        val text = spokenText(message, names) ?: return
+        val text = spokenText(message, names, context.getString(R.string.chat_speech_said)) ?: return
         queued.incrementAndGet()
         if (engine.speak(text, TextToSpeech.QUEUE_ADD, null, "chat") != TextToSpeech.SUCCESS) queued.decrementAndGet()
     }
 }
 
-fun spokenText(message: ChatMessage, names: Boolean): String? {
+fun spokenText(message: ChatMessage, names: Boolean, said: String = "%1\$s said %2\$s"): String? {
     val text = message.segments.filterIsInstance<ChatSegment.Text>().joinToString(" ") { it.text }
         .split(Regex("\\s+")).filterNot { it.startsWith("http://") || it.startsWith("https://") }
         .joinToString(" ").trim()
     if (text.isEmpty()) return null
-    return if (names) "${message.user} said $text" else text
+    return if (names) said.format(message.user, text) else text
 }

@@ -1,5 +1,7 @@
 package com.opirl.app.ui
 
+import com.opirl.app.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -152,16 +154,16 @@ fun ChatPanel(
                     if (header != null) {
                         header()
                     } else {
-                        Text("Chat", style = PanelTitle)
+                        Text(stringResource(R.string.chat), style = PanelTitle)
                     }
                 }
                 PanelButtons(hidden = false, onHide, onClose)
             }
             val waiting = connected.filterValues { !it }.keys
             val note = when {
-                connected.isEmpty() -> "Add a chat channel to the stream in Settings"
-                waiting.isNotEmpty() -> "Connecting to ${waiting.joinToString(", ") { it.label }}"
-                lines.isEmpty() -> "No messages yet"
+                connected.isEmpty() -> stringResource(R.string.chat_no_channel)
+                waiting.isNotEmpty() -> stringResource(R.string.connecting_to, waiting.joinToString(", ") { it.label })
+                lines.isEmpty() -> stringResource(R.string.chat_empty)
                 else -> null
             }
             if (note != null) {
@@ -208,7 +210,12 @@ private fun ChatInput(
     }
     Column(Modifier.padding(start = 12.dp, end = 4.dp, bottom = 8.dp)) {
         error?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(4.dp))
+            Text(
+                localized(it),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(4.dp),
+            )
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             BasicTextField(
@@ -230,7 +237,11 @@ private fun ChatInput(
                     ) {
                         if (text.isEmpty()) {
                             Text(
-                                if (platforms.size > 1) "Message ${platform.label}" else "Send a message",
+                                if (platforms.size > 1) {
+                                    stringResource(R.string.chat_message_platform, platform.label)
+                                } else {
+                                    stringResource(R.string.chat_send_message)
+                                },
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 15.sp,
                             )
@@ -254,7 +265,7 @@ private fun ChatInput(
                         .padding(horizontal = 10.dp, vertical = 8.dp),
                 )
             }
-            IconButton(send, enabled = text.isNotBlank()) { Icon(Icons.AutoMirrored.Rounded.Send, "Send", Modifier.size(22.dp)) }
+            IconButton(send, enabled = text.isNotBlank()) { Icon(Icons.AutoMirrored.Rounded.Send, stringResource(R.string.send), Modifier.size(22.dp)) }
         }
     }
 }

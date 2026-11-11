@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 
 class SettingsStore(private val file: File, scope: CoroutineScope) {
     private val json = Json {
@@ -41,7 +42,9 @@ class SettingsStore(private val file: File, scope: CoroutineScope) {
     }.getOrDefault(AppSettings())
 
     internal fun decode(text: String): AppSettings {
-        val settings = json.decodeFromString(AppSettings.serializer(), text)
+        val tree = json.parseToJsonElement(text).jsonObject
+        val decoded = json.decodeFromJsonElement(AppSettings.serializer(), tree)
+        val settings = if ("setupDone" in tree) decoded else decoded.copy(setupDone = true)
         return if (settings.profiles.isEmpty()) settings.copy(profiles = AppSettings().profiles) else settings
     }
 

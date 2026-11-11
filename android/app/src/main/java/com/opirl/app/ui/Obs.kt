@@ -1,5 +1,7 @@
 package com.opirl.app.ui
 
+import com.opirl.app.R
+import androidx.compose.ui.res.stringResource
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -69,15 +71,23 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
-fun obsStatus(state: ObsState): String = if (state.connected) {
+fun obsStatus(state: ObsState, live: String, rec: String, offline: String): String = if (state.connected) {
     listOfNotNull(
         "OBS ${state.scene.orEmpty()}".trim(),
-        "live".takeIf { state.stream == ObsOutput.STARTED },
-        "rec".takeIf { state.record == ObsOutput.STARTED },
+        live.takeIf { state.stream == ObsOutput.STARTED },
+        rec.takeIf { state.record == ObsOutput.STARTED },
     ).joinToString(", ")
 } else {
-    "OBS offline"
+    offline
 }
+
+@Composable
+fun obsStatusText(state: ObsState): String = obsStatus(
+    state,
+    stringResource(R.string.obs_status_live),
+    stringResource(R.string.obs_status_rec),
+    stringResource(R.string.obs_offline),
+)
 
 @Composable
 fun ObsPanel(
@@ -115,15 +125,15 @@ fun ObsPanel(
                     !state.connected -> {
                         Text(
                             if (state.error == null) {
-                                "Connecting to $url"
+                                stringResource(R.string.connecting_to, url)
                             } else {
-                                "${state.error} ($url). Retrying every 5 seconds."
+                                stringResource(R.string.obs_retrying, localized(state.error.orEmpty()), url)
                             },
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 4.dp),
                         )
-                        Group { row { NavRow(it, "OBS remote settings", onClick = onSettings) } }
+                        Group { row { NavRow(it, stringResource(R.string.obs_remote_settings), onClick = onSettings) } }
                     }
                     else -> Connected(obs, state)
                 }
@@ -139,9 +149,15 @@ private fun Setup(url: String, password: String, onConnect: (String, String) -> 
     val valid = obsUrl(urlDraft)
     Group {
         row { TextRow(it, "URL", urlDraft, "ws://192.168.1.20:4455", keyboard = KeyboardType.Uri) { text -> urlDraft = text } }
-        row { TextRow(it, "Password", passwordDraft, keyboard = KeyboardType.Password) { text -> passwordDraft = text } }
         row { shapes ->
-            ActionRow(shapes, "Connect", Icons.Rounded.Link, enabled = valid != null) { onConnect(valid!!, passwordDraft) }
+            TextRow(shapes, stringResource(R.string.password), passwordDraft, keyboard = KeyboardType.Password) { text ->
+                passwordDraft = text
+            }
+        }
+        row { shapes ->
+            ActionRow(shapes, stringResource(R.string.connect), Icons.Rounded.Link, enabled = valid != null) {
+                onConnect(valid!!, passwordDraft)
+            }
         }
     }
 }
@@ -153,8 +169,8 @@ private fun Connected(obs: ObsClient, state: ObsState) {
         Snapshot(obs, state.scene.orEmpty())
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             OutputButton(
-                "Stream",
-                "Streaming",
+                stringResource(R.string.obs_stream),
+                stringResource(R.string.obs_streaming),
                 state.stream,
                 state.streamStartedAtMs,
                 obs,
@@ -164,8 +180,8 @@ private fun Connected(obs: ObsClient, state: ObsState) {
                 Modifier.weight(1f),
             )
             OutputButton(
-                "Record",
-                "Recording",
+                stringResource(R.string.obs_record),
+                stringResource(R.string.recording_now),
                 state.record,
                 state.recordStartedAtMs,
                 obs,
@@ -200,12 +216,13 @@ private fun Snapshot(obs: ObsClient, scene: String) {
     val image by produceState<ImageBitmap?>(null, bytes) {
         value = bytes?.let { withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() } }
     }
+    val picture = stringResource(R.string.obs_picture)
     Box(
         Modifier
             .size(156.dp, 88.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceContainer)
-            .semantics { contentDescription = "OBS picture" },
+            .semantics { contentDescription = picture },
     ) {
         image?.let { Image(it, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
         Text(
@@ -263,9 +280,9 @@ private fun OutputButton(
     ) {
         Text(
             when {
-                confirm -> "Confirm stop"
-                output == ObsOutput.STARTING -> "Starting"
-                output == ObsOutput.STOPPING -> "Stopping"
+                confirm -> stringResource(R.string.confirm_stop)
+                output == ObsOutput.STARTING -> stringResource(R.string.starting)
+                output == ObsOutput.STOPPING -> stringResource(R.string.stopping)
                 active -> activeLabel
                 else -> label
             },
@@ -305,7 +322,7 @@ private fun MuteRow(shapes: ListItemShapes, input: ObsInput, onClick: () -> Unit
         trailingContent = {
             Icon(
                 if (input.muted) Icons.Rounded.MicOff else Icons.Rounded.Mic,
-                if (input.muted) "Muted" else "Not muted",
+                stringResource(if (input.muted) R.string.muted else R.string.not_muted),
                 Modifier.size(20.dp),
                 tint = if (input.muted) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             )

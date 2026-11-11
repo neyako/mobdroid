@@ -23,3 +23,21 @@ class LowBitrateWatch(private val thresholdBps: Long = 500_000, private val samp
         return false
     }
 }
+
+class ThermalGuard(private val reduceAt: Int = 4, private val restoreAt: Int = 2, private val reducedFps: Int = 30) {
+    var reduced = false
+        private set
+
+    fun update(status: Int, busy: Boolean): Boolean {
+        val next = when {
+            status >= reduceAt -> true
+            status <= restoreAt && !busy -> false
+            else -> reduced
+        }
+        if (next == reduced) return false
+        reduced = next
+        return true
+    }
+
+    fun fps(wanted: Int): Int = if (reduced) minOf(wanted, reducedFps) else wanted
+}

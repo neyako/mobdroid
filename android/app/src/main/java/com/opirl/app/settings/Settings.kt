@@ -1,5 +1,7 @@
 package com.opirl.app.settings
 
+import com.opirl.app.R
+import androidx.annotation.StringRes
 import com.opirl.app.engine.media.VideoCodec
 import com.opirl.app.engine.net.LinkType
 import java.util.UUID
@@ -32,34 +34,43 @@ enum class Resolution(val label: String, val width: Int, val height: Int) {
 enum class StabilizationSetting { OFF, STANDARD, PREVIEW }
 
 @Serializable
-enum class MicSource(val label: String) { AUTO("Auto"), BUILT_IN("Phone"), USB("USB"), WIRED("Headset") }
-
-@Serializable
-enum class ChatTextSize(val label: String, val sp: Int) { SMALL("Small", 12), MEDIUM("Medium", 14), LARGE("Large", 17) }
-
-@Serializable
-enum class StatusItem(val label: String) {
-    TEMPERATURE("Temperature"),
-    UPTIME("Uptime"),
-    BITRATE("Bitrate"),
-    BONDING("Bonding"),
-    AUDIO_LEVEL("Audio level"),
-    RECORDING("Recording"),
-    OBS("OBS"),
+enum class MicSource(@StringRes val label: Int) {
+    AUTO(R.string.mic_auto),
+    BUILT_IN(R.string.mic_phone),
+    USB(R.string.mic_usb),
+    WIRED(R.string.mic_headset),
 }
 
 @Serializable
-enum class QuickButtonId(val label: String) {
-    CHAT("Chat"),
-    RECORD("Record"),
-    SNAPSHOT("Snapshot"),
-    WIDGETS("Widgets"),
-    OBS("OBS"),
-    BROWSER("Browser"),
-    BITRATE("Bitrate"),
-    MIC("Mic"),
-    STEALTH("Stealth"),
-    TORCH("Torch"),
+enum class ChatTextSize(@StringRes val label: Int, val sp: Int) {
+    SMALL(R.string.size_small, 12),
+    MEDIUM(R.string.size_medium, 14),
+    LARGE(R.string.size_large, 17),
+}
+
+@Serializable
+enum class StatusItem(@StringRes val label: Int) {
+    TEMPERATURE(R.string.temperature),
+    UPTIME(R.string.status_uptime),
+    BITRATE(R.string.bitrate),
+    BONDING(R.string.status_bonding),
+    AUDIO_LEVEL(R.string.status_audio_level),
+    RECORDING(R.string.recording),
+    OBS(R.string.quick_obs),
+}
+
+@Serializable
+enum class QuickButtonId(@StringRes val label: Int) {
+    CHAT(R.string.quick_chat),
+    RECORD(R.string.quick_record),
+    SNAPSHOT(R.string.quick_snapshot),
+    WIDGETS(R.string.quick_widgets),
+    OBS(R.string.quick_obs),
+    BROWSER(R.string.quick_browser),
+    BITRATE(R.string.quick_bitrate),
+    MIC(R.string.quick_mic),
+    STEALTH(R.string.quick_stealth),
+    TORCH(R.string.quick_torch),
 }
 
 @Serializable
@@ -85,14 +96,20 @@ data class ObsSettings(
 val RECORDING_CODECS = listOf(VideoCodec.HEVC, VideoCodec.H264, VideoCodec.AV1)
 
 @Serializable
-enum class WidgetType(val label: String) { TEXT("Text"), IMAGE("Image"), CHAT("Chat"), BROWSER("Browser"), MUSIC("Music") }
+enum class WidgetType(@StringRes val label: Int) {
+    TEXT(R.string.widget_text),
+    IMAGE(R.string.widget_image),
+    CHAT(R.string.chat),
+    BROWSER(R.string.widget_browser),
+    MUSIC(R.string.widget_music),
+}
 
 @Serializable
-enum class Corner(val label: String, val left: Boolean, val top: Boolean) {
-    TOP_LEFT("Top left", true, true),
-    TOP_RIGHT("Top right", false, true),
-    BOTTOM_LEFT("Bottom left", true, false),
-    BOTTOM_RIGHT("Bottom right", false, false),
+enum class Corner(@StringRes val label: Int, val left: Boolean, val top: Boolean) {
+    TOP_LEFT(R.string.corner_top_left, true, true),
+    TOP_RIGHT(R.string.corner_top_right, false, true),
+    BOTTOM_LEFT(R.string.corner_bottom_left, true, false),
+    BOTTOM_RIGHT(R.string.corner_bottom_right, false, false),
 }
 
 @Serializable
@@ -150,6 +167,7 @@ data class StreamProfile(
     val streamKey: String = "",
     val codec: VideoCodec? = null,
     val resolution: Resolution = Resolution.R1080,
+    val portrait: Boolean = false,
     val fps: Int = 30,
     val bitrateKbps: Int = 6000,
     val adaptiveBitrate: Boolean = true,
@@ -187,6 +205,8 @@ data class AppSettings(
     val widgets: List<Widget> = emptyList(),
     val selectedSceneId: String? = null,
     val bookmarks: List<Bookmark> = emptyList(),
+    val usbCameraRotation: Int = 0,
+    val setupDone: Boolean = false,
 ) {
     val selectedProfile: StreamProfile
         get() = profiles.firstOrNull { it.id == selectedProfileId } ?: profiles.first()

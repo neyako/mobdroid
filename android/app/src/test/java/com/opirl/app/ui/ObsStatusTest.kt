@@ -5,6 +5,8 @@ import com.opirl.app.engine.obs.ObsState
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
+private fun obsStatus(state: ObsState) = obsStatus(state, "live", "rec", "OBS offline")
+
 class ObsStatusTest {
     @Test
     fun namesTheSceneAndTheRunningOutputs() {
