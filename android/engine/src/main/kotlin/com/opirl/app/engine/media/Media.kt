@@ -10,10 +10,13 @@ class VideoFormat(
     val config: ByteArray,
 )
 
+enum class AudioCodec { AAC, OPUS }
+
 class AudioFormat(
     val sampleRate: Int,
     val channels: Int,
     val config: ByteArray,
+    val codec: AudioCodec = AudioCodec.AAC,
 )
 
 class EncodedFrame(
