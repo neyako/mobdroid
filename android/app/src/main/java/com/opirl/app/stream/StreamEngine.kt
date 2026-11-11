@@ -233,7 +233,10 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     val macros = MacroRunner(
         scope,
         object : MacroHost {
-            override fun selectScene(id: String) = this@StreamEngine.selectScene(id)
+            override fun selectScene(id: String) {
+                this@StreamEngine.selectScene(id)
+                syncScene()
+            }
 
             override fun setZoom(ratio: Float) = this@StreamEngine.setZoom(ratio)
 
@@ -355,20 +358,11 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             }
         }
         scope.launch {
-            var playing = settings.settings.value.selectedScene?.let(::videoKey)
             settings.settings
                 .map { it.selectedScene?.cameraKey to it.selectedScene?.let(::videoKey) }
                 .distinctUntilChanged()
                 .drop(1)
-                .collect { (_, video) ->
-                    synchronized(this@StreamEngine) {
-                        val next = sceneCamera(_ui.value.cameras)
-                        val changed = next != null && next.key != _ui.value.camera?.key
-                        if (changed) _ui.update { it.copy(camera = next, lens = defaultLens(next!!), zoom = 1f, torch = false) }
-                        if (previewActive && (changed || video != playing)) openCamera()
-                        playing = video
-                    }
-                }
+                .collect { syncScene() }
         }
         scope.launch {
             settings.settings.map { it.selectedScene?.let { scene -> scene.videoVolume to scene.micWithVideo } }
@@ -606,6 +600,18 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     ) ?: defaultCamera(cameras)
 
     fun selectScene(id: String) = settings.update { it.copy(selectedSceneId = id) }
+
+    private var sceneVideo = settings.settings.value.selectedScene?.let(::videoKey)
+
+    @Synchronized
+    private fun syncScene() {
+        val video = settings.settings.value.selectedScene?.let(::videoKey)
+        val next = sceneCamera(_ui.value.cameras)
+        val changed = next != null && next.key != _ui.value.camera?.key
+        if (changed) _ui.update { it.copy(camera = next, lens = defaultLens(next!!), zoom = 1f, torch = false) }
+        if (previewActive && (changed || video != sceneVideo)) openCamera()
+        sceneVideo = video
+    }
 
     private fun ensureScenes(cameras: List<CameraDescriptor>) = settings.update { current ->
         if (current.scenes.isNotEmpty()) return@update current

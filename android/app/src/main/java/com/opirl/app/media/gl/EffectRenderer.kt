@@ -12,6 +12,7 @@ import com.opirl.app.effects.DetectedFace
 import com.opirl.app.effects.Detector
 import com.opirl.app.effects.LutCube
 import com.opirl.app.effects.pixellateCell
+import com.opirl.app.effects.textMask
 import com.opirl.app.settings.Filter
 import com.opirl.app.settings.PrivacyMode
 import com.opirl.app.settings.Reaction
@@ -495,14 +496,7 @@ class EffectRenderer(private val quad: FloatBuffer) {
             faceUniforms[index * 4 + 2] = radius
             faceUniforms[index * 4 + 3] = radius * ratio
         }
-        val textCount = min(texts.size / 4, MAX_TEXTS)
-        for (index in 0 until textCount) {
-            val pad = (texts[index * 4 + 3] - texts[index * 4 + 1]) * 0.2f * height
-            textUniforms[index * 4] = texts[index * 4] * width - pad * 3
-            textUniforms[index * 4 + 1] = (1 - texts[index * 4 + 3]) * height - pad
-            textUniforms[index * 4 + 2] = texts[index * 4 + 2] * width + pad * 3
-            textUniforms[index * 4 + 3] = (1 - texts[index * 4 + 1]) * height + pad
-        }
+        val textCount = textMask(texts, width, height, textUniforms)
         pass(face) {
             it.setInt("sPrivacy", 1)
             it.set("uSize", width.toFloat(), height.toFloat())

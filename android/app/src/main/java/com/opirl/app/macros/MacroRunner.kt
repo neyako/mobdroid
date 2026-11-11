@@ -107,8 +107,8 @@ class MacroRunner(private val scope: CoroutineScope, private val host: MacroHost
                     MacroFunction.AUTO_SWITCHER -> host.setAutoSwitcher(action.switcherId)
                     MacroFunction.CHAT_MESSAGE -> host.sendChat(host.format(action.text))
                     MacroFunction.NOTIFICATION -> host.notify(macro.name, host.format(action.text))
-                    MacroFunction.DELAY -> {
-                        delay((action.delaySeconds * 1000).toLong())
+                    MacroFunction.DELAY -> (action.delaySeconds * 1000).toLong().takeIf { it > 0 }?.let {
+                        delay(it)
                         delayed = true
                     }
                     MacroFunction.WAIT_FOR_EVENT -> do {

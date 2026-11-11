@@ -46,6 +46,23 @@ class EffectMathTest {
     }
 
     @Test
+    fun textLinesBeyondTheLastSlotAreCoveredByIt() {
+        val lines = FloatArray(5 * 4) { index ->
+            val line = index / 4
+            when (index % 4) {
+                0 -> 0.1f
+                1 -> 0.1f * line
+                2 -> 0.5f
+                else -> 0.1f * line + 0.05f
+            }
+        }
+        val out = FloatArray(3 * 4)
+        assertEquals(3, textMask(lines, 1000, 1000, out))
+        assertEquals(listOf(70, 940, 530, 1010), out.slice(0..3).map { Math.round(it) })
+        assertEquals(listOf(70, 540, 530, 810), out.slice(8..11).map { Math.round(it) })
+    }
+
+    @Test
     fun aGreenHueRangeKeysOnGreen() {
         val key = chromaKey(90, 150)
         assertEquals(listOf(0, 100, 0), listOf(key.red, key.green, key.blue).map { Math.round(it * 100) })

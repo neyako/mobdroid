@@ -34,6 +34,24 @@ fun horizonScale(width: Float, height: Float, angle: Float): Float {
     return max(boxWidth, boxHeight * width / height) / width
 }
 
+fun textMask(texts: FloatArray, width: Int, height: Int, out: FloatArray): Int {
+    val slots = out.size / 4
+    for (index in 0 until texts.size / 4) {
+        val pad = (texts[index * 4 + 3] - texts[index * 4 + 1]) * 0.2f * height
+        val left = texts[index * 4] * width - pad * 3
+        val bottom = (1 - texts[index * 4 + 3]) * height - pad
+        val right = texts[index * 4 + 2] * width + pad * 3
+        val top = (1 - texts[index * 4 + 1]) * height + pad
+        val slot = min(index, slots - 1) * 4
+        val merge = index >= slots
+        out[slot] = if (merge) min(out[slot], left) else left
+        out[slot + 1] = if (merge) min(out[slot + 1], bottom) else bottom
+        out[slot + 2] = if (merge) max(out[slot + 2], right) else right
+        out[slot + 3] = if (merge) max(out[slot + 3], top) else top
+    }
+    return min(texts.size / 4, slots)
+}
+
 class ChromaKey(val red: Float, val green: Float, val blue: Float, val threshold: Float)
 
 private fun saturated(hue: Float): FloatArray {

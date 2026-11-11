@@ -112,6 +112,17 @@ class MacroRunnerTest {
     }
 
     @Test
+    fun aZeroDelayStillPausesARepeatedMacro() = runTest {
+        val runner = runner(Macro(id = "m", actions = listOf(scene("a"), delay(0f)), repeat = RepeatMode.FOREVER))
+        runner.start("m")
+        runCurrent()
+        assertEquals(1, log.size)
+        advanceTimeBy(2001)
+        assertEquals(3, log.size)
+        runner.stop("m")
+    }
+
+    @Test
     fun aMacroRunsAnotherMacroButNeverItself() = runTest {
         val inner = Macro(id = "inner", actions = listOf(scene("b"), MacroAction(function = MacroFunction.MACRO, macroId = "outer")))
         val outer = Macro(id = "outer", actions = listOf(scene("a"), MacroAction(function = MacroFunction.MACRO, macroId = "inner"), scene("c")))
