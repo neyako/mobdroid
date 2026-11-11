@@ -350,4 +350,10 @@ class CatalogLogicTest {
     fun `stop snapping`(ratio: Float, lower: Float, upper: Float, expected: Float) {
         assertEquals(expected, niceStop(ratio, lower..upper))
     }
+
+    @Test
+    fun labelsUseTheGivenWords() {
+        val words = CameraWords(back = "Sau", front = "Trước")
+        assertEquals(listOf("Sau", "Trước"), buildCatalog(Flip5Fixture.cameras, words).map { it.label })
+    }
 }

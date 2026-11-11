@@ -1,5 +1,8 @@
 package com.opirl.app.ui
 
+import com.opirl.app.R
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -211,40 +214,48 @@ private fun transportName(profile: StreamProfile) = when {
     else -> "RTMP"
 }
 
+@Composable
 private fun title(route: Route, settings: AppSettings) = when (route) {
-    Route.Home -> "Settings"
-    Route.Streams -> "Streams"
+    Route.Home -> stringResource(R.string.settings)
+    Route.Streams -> stringResource(R.string.streams)
     is Route.Stream -> settings.profile(route.id)?.name.orEmpty()
     is Route.StreamUrl -> "URL"
-    is Route.StreamVideo -> "Video"
-    is Route.StreamAudio -> "Audio"
+    is Route.StreamVideo -> stringResource(R.string.video)
+    is Route.StreamAudio -> stringResource(R.string.audio)
     is Route.StreamTransport -> settings.profile(route.id)?.let(::transportName).orEmpty()
-    is Route.StreamChat -> "Chat"
-    is Route.StreamRecording -> "Recording"
-    is Route.StreamObs -> "OBS remote"
-    Route.Recordings -> "Recordings"
-    Route.Scenes -> "Scenes"
+    is Route.StreamChat -> stringResource(R.string.chat)
+    is Route.StreamRecording -> stringResource(R.string.recording)
+    is Route.StreamObs -> stringResource(R.string.obs_remote)
+    Route.Recordings -> stringResource(R.string.recordings)
+    Route.Scenes -> stringResource(R.string.scenes)
     is Route.ScenePage -> settings.scenes.firstOrNull { it.id == route.id }?.name.orEmpty()
-    is Route.SceneVideos -> "Videos"
-    is Route.Placement -> listOfNotNull(
-        settings.widgets.firstOrNull { it.id == route.widgetId }?.name,
-        settings.scenes.firstOrNull { it.id == route.sceneId }?.name,
-    ).joinToString(" in ")
+    is Route.SceneVideos -> stringResource(R.string.videos)
+    is Route.Placement -> stringResource(
+        R.string.placement_title,
+        settings.widgets.firstOrNull { it.id == route.widgetId }?.name.orEmpty(),
+        settings.scenes.firstOrNull { it.id == route.sceneId }?.name.orEmpty(),
+    )
     is Route.WidgetPage -> settings.widgets.firstOrNull { it.id == route.id }?.name.orEmpty()
-    Route.Chat -> "Chat"
-    Route.TwitchAccount -> "Twitch account"
-    Route.KickAccount -> "Kick account"
-    Route.Display -> "Display"
-    Route.StatusItems -> "Status"
-    Route.QuickButtons -> "Quick buttons"
-    Route.Camera -> "Camera"
-    Route.Audio -> "Audio"
-    Route.BitratePresets -> "Bitrate presets"
-    Route.About -> "About"
-    Route.Licenses -> "Licenses"
+    Route.Chat -> stringResource(R.string.chat)
+    Route.TwitchAccount -> stringResource(R.string.twitch_account)
+    Route.KickAccount -> stringResource(R.string.kick_account)
+    Route.Display -> stringResource(R.string.display)
+    Route.StatusItems -> stringResource(R.string.status)
+    Route.QuickButtons -> stringResource(R.string.quick_buttons)
+    Route.Camera -> stringResource(R.string.camera)
+    Route.Audio -> stringResource(R.string.audio)
+    Route.BitratePresets -> stringResource(R.string.bitrate_presets)
+    Route.About -> stringResource(R.string.about)
+    Route.Licenses -> stringResource(R.string.licenses)
     is Route.License -> route.name
-    Route.ImportExport -> "Import and export settings"
+    Route.ImportExport -> stringResource(R.string.import_export)
 }
+
+private const val SOURCE_URL = "https://github.com/neyako/mobdroid"
+
+@Composable
+private fun platformLabel(platform: Platform): String =
+    if (platform == Platform.CUSTOM) stringResource(R.string.platform_custom) else platform.label
 
 private fun videoSummary(profile: StreamProfile): String {
     val (w, h) = outputSize(profile)
@@ -266,7 +277,7 @@ fun SettingsPanel(
     val stack = pages.stack
     val push: (Route) -> Unit = { stack += it }
     val pop = { if (stack.size > 1) stack.removeAt(stack.lastIndex) }
-    BackHandler(stack.size > 1) { pop() }
+    val back = backProgress(stack.size > 1) { pop() }
     val motion = MaterialTheme.motionScheme
     val spatial = motion.defaultSpatialSpec<IntOffset>()
     val fastSpatial = motion.fastSpatialSpec<IntOffset>()
@@ -281,7 +292,7 @@ fun SettingsPanel(
                 Box(Modifier.width(70.dp)) {
                     if (stack.size > 1) {
                         IconButton({ pop() }, Modifier.size(44.dp)) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Navigate back", Modifier.size(20.dp))
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.navigate_back), Modifier.size(20.dp))
                         }
                     }
                 }
@@ -297,6 +308,7 @@ fun SettingsPanel(
             }
             AnimatedContent(
                 targetState = stack.size to stack.last(),
+                modifier = Modifier.backGesture(back),
                 transitionSpec = {
                     val forward = targetState.first > initialState.first
                     (slideInHorizontally(spatial) { if (forward) it / 4 else -it / 4 } + fadeIn(effects)) togetherWith
@@ -326,17 +338,17 @@ fun SettingsPanel(
                         is Route.StreamChat -> settings.profile(route.id)?.let { profile ->
                             Group {
                                 row { shapes ->
-                                    TextRow(shapes, "Twitch channel", profile.twitchChannel) {
+                                    TextRow(shapes, stringResource(R.string.twitch_channel), profile.twitchChannel) {
                                         store.updateProfile(profile.copy(twitchChannel = it.trim()))
                                     }
                                 }
                                 row { shapes ->
-                                    TextRow(shapes, "YouTube handle or video ID", profile.youtubeChannel) {
+                                    TextRow(shapes, stringResource(R.string.youtube_channel), profile.youtubeChannel) {
                                         store.updateProfile(profile.copy(youtubeChannel = it.trim()))
                                     }
                                 }
                                 row { shapes ->
-                                    TextRow(shapes, "Kick channel", profile.kickChannel) {
+                                    TextRow(shapes, stringResource(R.string.kick_channel), profile.kickChannel) {
                                         store.updateProfile(profile.copy(kickChannel = it.trim()))
                                     }
                                 }
@@ -367,7 +379,7 @@ fun SettingsPanel(
                         Route.StatusItems -> Group {
                             StatusItem.entries.forEach { item ->
                                 row { shapes ->
-                                    SwitchRow(shapes, item.label, item !in settings.hiddenStatusItems) { shown ->
+                                    SwitchRow(shapes, stringResource(item.label), item !in settings.hiddenStatusItems) { shown ->
                                         store.update { it.copy(hiddenStatusItems = it.hiddenStatusItems.toggled(item, !shown)) }
                                     }
                                 }
@@ -376,7 +388,7 @@ fun SettingsPanel(
                         Route.QuickButtons -> Group {
                             QuickButtonId.entries.forEach { item ->
                                 row { shapes ->
-                                    SwitchRow(shapes, item.label, item !in settings.hiddenQuickButtons) { shown ->
+                                    SwitchRow(shapes, stringResource(item.label), item !in settings.hiddenQuickButtons) { shown ->
                                         store.update { it.copy(hiddenQuickButtons = it.hiddenQuickButtons.toggled(item, !shown)) }
                                     }
                                 }
@@ -385,16 +397,29 @@ fun SettingsPanel(
                         Route.Camera -> Camera(store, settings)
                         Route.Audio -> Group {
                             row { shapes ->
-                                ChoiceRow(shapes, "Microphone", MicSource.entries, settings.mic, { it.label }, enabled = !live) { mic ->
+                                ChoiceRow(
+                                    shapes,
+                                    stringResource(R.string.microphone),
+                                    MicSource.entries,
+                                    settings.mic,
+                                    { stringResource(it.label) },
+                                    enabled = !live,
+                                ) { mic ->
                                     store.update { it.copy(mic = mic) }
                                 }
                             }
                         }
                         Route.BitratePresets -> BitratePresetsPage(store, settings)
                         Route.About -> Group {
-                            row { ValueRow(it, "Version", BuildConfig.VERSION_NAME) }
-                            row { ValueRow(it, "Based on", "Moblin") }
-                            row { NavRow(it, "Licenses") { push(Route.Licenses) } }
+                            row { ValueRow(it, stringResource(R.string.version), BuildConfig.VERSION_NAME) }
+                            row { ValueRow(it, stringResource(R.string.based_on), "Moblin") }
+                            row { shapes ->
+                                val context = LocalContext.current
+                                NavRow(shapes, stringResource(R.string.source_code), "GitHub") {
+                                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SOURCE_URL))) }
+                                }
+                            }
+                            row { NavRow(it, stringResource(R.string.licenses)) { push(Route.Licenses) } }
                         }
                         Route.Licenses -> Group {
                             LICENSES.forEach { item -> row { NavRow(it, item.name, item.license) { push(Route.License(item.name)) } } }
@@ -415,14 +440,14 @@ private fun TwitchAccountPage(engine: StreamEngine) {
     val account = logins.twitch
     Group {
         if (account != null) {
-            row { ValueRow(it, "Logged in as", account.login) }
+            row { ValueRow(it, stringResource(R.string.logged_in_as), account.login) }
             row { shapes ->
-                ActionRow(shapes, "Log out", Icons.Rounded.Close, MaterialTheme.colorScheme.error) {
+                ActionRow(shapes, stringResource(R.string.log_out), Icons.Rounded.Close, MaterialTheme.colorScheme.error) {
                     engine.logins.update { it.copy(twitch = null) }
                 }
             }
         } else {
-            row { ActionRow(it, "Log in", Icons.Rounded.Add) { loggingIn = true } }
+            row { ActionRow(it, stringResource(R.string.log_in), Icons.Rounded.Add) { loggingIn = true } }
         }
     }
     if (loggingIn) {
@@ -444,14 +469,14 @@ private fun KickAccountPage(engine: StreamEngine) {
     val account = logins.kick
     Group {
         if (account != null) {
-            row { ValueRow(it, "Logged in as", account.username) }
+            row { ValueRow(it, stringResource(R.string.logged_in_as), account.username) }
             row { shapes ->
-                ActionRow(shapes, "Log out", Icons.Rounded.Close, MaterialTheme.colorScheme.error) {
+                ActionRow(shapes, stringResource(R.string.log_out), Icons.Rounded.Close, MaterialTheme.colorScheme.error) {
                     engine.logins.update { it.copy(kick = null) }
                 }
             }
         } else {
-            row { ActionRow(it, "Log in", Icons.Rounded.Add) { loggingIn = true } }
+            row { ActionRow(it, stringResource(R.string.log_in), Icons.Rounded.Add) { loggingIn = true } }
         }
     }
     if (loggingIn) {
@@ -471,29 +496,33 @@ private fun ChatPage(store: SettingsStore, settings: AppSettings, engine: Stream
     val logins by engine.logins.logins.collectAsStateWithLifecycle()
     Group {
         row { shapes ->
-            NavRow(shapes, "Twitch account", logins.twitch?.login ?: "Not logged in") { push(Route.TwitchAccount) }
+            NavRow(shapes, stringResource(R.string.twitch_account), logins.twitch?.login ?: stringResource(R.string.not_logged_in)) {
+                push(Route.TwitchAccount)
+            }
         }
         row { shapes ->
-            NavRow(shapes, "Kick account", logins.kick?.username ?: "Not logged in") { push(Route.KickAccount) }
+            NavRow(shapes, stringResource(R.string.kick_account), logins.kick?.username ?: stringResource(R.string.not_logged_in)) {
+                push(Route.KickAccount)
+            }
         }
     }
     Group {
         row { shapes ->
-            ChoiceRow(shapes, "Text size", ChatTextSize.entries, settings.chatTextSize, { it.label }) { size ->
+            ChoiceRow(shapes, stringResource(R.string.text_size), ChatTextSize.entries, settings.chatTextSize, { stringResource(it.label) }) { size ->
                 store.update { it.copy(chatTextSize = size) }
             }
         }
         row { shapes ->
-            SwitchRow(shapes, "Show on the preview on small screens", settings.chatOnPreview) { on ->
+            SwitchRow(shapes, stringResource(R.string.chat_on_preview), settings.chatOnPreview) { on ->
                 store.update { it.copy(chatOnPreview = on) }
             }
         }
         row { shapes ->
-            SwitchRow(shapes, "Text to speech", settings.chatSpeech) { on -> store.update { it.copy(chatSpeech = on) } }
+            SwitchRow(shapes, stringResource(R.string.chat_speech), settings.chatSpeech) { on -> store.update { it.copy(chatSpeech = on) } }
         }
         if (settings.chatSpeech) {
             row { shapes ->
-                SwitchRow(shapes, "Say who wrote the message", settings.chatSpeechNames) { on ->
+                SwitchRow(shapes, stringResource(R.string.chat_speech_names), settings.chatSpeechNames) { on ->
                     store.update { it.copy(chatSpeechNames = on) }
                 }
             }
@@ -513,7 +542,7 @@ private fun Home(settings: AppSettings, push: (Route) -> Unit) {
         row {
             NavRow(
                 it,
-                "Streams",
+                stringResource(R.string.streams),
                 settings.selectedProfile.name,
                 Badge(Icons.Rounded.Sensors, Color(0xFFFF8A7A), MaterialShapes.Cookie9Sided),
             ) { push(Route.Streams) }
@@ -521,54 +550,68 @@ private fun Home(settings: AppSettings, push: (Route) -> Unit) {
         row {
             NavRow(
                 it,
-                "Scenes",
+                stringResource(R.string.scenes),
                 settings.selectedScene?.name,
                 Badge(Icons.Rounded.Layers, Color(0xFFFFB86B), MaterialShapes.Slanted),
             ) { push(Route.Scenes) }
         }
         row {
-            NavRow(it, "Chat", badge = Badge(Icons.Rounded.ChatBubble, Color(0xFFFF9ECF), MaterialShapes.Pill)) {
+            NavRow(it, stringResource(R.string.chat), badge = Badge(Icons.Rounded.ChatBubble, Color(0xFFFF9ECF), MaterialShapes.Pill)) {
                 push(Route.Chat)
             }
         }
         row {
-            NavRow(it, "Display", badge = Badge(Icons.Rounded.PictureInPictureAlt, Color(0xFF8AB4FF), MaterialShapes.Square)) {
+            NavRow(it, stringResource(R.string.display), badge = Badge(Icons.Rounded.PictureInPictureAlt, Color(0xFF8AB4FF), MaterialShapes.Square)) {
                 push(Route.Display)
             }
         }
         row {
-            NavRow(it, "Camera", badge = Badge(Icons.Rounded.PhotoCamera, Color(0xFF7DDB8B), MaterialShapes.Clover4Leaf)) {
+            NavRow(it, stringResource(R.string.camera), badge = Badge(Icons.Rounded.PhotoCamera, Color(0xFF7DDB8B), MaterialShapes.Clover4Leaf)) {
                 push(Route.Camera)
             }
         }
         row {
-            NavRow(it, "Audio", settings.mic.label, Badge(Icons.Rounded.GraphicEq, Color(0xFFFFC46B), MaterialShapes.Sunny)) {
+            NavRow(
+                it,
+                stringResource(R.string.audio),
+                stringResource(settings.mic.label),
+                Badge(Icons.Rounded.GraphicEq, Color(0xFFFFC46B), MaterialShapes.Sunny),
+            ) {
                 push(Route.Audio)
             }
         }
     }
     Group {
         row {
-            NavRow(it, "Recordings", badge = Badge(Icons.Rounded.Videocam, Color(0xFF6FE3C8), MaterialShapes.Gem)) {
+            NavRow(it, stringResource(R.string.recordings), badge = Badge(Icons.Rounded.Videocam, Color(0xFF6FE3C8), MaterialShapes.Gem)) {
                 push(Route.Recordings)
             }
         }
         row {
-            NavRow(it, "Bitrate presets", badge = Badge(Icons.Rounded.Speed, Color(0xFFC3A6FF), MaterialShapes.Pentagon)) {
+            NavRow(
+                it,
+                stringResource(R.string.bitrate_presets),
+                badge = Badge(Icons.Rounded.Speed, Color(0xFFC3A6FF), MaterialShapes.Pentagon),
+            ) {
                 push(Route.BitratePresets)
             }
         }
     }
     Group {
         row {
-            NavRow(it, "About", BuildConfig.VERSION_NAME, Badge(Icons.Rounded.Info, Color(0xFF9FDCE8), MaterialShapes.Circle)) {
+            NavRow(
+                it,
+                stringResource(R.string.about),
+                BuildConfig.VERSION_NAME,
+                Badge(Icons.Rounded.Info, Color(0xFF9FDCE8), MaterialShapes.Circle),
+            ) {
                 push(Route.About)
             }
         }
         row {
             NavRow(
                 it,
-                "Import and export settings",
+                stringResource(R.string.import_export),
                 badge = Badge(Icons.Rounded.ImportExport, Color(0xFFD6D6D6), MaterialShapes.Arch),
             ) { push(Route.ImportExport) }
         }
@@ -591,15 +634,16 @@ private fun Streams(store: SettingsStore, settings: AppSettings, live: Boolean, 
                             enabled = !live,
                         )
                     },
-                    supporting = "${profile.platform.label}  ${videoSummary(profile)}",
+                    supporting = "${platformLabel(profile.platform)}  ${videoSummary(profile)}",
                 ) { push(Route.Stream(profile.id)) }
             }
         }
     }
     Group {
         row { shapes ->
-            ActionRow(shapes, "Create stream", Icons.Rounded.Add) {
-                val profile = StreamProfile(name = "Stream ${settings.profiles.size + 1}")
+            val name = stringResource(R.string.stream_default_name, settings.profiles.size + 1)
+            ActionRow(shapes, stringResource(R.string.create_stream), Icons.Rounded.Add) {
+                val profile = StreamProfile(name = name)
                 store.update { it.copy(profiles = it.profiles + profile) }
                 push(Route.Stream(profile.id))
             }
@@ -618,39 +662,55 @@ private fun StreamPage(
 ) {
     val editable = editable(settings, profile, live)
     Group {
-        row { TextRow(it, "Name", profile.name) { name -> store.updateProfile(profile.copy(name = name)) } }
+        row { TextRow(it, stringResource(R.string.name), profile.name) { name -> store.updateProfile(profile.copy(name = name)) } }
     }
     Group {
         row { shapes ->
-            NavRow(shapes, "URL", profile.url.substringAfter("://").substringBefore('/').substringBefore('?').ifEmpty { "Not set" }) {
+            val host = profile.url.substringAfter("://").substringBefore('/').substringBefore('?')
+            NavRow(shapes, "URL", host.ifEmpty { stringResource(R.string.not_set) }) {
                 push(Route.StreamUrl(profile.id))
             }
         }
-        row { NavRow(it, "Video", videoSummary(profile)) { push(Route.StreamVideo(profile.id)) } }
-        row { NavRow(it, "Audio", "${profile.audioBitrateKbps} kbps") { push(Route.StreamAudio(profile.id)) } }
+        row { NavRow(it, stringResource(R.string.video), videoSummary(profile)) { push(Route.StreamVideo(profile.id)) } }
         row { shapes ->
-            NavRow(shapes, transportName(profile), if (profile.adaptiveBitrate) "Adaptive bitrate" else "Fixed bitrate") {
-                push(Route.StreamTransport(profile.id))
-            }
+            NavRow(shapes, stringResource(R.string.audio), "${profile.audioBitrateKbps} kbps") { push(Route.StreamAudio(profile.id)) }
+        }
+        row { shapes ->
+            NavRow(
+                shapes,
+                transportName(profile),
+                stringResource(if (profile.adaptiveBitrate) R.string.adaptive_bitrate else R.string.fixed_bitrate),
+            ) { push(Route.StreamTransport(profile.id)) }
         }
         row { shapes ->
             val channels = listOf(profile.twitchChannel, profile.youtubeChannel, profile.kickChannel).count { it.isNotBlank() }
-            NavRow(shapes, "Chat", if (channels == 0) "Off" else "$channels on") { push(Route.StreamChat(profile.id)) }
+            NavRow(
+                shapes,
+                stringResource(R.string.chat),
+                if (channels == 0) stringResource(R.string.off) else stringResource(R.string.channels_on, channels),
+            ) { push(Route.StreamChat(profile.id)) }
         }
-        row { NavRow(it, "Recording", recordingSummary(profile)) { push(Route.StreamRecording(profile.id)) } }
-        row { NavRow(it, "OBS remote", if (profile.obs.enabled) "On" else "Off") { push(Route.StreamObs(profile.id)) } }
+        row { shapes ->
+            NavRow(shapes, stringResource(R.string.recording), recordingSummary(profile)) { push(Route.StreamRecording(profile.id)) }
+        }
+        row { shapes ->
+            NavRow(shapes, stringResource(R.string.obs_remote), stringResource(if (profile.obs.enabled) R.string.on else R.string.off)) {
+                push(Route.StreamObs(profile.id))
+            }
+        }
     }
     Group {
         row { shapes ->
-            ActionRow(shapes, "Duplicate", Icons.Rounded.ContentCopy) {
-                val copy = profile.copy(id = UUID.randomUUID().toString(), name = "${profile.name} copy")
+            val name = stringResource(R.string.copy_name, profile.name)
+            ActionRow(shapes, stringResource(R.string.duplicate), Icons.Rounded.ContentCopy) {
+                val copy = profile.copy(id = UUID.randomUUID().toString(), name = name)
                 store.update { it.copy(profiles = it.profiles + copy) }
                 pop()
             }
         }
         if (settings.profiles.size > 1) {
             row { shapes ->
-                ActionRow(shapes, "Delete", Icons.Rounded.Delete, MaterialTheme.colorScheme.error, editable) {
+                ActionRow(shapes, stringResource(R.string.delete), Icons.Rounded.Delete, MaterialTheme.colorScheme.error, editable) {
                     pop()
                     store.update { s -> s.copy(profiles = s.profiles.filterNot { it.id == profile.id }) }
                 }
@@ -664,7 +724,14 @@ private fun StreamUrl(store: SettingsStore, profile: StreamProfile, editable: Bo
     val update: (StreamProfile) -> Unit = store::updateProfile
     Group {
         row { shapes ->
-            ChoiceRow(shapes, "Platform", Platform.entries, profile.platform, { it.label }, enabled = editable) { platform ->
+            ChoiceRow(
+                shapes,
+                stringResource(R.string.platform),
+                Platform.entries,
+                profile.platform,
+                { platformLabel(it) },
+                enabled = editable,
+            ) { platform ->
                 update(
                     profile.copy(
                         platform = platform,
@@ -685,7 +752,7 @@ private fun StreamUrl(store: SettingsStore, profile: StreamProfile, editable: Bo
         }
         if (profile.url.startsWith("rtmp")) {
             row { shapes ->
-                TextRow(shapes, "Stream key", profile.streamKey, enabled = editable, keyboard = KeyboardType.Password) {
+                TextRow(shapes, stringResource(R.string.stream_key), profile.streamKey, enabled = editable, keyboard = KeyboardType.Password) {
                     update(profile.copy(streamKey = it.trim()))
                 }
             }
@@ -699,12 +766,24 @@ private fun StreamVideo(store: SettingsStore, profile: StreamProfile, editable: 
     val (w, h) = outputSize(profile)
     Group {
         row { shapes ->
-            ChoiceRow(shapes, "Resolution", Resolution.entries.reversed(), profile.resolution, { it.label }, enabled = editable) {
+            ChoiceRow(
+                shapes,
+                stringResource(R.string.resolution),
+                Resolution.entries.reversed(),
+                profile.resolution,
+                { it.label },
+                enabled = editable,
+            ) {
                 update(profile.copy(resolution = it))
             }
         }
         row { shapes ->
-            ChoiceRow(shapes, "Frame rate", fpsChoices, profile.fps, { "$it" }, enabled = editable) { update(profile.copy(fps = it)) }
+            ChoiceRow(shapes, stringResource(R.string.frame_rate), fpsChoices, profile.fps, { "$it" }, enabled = editable) {
+                update(profile.copy(fps = it))
+            }
+        }
+        row { shapes ->
+            SwitchRow(shapes, stringResource(R.string.portrait), profile.portrait, editable) { on -> update(profile.copy(portrait = on)) }
         }
         row { shapes ->
             ChoiceRow(
@@ -712,7 +791,10 @@ private fun StreamVideo(store: SettingsStore, profile: StreamProfile, editable: 
                 "Codec",
                 listOf<VideoCodec?>(null) + profile.allowedCodecs.reversed(),
                 profile.codec,
-                { it?.label ?: "Auto ${CodecCatalog.choose(null, profile.allowedCodecs, w, h, profile.fps).label}" },
+                {
+                    it?.label
+                        ?: stringResource(R.string.codec_auto, CodecCatalog.choose(null, profile.allowedCodecs, w, h, profile.fps).label)
+                },
                 { it == null || CodecCatalog.available(it, w, h, profile.fps) },
                 editable,
             ) { update(profile.copy(codec = it)) }
@@ -723,7 +805,14 @@ private fun StreamVideo(store: SettingsStore, profile: StreamProfile, editable: 
             BitrateRow(shapes, "Bitrate", profile.bitrateKbps, 1000..20000, editable) { update(profile.copy(bitrateKbps = it)) }
         }
         row { shapes ->
-            ChoiceRow(shapes, "Key frame interval", listOf(1, 2, 3, 4, 5), profile.keyFrameIntervalSeconds, { "$it s" }, enabled = editable) {
+            ChoiceRow(
+                shapes,
+                stringResource(R.string.key_frame_interval),
+                listOf(1, 2, 3, 4, 5),
+                profile.keyFrameIntervalSeconds,
+                { "$it s" },
+                enabled = editable,
+            ) {
                 update(profile.copy(keyFrameIntervalSeconds = it))
             }
         }
@@ -741,8 +830,12 @@ private fun StreamAudio(store: SettingsStore, profile: StreamProfile, editable: 
     }
 }
 
-private fun cameraLabel(engine: StreamEngine, scene: Scene): String =
-    if (scene.video) "Video" else engine.ui.value.cameras.firstOrNull { it.key == scene.cameraKey }?.label ?: "Default"
+@Composable
+private fun cameraLabel(engine: StreamEngine, scene: Scene): String = if (scene.video) {
+    stringResource(R.string.video)
+} else {
+    engine.ui.value.cameras.firstOrNull { it.key == scene.cameraKey }?.label ?: stringResource(R.string.source_default)
+}
 
 @Composable
 private fun ScenesPage(store: SettingsStore, settings: AppSettings, engine: StreamEngine, push: (Route) -> Unit) {
@@ -750,14 +843,19 @@ private fun ScenesPage(store: SettingsStore, settings: AppSettings, engine: Stre
         settings.scenes.forEach { scene ->
             row { shapes ->
                 val count = scene.widgets.count { it.enabled }
-                NavRow(shapes, scene.name, "${cameraLabel(engine, scene)}, $count ${if (count == 1) "widget" else "widgets"}") {
+                NavRow(
+                    shapes,
+                    scene.name,
+                    "${cameraLabel(engine, scene)}, ${pluralStringResource(R.plurals.widget_count, count, count)}",
+                ) {
                     push(Route.ScenePage(scene.id))
                 }
             }
         }
         row { shapes ->
-            ActionRow(shapes, "Create scene", Icons.Rounded.Add) {
-                val scene = Scene(name = "Scene ${settings.scenes.size + 1}", cameraKey = settings.selectedScene?.cameraKey)
+            val name = stringResource(R.string.scene_default_name, settings.scenes.size + 1)
+            ActionRow(shapes, stringResource(R.string.create_scene), Icons.Rounded.Add) {
+                val scene = Scene(name = name, cameraKey = settings.selectedScene?.cameraKey)
                 store.update { it.copy(scenes = it.scenes + scene) }
                 push(Route.ScenePage(scene.id))
             }
@@ -765,11 +863,12 @@ private fun ScenesPage(store: SettingsStore, settings: AppSettings, engine: Stre
     }
     Group {
         settings.widgets.forEach { widget ->
-            row { shapes -> NavRow(shapes, widget.name, widget.type.label) { push(Route.WidgetPage(widget.id)) } }
+            row { shapes -> NavRow(shapes, widget.name, stringResource(widget.type.label)) { push(Route.WidgetPage(widget.id)) } }
         }
         row { shapes ->
-            ActionRow(shapes, "Create widget", Icons.Rounded.Add) {
-                val widget = Widget(name = "Widget ${settings.widgets.size + 1}")
+            val name = stringResource(R.string.widget_default_name, settings.widgets.size + 1)
+            ActionRow(shapes, stringResource(R.string.create_widget), Icons.Rounded.Add) {
+                val widget = Widget(name = name)
                 store.update { it.copy(widgets = it.widgets + widget) }
                 push(Route.WidgetPage(widget.id))
             }
@@ -791,19 +890,23 @@ private fun ScenePage(
     val cameras = ui.cameras.filter { it.facing != Facing.EXTERNAL }
     val update = { changed: Scene -> store.update { s -> s.copy(scenes = s.scenes.map { if (it.id == scene.id) changed else it }) } }
     Group {
-        row { TextRow(it, "Name", scene.name) { name -> update(scene.copy(name = name)) } }
+        row { TextRow(it, stringResource(R.string.name), scene.name) { name -> update(scene.copy(name = name)) } }
         row { shapes ->
             ChoiceRow(
                 shapes,
-                "Source",
+                stringResource(R.string.source),
                 cameras.map { it.key } + VIDEO_SOURCE,
                 if (scene.video) VIDEO_SOURCE else scene.cameraKey,
-                { key -> if (key == VIDEO_SOURCE) "Video" else cameras.firstOrNull { it.key == key }?.label.orEmpty() },
+                { key -> if (key == VIDEO_SOURCE) stringResource(R.string.video) else cameras.firstOrNull { it.key == key }?.label.orEmpty() },
             ) { update(if (it == VIDEO_SOURCE) scene.copy(video = true) else scene.copy(video = false, cameraKey = it)) }
         }
         if (scene.video) {
             row { shapes ->
-                NavRow(shapes, "Videos", if (scene.videos.size == 1) "1 file" else "${scene.videos.size} files") {
+                NavRow(
+                    shapes,
+                    stringResource(R.string.videos),
+                    pluralStringResource(R.plurals.file_count, scene.videos.size, scene.videos.size),
+                ) {
                     push(Route.SceneVideos(scene.id))
                 }
             }
@@ -829,15 +932,16 @@ private fun ScenePage(
     }
     Group {
         row { shapes ->
-            ActionRow(shapes, "Duplicate", Icons.Rounded.ContentCopy) {
-                val copy = scene.copy(id = UUID.randomUUID().toString(), name = "${scene.name} copy")
+            val name = stringResource(R.string.copy_name, scene.name)
+            ActionRow(shapes, stringResource(R.string.duplicate), Icons.Rounded.ContentCopy) {
+                val copy = scene.copy(id = UUID.randomUUID().toString(), name = name)
                 store.update { it.copy(scenes = it.scenes + copy) }
                 pop()
             }
         }
         if (settings.scenes.size > 1) {
             row { shapes ->
-                ActionRow(shapes, "Delete", Icons.Rounded.Delete, MaterialTheme.colorScheme.error) {
+                ActionRow(shapes, stringResource(R.string.delete), Icons.Rounded.Delete, MaterialTheme.colorScheme.error) {
                     pop()
                     store.update { s -> s.copy(scenes = s.scenes.filterNot { it.id == scene.id }) }
                     releaseUnusedVideos(context, store, scene.videos)
@@ -919,13 +1023,17 @@ private fun SceneVideosPage(store: SettingsStore, scene: Scene) {
                 }
             }
         }
-        row { ActionRow(it, "Add video", Icons.Rounded.Add) { pick.launch(arrayOf("video/*")) } }
+        row { ActionRow(it, stringResource(R.string.add_video), Icons.Rounded.Add) { pick.launch(arrayOf("video/*")) } }
     }
     Group {
         row { shapes ->
-            SliderRow(shapes, "Video volume", scene.videoVolume, 0..100, "${scene.videoVolume}%") { update(scene.copy(videoVolume = it)) }
+            SliderRow(shapes, stringResource(R.string.video_volume), scene.videoVolume, 0..100, "${scene.videoVolume}%") {
+                update(scene.copy(videoVolume = it))
+            }
         }
-        row { SwitchRow(it, "Mic while playing", scene.micWithVideo) { on -> update(scene.copy(micWithVideo = on)) } }
+        row { shapes ->
+            SwitchRow(shapes, stringResource(R.string.mic_while_playing), scene.micWithVideo) { on -> update(scene.copy(micWithVideo = on)) }
+        }
     }
 }
 
@@ -935,16 +1043,24 @@ private fun PlacementPage(store: SettingsStore, scene: Scene, widget: Widget) {
     val update = { changed: SceneWidget -> store.update { it.withPlacement(scene.id, changed) } }
     Group {
         row { shapes ->
-            ChoiceRow(shapes, "Corner", Corner.entries, placement.corner, { it.label }) { update(placement.copy(corner = it)) }
+            ChoiceRow(shapes, stringResource(R.string.corner), Corner.entries, placement.corner, { stringResource(it.label) }) {
+                update(placement.copy(corner = it))
+            }
         }
         row { SliderRow(it, "X", placement.x, 0..100, "${placement.x}%") { x -> update(placement.copy(x = x)) } }
         row { SliderRow(it, "Y", placement.y, 0..100, "${placement.y}%") { y -> update(placement.copy(y = y)) } }
         if (widget.type != WidgetType.TEXT && widget.type != WidgetType.MUSIC) {
-            row { SliderRow(it, "Size", placement.size, 5..100, "${placement.size}%") { size -> update(placement.copy(size = size)) } }
+            row { shapes ->
+                SliderRow(shapes, stringResource(R.string.size), placement.size, 5..100, "${placement.size}%") { size ->
+                    update(placement.copy(size = size))
+                }
+            }
         }
     }
     Group {
-        row { SwitchRow(it, "Show in this scene", placement.enabled) { on -> update(placement.copy(enabled = on)) } }
+        row { shapes ->
+            SwitchRow(shapes, stringResource(R.string.show_in_scene), placement.enabled) { on -> update(placement.copy(enabled = on)) }
+        }
     }
 }
 
@@ -972,19 +1088,33 @@ private fun WidgetPage(store: SettingsStore, widget: Widget, engine: StreamEngin
         }
     }
     Group {
-        row { TextRow(it, "Name", widget.name) { name -> update(widget.copy(name = name)) } }
+        row { TextRow(it, stringResource(R.string.name), widget.name) { name -> update(widget.copy(name = name)) } }
         row { shapes ->
-            ChoiceRow(shapes, "Type", WidgetType.entries, widget.type, { it.label }) { update(widget.copy(type = it)) }
+            ChoiceRow(shapes, stringResource(R.string.type), WidgetType.entries, widget.type, { stringResource(it.label) }) {
+                update(widget.copy(type = it))
+            }
         }
     }
     when (widget.type) {
         WidgetType.TEXT -> Group {
-            row { TextRow(it, "Text", widget.text, "{time} and {date} are filled in") { text -> update(widget.copy(text = text)) } }
-            row { SliderRow(it, "Text size", widget.textSize, 8..60, "${widget.textSize}") { size -> update(widget.copy(textSize = size)) } }
+            row { shapes ->
+                TextRow(shapes, stringResource(R.string.widget_text), widget.text, stringResource(R.string.text_hint)) { text ->
+                    update(widget.copy(text = text))
+                }
+            }
+            row { shapes ->
+                SliderRow(shapes, stringResource(R.string.text_size), widget.textSize, 8..60, "${widget.textSize}") { size ->
+                    update(widget.copy(textSize = size))
+                }
+            }
         }
         WidgetType.IMAGE -> Group {
             row { shapes ->
-                ActionRow(shapes, if (widget.image == null) "Choose image" else "Change image", Icons.Rounded.Add) {
+                ActionRow(
+                    shapes,
+                    stringResource(if (widget.image == null) R.string.choose_image else R.string.change_image),
+                    Icons.Rounded.Add,
+                ) {
                     pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 }
             }
@@ -993,12 +1123,12 @@ private fun WidgetPage(store: SettingsStore, widget: Widget, engine: StreamEngin
         WidgetType.BROWSER -> Group {
             row { TextRow(it, "URL", widget.url, "https://", keyboard = KeyboardType.Uri) { url -> update(widget.copy(url = url.trim())) } }
             row { shapes ->
-                SliderRow(shapes, "Width", widget.browserWidth, 200..1920, "${widget.browserWidth}", 10) {
+                SliderRow(shapes, stringResource(R.string.width), widget.browserWidth, 200..1920, "${widget.browserWidth}", 10) {
                     update(widget.copy(browserWidth = it))
                 }
             }
             row { shapes ->
-                SliderRow(shapes, "Height", widget.browserHeight, 100..1080, "${widget.browserHeight}", 10) {
+                SliderRow(shapes, stringResource(R.string.height), widget.browserHeight, 100..1080, "${widget.browserHeight}", 10) {
                     update(widget.copy(browserHeight = it))
                 }
             }
@@ -1007,20 +1137,28 @@ private fun WidgetPage(store: SettingsStore, widget: Widget, engine: StreamEngin
             val allowed by engine.nowPlaying.allowed.collectAsStateWithLifecycle()
             if (allowed) {
                 Group {
-                    row { SwitchRow(it, "Cover", widget.cover) { on -> update(widget.copy(cover = on)) } }
-                    row { SliderRow(it, "Text size", widget.textSize, 8..60, "${widget.textSize}") { size -> update(widget.copy(textSize = size)) } }
-                    row { SwitchRow(it, "Hide when paused", widget.hideWhenPaused) { on -> update(widget.copy(hideWhenPaused = on)) } }
+                    row { SwitchRow(it, stringResource(R.string.cover), widget.cover) { on -> update(widget.copy(cover = on)) } }
+                    row { shapes ->
+                        SliderRow(shapes, stringResource(R.string.text_size), widget.textSize, 8..60, "${widget.textSize}") { size ->
+                            update(widget.copy(textSize = size))
+                        }
+                    }
+                    row { shapes ->
+                        SwitchRow(shapes, stringResource(R.string.hide_when_paused), widget.hideWhenPaused) { on ->
+                            update(widget.copy(hideWhenPaused = on))
+                        }
+                    }
                 }
             } else {
                 Text(
-                    "The playing track comes from Android's media controls, which needs notification access.",
+                    stringResource(R.string.notification_access_note),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 4.dp),
                 )
                 Group {
                     row { shapes ->
-                        NavRow(shapes, "Allow notification access") {
+                        NavRow(shapes, stringResource(R.string.allow_notification_access)) {
                             context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                         }
                     }
@@ -1030,14 +1168,20 @@ private fun WidgetPage(store: SettingsStore, widget: Widget, engine: StreamEngin
     }
     Group {
         row { shapes ->
-            ChoiceRow(shapes, "Show on", listOf(false, true), widget.previewOnly, { if (it) "Preview only" else "Stream and preview" }) {
+            ChoiceRow(
+                shapes,
+                stringResource(R.string.show_on),
+                listOf(false, true),
+                widget.previewOnly,
+                { stringResource(if (it) R.string.preview_only else R.string.stream_and_preview) },
+            ) {
                 update(widget.copy(previewOnly = it))
             }
         }
     }
     Group {
         row { shapes ->
-            ActionRow(shapes, "Delete", Icons.Rounded.Delete, MaterialTheme.colorScheme.error) {
+            ActionRow(shapes, stringResource(R.string.delete), Icons.Rounded.Delete, MaterialTheme.colorScheme.error) {
                 pop()
                 widget.image?.let { File(directory, it).delete() }
                 store.update { it.withoutWidget(widget.id) }
@@ -1051,10 +1195,11 @@ private fun recordingCodec(profile: StreamProfile): VideoCodec {
     return CodecCatalog.choose(profile.recording.codec, RECORDING_CODECS, w, h, profile.fps)
 }
 
+@Composable
 private fun recordingSummary(profile: StreamProfile) = if (profile.recording.separate) {
     "${recordingCodec(profile).label} ${formatMbps(profile.recording.bitrateKbps)} Mbps"
 } else {
-    "Same as stream"
+    stringResource(R.string.same_as_stream)
 }
 
 @Composable
@@ -1066,10 +1211,10 @@ private fun StreamRecording(store: SettingsStore, profile: StreamProfile, editab
         row { shapes ->
             ChoiceRow(
                 shapes,
-                "Quality",
+                stringResource(R.string.quality),
                 listOf(false, true),
                 recording.separate,
-                { if (it) "Separate" else "Same as stream" },
+                { stringResource(if (it) R.string.separate else R.string.same_as_stream) },
                 enabled = editable,
             ) { update(recording.copy(separate = it)) }
         }
@@ -1080,7 +1225,10 @@ private fun StreamRecording(store: SettingsStore, profile: StreamProfile, editab
                     "Codec",
                     listOf<VideoCodec?>(null) + RECORDING_CODECS.reversed(),
                     recording.codec,
-                    { it?.label ?: "Auto ${recordingCodec(profile.copy(recording = recording.copy(codec = null))).label}" },
+                    {
+                        it?.label
+                            ?: stringResource(R.string.codec_auto, recordingCodec(profile.copy(recording = recording.copy(codec = null))).label)
+                    },
                     { it == null || CodecCatalog.available(it, w, h, profile.fps) },
                     editable,
                 ) { update(recording.copy(codec = it)) }
@@ -1092,12 +1240,12 @@ private fun StreamRecording(store: SettingsStore, profile: StreamProfile, editab
     }
     Group {
         row { shapes ->
-            SwitchRow(shapes, "Start when going live", recording.startWithStream, editable) {
+            SwitchRow(shapes, stringResource(R.string.start_when_live), recording.startWithStream, editable) {
                 update(recording.copy(startWithStream = it))
             }
         }
         row { shapes ->
-            SwitchRow(shapes, "Stop when the stream ends", recording.stopWithStream, editable) {
+            SwitchRow(shapes, stringResource(R.string.stop_when_ends), recording.stopWithStream, editable) {
                 update(recording.copy(stopWithStream = it))
             }
         }
@@ -1109,21 +1257,25 @@ private fun StreamObs(store: SettingsStore, profile: StreamProfile) {
     val obs = profile.obs
     val update = { changed: ObsSettings -> store.updateProfile(profile.copy(obs = changed)) }
     Group {
-        row { SwitchRow(it, "Enabled", obs.enabled) { on -> update(obs.copy(enabled = on)) } }
+        row { SwitchRow(it, stringResource(R.string.enabled), obs.enabled) { on -> update(obs.copy(enabled = on)) } }
     }
     Group {
         row { shapes ->
             TextRow(shapes, "URL", obs.url, "ws://192.168.1.20:4455", keyboard = KeyboardType.Uri) { update(obs.copy(url = it.trim())) }
         }
         row { shapes ->
-            TextRow(shapes, "Password", obs.password, keyboard = KeyboardType.Password) { update(obs.copy(password = it)) }
+            TextRow(shapes, stringResource(R.string.password), obs.password, keyboard = KeyboardType.Password) { update(obs.copy(password = it)) }
         }
     }
     Group {
-        row { SwitchRow(it, "Start OBS stream on Go Live", obs.startStream) { on -> update(obs.copy(startStream = on)) } }
-        row { SwitchRow(it, "Stop OBS stream on End", obs.stopStream) { on -> update(obs.copy(stopStream = on)) } }
-        row { SwitchRow(it, "Start OBS recording on Go Live", obs.startRecording) { on -> update(obs.copy(startRecording = on)) } }
-        row { SwitchRow(it, "Stop OBS recording on End", obs.stopRecording) { on -> update(obs.copy(stopRecording = on)) } }
+        row { SwitchRow(it, stringResource(R.string.obs_start_stream), obs.startStream) { on -> update(obs.copy(startStream = on)) } }
+        row { SwitchRow(it, stringResource(R.string.obs_stop_stream), obs.stopStream) { on -> update(obs.copy(stopStream = on)) } }
+        row { shapes ->
+            SwitchRow(shapes, stringResource(R.string.obs_start_recording), obs.startRecording) { on -> update(obs.copy(startRecording = on)) }
+        }
+        row { shapes ->
+            SwitchRow(shapes, stringResource(R.string.obs_stop_recording), obs.stopRecording) { on -> update(obs.copy(stopRecording = on)) }
+        }
     }
 }
 
@@ -1149,7 +1301,7 @@ private fun RecordingsPage(engine: StreamEngine) {
     var deleting by remember { mutableStateOf<Recording?>(null) }
     LaunchedEffect(Unit) { withContext(Dispatchers.IO) { engine.recordings.refresh() } }
     if (recordings.isEmpty()) {
-        Text("No recordings", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 12.dp))
+        Text(stringResource(R.string.no_recordings), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 12.dp))
     } else {
         Group {
             recordings.forEach { recording ->
@@ -1174,26 +1326,28 @@ private fun RecordingsPage(engine: StreamEngine) {
                             Text("${formatUptime(recording.durationMs / 1000)}  ${formatBytes(recording.bytes)}", maxLines = 1)
                         },
                         trailingContent = {
-                            IconButton({ deleting = recording }) { Icon(Icons.Rounded.Delete, "Delete ${recording.name}") }
+                            IconButton({ deleting = recording }) {
+                                Icon(Icons.Rounded.Delete, stringResource(R.string.delete_item, recording.name))
+                            }
                         },
                     ) { Text(recording.name, style = RowTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 }
             }
         }
     }
-    Group { row { ValueRow(it, "Saved to", "Movies/opIRL") } }
+    Group { row { ValueRow(it, stringResource(R.string.saved_to), "Movies/opIRL") } }
     deleting?.let { recording ->
         AlertDialog(
             onDismissRequest = { deleting = null },
-            title = { Text("Delete recording?") },
+            title = { Text(stringResource(R.string.delete_recording_title)) },
             text = { Text(recording.name) },
             confirmButton = {
                 TextButton({
                     deleting = null
                     scope.launch(Dispatchers.IO) { engine.recordings.delete(recording.uri) }
-                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                }) { Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton({ deleting = null }) { Text("Cancel") } },
+            dismissButton = { TextButton({ deleting = null }) { Text(stringResource(R.string.cancel)) } },
         )
     }
 }
@@ -1202,10 +1356,14 @@ private fun RecordingsPage(engine: StreamEngine) {
 private fun StreamTransport(store: SettingsStore, profile: StreamProfile, editable: Boolean) {
     val update: (StreamProfile) -> Unit = store::updateProfile
     Group {
-        row { SwitchRow(it, "Adaptive bitrate", profile.adaptiveBitrate, editable) { on -> update(profile.copy(adaptiveBitrate = on)) } }
+        row { shapes ->
+            SwitchRow(shapes, stringResource(R.string.adaptive_bitrate), profile.adaptiveBitrate, editable) { on ->
+                update(profile.copy(adaptiveBitrate = on))
+            }
+        }
         if (profile.adaptiveBitrate) {
             row { shapes ->
-                BitrateRow(shapes, "Minimum bitrate", profile.minBitrateKbps, 250..profile.bitrateKbps, editable) {
+                BitrateRow(shapes, stringResource(R.string.minimum_bitrate), profile.minBitrateKbps, 250..profile.bitrateKbps, editable) {
                     update(profile.copy(minBitrateKbps = it))
                 }
             }
@@ -1216,7 +1374,7 @@ private fun StreamTransport(store: SettingsStore, profile: StreamProfile, editab
             row { shapes ->
                 ChoiceRow(
                     shapes,
-                    "Latency",
+                    stringResource(R.string.latency),
                     (listOf(1000, 2000, 3000, 4000, 6000, 8000) + profile.srtLatencyMs).distinct().sorted(),
                     profile.srtLatencyMs,
                     { "${formatMbps(it)} s" },
@@ -1227,9 +1385,14 @@ private fun StreamTransport(store: SettingsStore, profile: StreamProfile, editab
     }
     if (profile.url.startsWith("srtla")) {
         Group {
-            for ((type, label) in listOf(LinkType.WIFI to "Wi-Fi", LinkType.CELLULAR to "Cellular", LinkType.ETHERNET to "Ethernet")) {
+            val networks = listOf(
+                LinkType.WIFI to R.string.network_wifi,
+                LinkType.CELLULAR to R.string.network_cellular,
+                LinkType.ETHERNET to R.string.network_ethernet,
+            )
+            for ((type, label) in networks) {
                 row { shapes ->
-                    SwitchRow(shapes, "Bond over $label", type in profile.bondingNetworks, editable) { on ->
+                    SwitchRow(shapes, stringResource(R.string.bond_over, stringResource(label)), type in profile.bondingNetworks, editable) { on ->
                         val networks = profile.bondingNetworks.toggled(type, on)
                         update(profile.copy(bondingNetworks = networks.ifEmpty { BONDING_NETWORKS }))
                     }
@@ -1242,17 +1405,33 @@ private fun StreamTransport(store: SettingsStore, profile: StreamProfile, editab
 @Composable
 private fun Display(store: SettingsStore, settings: AppSettings, push: (Route) -> Unit) {
     Group {
-        row { SwitchRow(it, "Keep screen on", settings.keepScreenOn) { on -> store.update { s -> s.copy(keepScreenOn = on) } } }
-        row { SwitchRow(it, "Vibrate on alerts", settings.alertHaptics) { on -> store.update { s -> s.copy(alertHaptics = on) } } }
+        row { shapes ->
+            SwitchRow(shapes, stringResource(R.string.keep_screen_on), settings.keepScreenOn) { on ->
+                store.update { s -> s.copy(keepScreenOn = on) }
+            }
+        }
+        row { shapes ->
+            SwitchRow(shapes, stringResource(R.string.vibrate_on_alerts), settings.alertHaptics) { on ->
+                store.update { s -> s.copy(alertHaptics = on) }
+            }
+        }
     }
     Group {
         row { shapes ->
-            NavRow(shapes, "Status", "${StatusItem.entries.size - settings.hiddenStatusItems.size} shown") {
+            NavRow(
+                shapes,
+                stringResource(R.string.status),
+                stringResource(R.string.shown_count, StatusItem.entries.size - settings.hiddenStatusItems.size),
+            ) {
                 push(Route.StatusItems)
             }
         }
         row { shapes ->
-            NavRow(shapes, "Quick buttons", "${QuickButtonId.entries.size - settings.hiddenQuickButtons.size} shown") {
+            NavRow(
+                shapes,
+                stringResource(R.string.quick_buttons),
+                stringResource(R.string.shown_count, QuickButtonId.entries.size - settings.hiddenQuickButtons.size),
+            ) {
                 push(Route.QuickButtons)
             }
         }
@@ -1265,21 +1444,28 @@ private fun Camera(store: SettingsStore, settings: AppSettings) {
         row { shapes ->
             ChoiceRow(
                 shapes,
-                "Stabilization",
+                stringResource(R.string.stabilization),
                 StabilizationSetting.entries,
                 settings.stabilization,
                 {
-                    when (it) {
-                        StabilizationSetting.OFF -> "Off"
-                        StabilizationSetting.STANDARD -> "Standard"
-                        StabilizationSetting.PREVIEW -> "Enhanced"
-                    }
+                    stringResource(
+                        when (it) {
+                            StabilizationSetting.OFF -> R.string.off
+                            StabilizationSetting.STANDARD -> R.string.stabilization_standard
+                            StabilizationSetting.PREVIEW -> R.string.stabilization_enhanced
+                        },
+                    )
                 },
             ) { value -> store.update { it.copy(stabilization = value) } }
         }
         row { shapes ->
-            SwitchRow(shapes, "Mirror front camera on stream", settings.mirrorFrontCameraOnStream) { on ->
+            SwitchRow(shapes, stringResource(R.string.mirror_front), settings.mirrorFrontCameraOnStream) { on ->
                 store.update { it.copy(mirrorFrontCameraOnStream = on) }
+            }
+        }
+        row { shapes ->
+            ChoiceRow(shapes, stringResource(R.string.usb_rotation), listOf(0, 90, 180, 270), settings.usbCameraRotation, { "$it°" }) { value ->
+                store.update { it.copy(usbCameraRotation = value) }
             }
         }
     }
@@ -1290,9 +1476,9 @@ private fun Camera(store: SettingsStore, settings: AppSettings) {
 private fun BitratePresetsPage(store: SettingsStore, settings: AppSettings) {
     var kbps by remember { mutableIntStateOf(5000) }
     Group {
-        row { BitrateRow(it, "New preset", kbps, 250..30000) { value -> kbps = value } }
+        row { BitrateRow(it, stringResource(R.string.new_preset), kbps, 250..30000) { value -> kbps = value } }
         row { shapes ->
-            ActionRow(shapes, "Add preset", Icons.Rounded.Add, enabled = kbps !in settings.bitratePresetsKbps) {
+            ActionRow(shapes, stringResource(R.string.add_preset), Icons.Rounded.Add, enabled = kbps !in settings.bitratePresetsKbps) {
                 store.update { it.copy(bitratePresetsKbps = (it.bitratePresetsKbps + kbps).sorted()) }
             }
         }
@@ -1309,7 +1495,7 @@ private fun BitratePresetsPage(store: SettingsStore, settings: AppSettings) {
                         IconButton(
                             { store.update { it.copy(bitratePresetsKbps = it.bitratePresetsKbps - preset) } },
                             enabled = settings.bitratePresetsKbps.size > 1,
-                        ) { Icon(Icons.Rounded.Delete, "Delete ${formatMbps(preset)} Mbps") }
+                        ) { Icon(Icons.Rounded.Delete, stringResource(R.string.delete_item, "${formatMbps(preset)} Mbps")) }
                     },
                 ) { Text("${formatMbps(preset)} Mbps", style = RowTitle) }
             }
@@ -1320,46 +1506,58 @@ private fun BitratePresetsPage(store: SettingsStore, settings: AppSettings) {
 @Composable
 private fun ImportExport(store: SettingsStore, live: Boolean) {
     val context = LocalContext.current
-    var message by remember { mutableStateOf<String?>(null) }
+    var message by remember { mutableStateOf<Int?>(null) }
     var confirmReset by remember { mutableStateOf(false) }
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) {
             message = runCatching {
                 context.contentResolver.openOutputStream(uri)!!.use { it.write(store.exportJson().toByteArray()) }
-            }.fold({ "Settings exported" }, { "Export failed" })
+            }.fold({ R.string.settings_exported }, { R.string.export_failed })
         }
     }
     val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val text = runCatching { context.contentResolver.openInputStream(uri)!!.use { it.readBytes().decodeToString() } }
-            message = if (text.isSuccess && store.importJson(text.getOrThrow())) "Settings imported" else "Not a settings file"
+            message = if (text.isSuccess && store.importJson(text.getOrThrow())) {
+                R.string.settings_imported
+            } else {
+                R.string.not_settings_file
+            }
         }
     }
     Group {
-        row { ActionRow(it, "Export settings", Icons.Rounded.FileUpload) { export.launch("opirl-settings.json") } }
-        row { ActionRow(it, "Import settings", Icons.Rounded.FileDownload, enabled = !live) { import.launch(arrayOf("*/*")) } }
+        row { shapes ->
+            ActionRow(shapes, stringResource(R.string.export_settings), Icons.Rounded.FileUpload) { export.launch("opirl-settings.json") }
+        }
+        row { shapes ->
+            ActionRow(shapes, stringResource(R.string.import_settings), Icons.Rounded.FileDownload, enabled = !live) {
+                import.launch(arrayOf("*/*"))
+            }
+        }
     }
     Group {
         row { shapes ->
-            ActionRow(shapes, "Reset settings", Icons.Rounded.RestartAlt, MaterialTheme.colorScheme.error, !live) {
+            ActionRow(shapes, stringResource(R.string.reset_settings), Icons.Rounded.RestartAlt, MaterialTheme.colorScheme.error, !live) {
                 confirmReset = true
             }
         }
     }
-    message?.let { Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 12.dp)) }
+    message?.let {
+        Text(stringResource(it), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 12.dp))
+    }
     if (confirmReset) {
         AlertDialog(
             onDismissRequest = { confirmReset = false },
-            title = { Text("Reset settings?") },
-            text = { Text("All streams and settings are removed.") },
+            title = { Text(stringResource(R.string.reset_title)) },
+            text = { Text(stringResource(R.string.reset_text)) },
             confirmButton = {
                 TextButton({
                     confirmReset = false
                     store.update { AppSettings() }
-                    message = "Settings reset"
-                }) { Text("Reset", color = MaterialTheme.colorScheme.error) }
+                    message = R.string.settings_reset
+                }) { Text(stringResource(R.string.reset), color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton({ confirmReset = false }) { Text("Cancel") } },
+            dismissButton = { TextButton({ confirmReset = false }) { Text(stringResource(R.string.cancel)) } },
         )
     }
 }

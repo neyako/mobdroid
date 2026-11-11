@@ -79,6 +79,7 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.service)
+    implementation(libs.androidx.window)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.foundation)
     implementation(libs.compose.material3)

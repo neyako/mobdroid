@@ -1,5 +1,7 @@
 package com.opirl.app.ui
 
+import com.opirl.app.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,7 +34,7 @@ fun WidgetsPanel(store: SettingsStore, settings: AppSettings, onHide: () -> Unit
                 Modifier.fillMaxWidth().height(PanelHeaderHeight).padding(start = 16.dp, end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(Modifier.weight(1f)) { Text("Widgets", style = PanelTitle) }
+                Box(Modifier.weight(1f)) { Text(stringResource(R.string.widgets), style = PanelTitle) }
                 PanelButtons(hidden = false, onHide, onClose)
             }
             Column(
@@ -41,7 +43,7 @@ fun WidgetsPanel(store: SettingsStore, settings: AppSettings, onHide: () -> Unit
             ) {
                 if (scene == null || settings.widgets.isEmpty()) {
                     Text(
-                        "Create a widget in Settings, Scenes",
+                        stringResource(R.string.widgets_empty),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 4.dp),

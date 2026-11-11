@@ -1,5 +1,14 @@
 package com.opirl.app.ui
 
+import android.graphics.Rect
+import java.util.Locale
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.AnimatedContent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
@@ -58,6 +67,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.lerp
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
@@ -68,9 +78,15 @@ import com.opirl.app.stream.StreamEngine
 import com.opirl.app.stream.outputSize
 import kotlinx.coroutines.delay
 
+@Composable
+fun isLargeWindow(): Boolean {
+    val window = LocalWindowInfo.current.containerSize
+    return minOf(window.width, window.height) / LocalDensity.current.density >= 600f
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalLayoutApi::class)
 @Composable
-fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
+fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hinge: Rect?) {
     val ui by engine.ui.collectAsStateWithLifecycle()
     val stats by engine.stats.collectAsStateWithLifecycle()
     val recording by engine.recording.collectAsStateWithLifecycle()
@@ -95,11 +111,18 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
         side = null
         panelHidden = false
     }
+    val motion = MaterialTheme.motionScheme
     val floatingButtons: @Composable (Modifier) -> Unit = { modifier ->
-        if (side != null && panelHidden) {
-            PanelButtons(hidden = true, onHide = { panelHidden = false }, onClose = closePanel, modifier)
-        }
+        AnimatedVisibility(
+            side != null && panelHidden,
+            modifier,
+            enter = scaleIn(motion.defaultSpatialSpec(), initialScale = 0.6f) + fadeIn(motion.defaultEffectsSpec()),
+            exit = scaleOut(motion.fastSpatialSpec(), targetScale = 0.6f) + fadeOut(motion.fastEffectsSpec()),
+        ) { PanelButtons(hidden = true, onHide = { panelHidden = false }, onClose = closePanel) }
     }
+    val through = fadeThrough()
+    val flash = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
     val obsPanel: @Composable () -> Unit = {
         ObsPanel(settings, engine.obs, appSettings, onHide = { panelHidden = true }, onClose = closePanel) {
             settingsPages.open(Route.Streams, Route.Stream(profile.id), Route.StreamObs(profile.id))
@@ -146,29 +169,164 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                 else -> confirmRecordStop = true
             }
         },
-        onSnapshot = engine::takeSnapshot,
+        onSnapshot = {
+            engine.takeSnapshot()
+            scope.launch {
+                flash.snapTo(0.5f)
+                flash.animateTo(0f, motion.slowEffectsSpec())
+            }
+        },
         onBitrate = { showBitrate = true },
         onStealth = { stealth = true },
         onMute = { engine.setMuted(!ui.muted) },
         onTorch = { engine.setTorch(!ui.torch) },
     )
     val window = LocalWindowInfo.current.containerSize
-    val banded = window.width < window.height * 1.5f
-    val motion = MaterialTheme.motionScheme
+    val density = LocalDensity.current
+    val large = isLargeWindow()
+    val banded = !large && window.width < window.height * 1.5f
     val panel = remember { MutableTransitionState(false) }
     panel.targetState = side != null && !panelHidden
+    val back = backProgress(side != null, closePanel)
+    val statusInset by animateDpAsState(if (panelHidden) 36.dp else 0.dp, motion.defaultSpatialSpec(), label = "status")
+
+    val statusView: @Composable (Boolean, Modifier) -> Unit = { compact, modifier ->
+        Status(ui, stats, recording, obs, engine.audioLevel, appSettings.hiddenStatusItems, engine::clearError, compact, modifier)
+    }
+    val panelView: @Composable (Boolean) -> Unit = { chatStatus ->
+        AnimatedContent(shownSide, transitionSpec = { through }, label = "panel") { shown ->
+            when (shown) {
+                Side.CHAT -> ChatPanel(
+                    engine,
+                    appSettings,
+                    chatDraft,
+                    onHide = { panelHidden = true },
+                    onClose = closePanel,
+                    header = if (chatStatus) ({ statusView(true, Modifier) }) else null,
+                )
+                Side.WIDGETS -> WidgetsPanel(settings, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
+                Side.OBS -> obsPanel()
+                Side.BROWSER -> BrowserPanel(settings, appSettings, browser, onHide = { panelHidden = true }, onClose = closePanel)
+                Side.SETTINGS -> SettingsPanel(settings, engine, busy, settingsPages, onHide = { panelHidden = true }, onClose = closePanel)
+            }
+        }
+    }
+    val picture: @Composable (Modifier) -> Unit = { modifier ->
+        Box(modifier) {
+            Preview(engine, ui, 16.dp, access) { flash.value }
+            statusView(false, Modifier.align(Alignment.TopEnd).padding(12.dp).padding(top = statusInset))
+            floatingButtons(Modifier.align(Alignment.TopEnd).padding(8.dp))
+            CameraControls(
+                ui,
+                appSettings.scenes,
+                appSettings.selectedScene,
+                video,
+                engine,
+                Modifier.align(Alignment.BottomEnd).padding(10.dp),
+            )
+        }
+    }
+    val enter = fadeIn(motion.defaultEffectsSpec())
+    val exit = fadeOut(motion.fastEffectsSpec())
 
     Surface(color = Color.Black, contentColor = Color.White) {
         BoxWithConstraints(
             Modifier.fillMaxSize().windowInsetsPadding(
-                if (banded) {
+                if (banded || large || hinge != null) {
                     WindowInsets.safeDrawing
                 } else {
                     WindowInsets.safeDrawing.only(WindowInsetsSides.Vertical + WindowInsetsSides.End)
                 },
             ),
         ) {
-            if (banded) {
+            val maxWidth = with(LocalDensity.current) { constraints.maxWidth.toDp() }
+            val maxHeight = with(LocalDensity.current) { constraints.maxHeight.toDp() }
+            if (hinge != null) {
+                val foldTop = with(density) { (hinge.top - WindowInsets.safeDrawing.getTop(this)).toDp() }
+                    .coerceIn(120.dp, maxHeight - 120.dp)
+                Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.fillMaxWidth().height(foldTop), contentAlignment = Alignment.Center) {
+                        val width = minOf(maxWidth - 12.dp, (foldTop - 12.dp) * aspect)
+                        picture(Modifier.size(width, width / aspect))
+                    }
+                    Spacer(Modifier.height(with(density) { hinge.height().toDp() }))
+                    Box(Modifier.fillMaxWidth().weight(1f)) {
+                        Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) {
+                            FlowRow(
+                                Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                buttons.forEach { QuickButtonView(it, 48.dp, 60.dp) }
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                AppLogo()
+                                SettingsButton(showSettings && !panelHidden) { toggle(Side.SETTINGS) }
+                                LiveButton(ui.live, confirmStop, onLive, Modifier.weight(1f).height(52.dp))
+                            }
+                        }
+                        androidx.compose.animation.AnimatedVisibility(
+                            visibleState = panel,
+                            modifier = Modifier.backGesture(back),
+                            enter = slideInVertically(motion.defaultSpatialSpec()) { it / 6 } + enter,
+                            exit = slideOutVertically(motion.fastSpatialSpec()) { it / 6 } + exit,
+                        ) { panelView(false) }
+                    }
+                }
+            } else if (large) {
+                val landscape = maxWidth > maxHeight
+                val panelWidth = if (landscape) minOf(400.dp, maxWidth * 0.36f) else maxWidth
+                val areaWidth = if (landscape && panel.targetState) maxWidth - panelWidth else maxWidth
+                val areaHeight = if (!landscape && panel.targetState) maxHeight * 0.55f else maxHeight
+                val width = minOf(areaWidth - 24.dp, (areaHeight - 108.dp) * aspect)
+                val panelHeight = if (landscape) maxHeight else maxHeight - width / aspect - 108.dp
+                Column(Modifier.width(areaWidth).padding(top = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    picture(Modifier.size(width, width / aspect))
+                    Row(
+                        Modifier.width(maxOf(width, minOf(areaWidth - 24.dp, 560.dp))).height(96.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Row(
+                            Modifier.padding(bottom = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            AppLogo(48.dp)
+                            SettingsButton(showSettings && !panelHidden, 48.dp) { toggle(Side.SETTINGS) }
+                        }
+                        Row(
+                            Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            buttons.forEach { QuickButtonView(it, 48.dp, 60.dp) }
+                        }
+                        LiveButton(ui.live, confirmStop, onLive, Modifier.padding(bottom = 14.dp).size(140.dp, 56.dp))
+                    }
+                }
+                if (panel.currentState || panel.targetState) {
+                    Box(
+                        Modifier
+                            .align(if (landscape) Alignment.CenterEnd else Alignment.BottomCenter)
+                            .size(panelWidth, panelHeight)
+                            .backGesture(back),
+                    ) {
+                        androidx.compose.animation.AnimatedVisibility(
+                            visibleState = panel,
+                            enter = enter + if (landscape) {
+                                slideInHorizontally(motion.defaultSpatialSpec()) { it / 4 }
+                            } else {
+                                slideInVertically(motion.defaultSpatialSpec()) { it / 4 }
+                            },
+                            exit = exit + if (landscape) {
+                                slideOutHorizontally(motion.fastSpatialSpec()) { it / 4 }
+                            } else {
+                                slideOutVertically(motion.fastSpatialSpec()) { it / 4 }
+                            },
+                        ) { panelView(false) }
+                    }
+                }
+            } else if (banded) {
                 val previewHeight = minOf((maxWidth - 12.dp) / aspect, maxHeight - 140.dp)
                 Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
                     Row(
@@ -190,22 +348,31 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                         Spacer(Modifier.width(8.dp))
                         SettingsButton(showSettings && !panelHidden) { toggle(Side.SETTINGS) }
                     }
-                    Box(Modifier.size(previewHeight * aspect, previewHeight)) {
-                        Preview(engine, ui, 14.dp)
-                        if (appSettings.chatOnPreview) {
-                            ChatOverlay(
-                                engine,
-                                appSettings.chatTextSize.sp - 1,
-                                3,
-                                Modifier.align(Alignment.BottomStart).fillMaxWidth(0.8f).padding(start = 10.dp, bottom = 48.dp),
-                            )
+                    Box(Modifier.fillMaxWidth().height(previewHeight), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(previewHeight * aspect, previewHeight)) {
+                            Preview(engine, ui, 14.dp, access) { flash.value }
+                            if (appSettings.chatOnPreview) {
+                                ChatOverlay(
+                                    engine,
+                                    appSettings.chatTextSize.sp - 1,
+                                    3,
+                                    Modifier.align(Alignment.BottomStart).fillMaxWidth(0.8f).padding(start = 10.dp, bottom = 48.dp),
+                                )
+                            }
+                            floatingButtons(Modifier.align(Alignment.TopEnd).padding(6.dp))
                         }
-                        floatingButtons(Modifier.align(Alignment.TopEnd).padding(6.dp))
                         Row(
-                            Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(8.dp),
+                            Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
-                            video?.let { VideoStrip(it, Modifier.weight(1f)) } ?: ZoomStops(ui, engine::setZoom)
+                            AnimatedContent(
+                                video,
+                                if (video != null) Modifier.weight(1f) else Modifier,
+                                transitionSpec = { through },
+                                label = "source",
+                            ) { player ->
+                                if (player != null) VideoStrip(player, Modifier.fillMaxWidth()) else ZoomStops(ui, engine::setZoom)
+                            }
                             Spacer(Modifier.width(8.dp))
                             SceneSwitch(appSettings.scenes, appSettings.selectedScene, engine::selectScene, Modifier.weight(1f, fill = false))
                         }
@@ -233,6 +400,8 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                 val previewArea = if (panel.targetState) maxWidth - panelWidth - 100.dp else maxWidth - closedBar
                 Row(Modifier.fillMaxSize()) {
                     BoxWithConstraints(Modifier.width(previewArea).fillMaxHeight().padding(6.dp)) {
+                        val maxWidth = with(LocalDensity.current) { constraints.maxWidth.toDp() }
+                        val maxHeight = with(LocalDensity.current) { constraints.maxHeight.toDp() }
                         val width = minOf(maxWidth, maxHeight * aspect)
                         val height = width / aspect
                         val below = maxHeight - height >= 96.dp
@@ -241,7 +410,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                             verticalArrangement = Arrangement.Center,
                         ) {
                             Box(Modifier.size(width, height)) {
-                                Preview(engine, ui, 16.dp)
+                                Preview(engine, ui, 16.dp, access) { flash.value }
                                 Status(
                                     ui,
                                     stats,
@@ -251,7 +420,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                                     appSettings.hiddenStatusItems,
                                     engine::clearError,
                                     compact = false,
-                                    Modifier.align(Alignment.TopEnd).padding(12.dp).padding(top = if (panelHidden) 36.dp else 0.dp),
+                                    Modifier.align(Alignment.TopEnd).padding(12.dp).padding(top = statusInset),
                                 )
                                 floatingButtons(Modifier.align(Alignment.TopEnd).padding(8.dp))
                                 if (!below) {
@@ -285,7 +454,8 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                                 .offset { IntOffset(-barWidth(), 0) }
                                 .wrapContentWidth(Alignment.End, unbounded = true)
                                 .width(panelWidth)
-                                .fillMaxHeight(),
+                                .fillMaxHeight()
+                                .backGesture(back),
                         ) {
                             androidx.compose.animation.AnimatedVisibility(
                                 visibleState = panel,
@@ -294,19 +464,27 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                                 exit = slideOutHorizontally(motion.fastSpatialSpec()) { it / 4 } +
                                     fadeOut(motion.fastEffectsSpec()),
                             ) {
-                                when (shownSide) {
-                                    Side.CHAT -> ChatPanel(engine, appSettings, chatDraft, onHide = { panelHidden = true }, onClose = closePanel)
-                                    Side.WIDGETS -> WidgetsPanel(settings, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
-                                    Side.OBS -> obsPanel()
-                                    Side.BROWSER -> BrowserPanel(settings, appSettings, browser, onHide = { panelHidden = true }, onClose = closePanel)
-                                    Side.SETTINGS -> SettingsPanel(
-                                        settings,
-                                        engine,
-                                        busy,
-                                        settingsPages,
-                                        onHide = { panelHidden = true },
-                                        onClose = closePanel,
-                                    )
+                                AnimatedContent(shownSide, transitionSpec = { through }, label = "panel") { shown ->
+                                    when (shown) {
+                                        Side.CHAT -> ChatPanel(engine, appSettings, chatDraft, onHide = { panelHidden = true }, onClose = closePanel)
+                                        Side.WIDGETS -> WidgetsPanel(settings, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
+                                        Side.OBS -> obsPanel()
+                                        Side.BROWSER -> BrowserPanel(
+                                            settings,
+                                            appSettings,
+                                            browser,
+                                            onHide = { panelHidden = true },
+                                            onClose = closePanel,
+                                        )
+                                        Side.SETTINGS -> SettingsPanel(
+                                            settings,
+                                            engine,
+                                            busy,
+                                            settingsPages,
+                                            onHide = { panelHidden = true },
+                                            onClose = closePanel,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -342,7 +520,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                     }
                 }
             }
-            if (stealth) {
+            AnimatedVisibility(stealth, enter = fadeIn(motion.defaultEffectsSpec()), exit = fadeOut(motion.defaultEffectsSpec())) {
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -350,36 +528,13 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                         .clickable(interactionSource = null, indication = null) { stealth = false },
                 )
             }
-            if (banded) {
+            if (banded && hinge == null) {
                 AnimatedVisibility(
                     visibleState = panel,
-                    enter = slideInVertically(motion.defaultSpatialSpec()) { it / 6 } + fadeIn(motion.defaultEffectsSpec()),
-                    exit = slideOutVertically(motion.fastSpatialSpec()) { it / 6 } + fadeOut(motion.fastEffectsSpec()),
-                ) {
-                    if (shownSide == Side.CHAT) {
-                        ChatPanel(engine, appSettings, chatDraft, onHide = { panelHidden = true }, onClose = closePanel) {
-                            Status(
-                                ui,
-                                stats,
-                                recording,
-                                obs,
-                                engine.audioLevel,
-                                appSettings.hiddenStatusItems,
-                                engine::clearError,
-                                compact = true,
-                                Modifier,
-                            )
-                        }
-                    } else if (shownSide == Side.WIDGETS) {
-                        WidgetsPanel(settings, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
-                    } else if (shownSide == Side.OBS) {
-                        obsPanel()
-                    } else if (shownSide == Side.BROWSER) {
-                        BrowserPanel(settings, appSettings, browser, onHide = { panelHidden = true }, onClose = closePanel)
-                    } else {
-                        SettingsPanel(settings, engine, busy, settingsPages, onHide = { panelHidden = true }, onClose = closePanel)
-                    }
-                }
+                    modifier = Modifier.backGesture(back),
+                    enter = slideInVertically(motion.defaultSpatialSpec()) { it / 6 } + enter,
+                    exit = slideOutVertically(motion.fastSpatialSpec()) { it / 6 } + exit,
+                ) { panelView(true) }
             }
             AlertBanner(engine, Modifier.align(Alignment.TopCenter))
         }
@@ -395,7 +550,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
         browser.webView?.onResume()
         onStopOrDispose { browser.webView?.onPause() }
     }
-    val chatOnly = banded && side == Side.CHAT && !panelHidden
+    val chatOnly = banded && hinge == null && side == Side.CHAT && !panelHidden
     LaunchedEffect(stealth, chatOnly) { engine.setPreviewEnabled(!stealth && !chatOnly) }
     LaunchedEffect(confirmStop) {
         if (confirmStop) {
@@ -411,7 +566,6 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
             confirmRecordStop = false
         }
     }
-    BackHandler(side != null) { closePanel() }
     BackHandler(stealth) { stealth = false }
 
     if (showBitrate) {
@@ -430,8 +584,8 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
 
 private enum class Side { SETTINGS, CHAT, WIDGETS, OBS, BROWSER }
 
-fun formatBitrate(bps: Long): String = if (bps >= 1_000_000) "%.1f Mbps".format(bps / 1e6) else "${bps / 1000} kbps"
+fun formatBitrate(bps: Long): String = if (bps >= 1_000_000) "%.1f Mbps".format(Locale.ROOT, bps / 1e6) else "${bps / 1000} kbps"
 
-fun formatUptime(seconds: Long): String = "%d:%02d:%02d".format(seconds / 3600, seconds / 60 % 60, seconds % 60)
+fun formatUptime(seconds: Long): String = "%d:%02d:%02d".format(Locale.ROOT, seconds / 3600, seconds / 60 % 60, seconds % 60)
 
-fun formatZoom(zoom: Float): String = if (zoom < 10 && zoom % 1f != 0f) "%.1fx".format(zoom) else "${zoom.toInt()}x"
+fun formatZoom(zoom: Float): String = if (zoom < 10 && zoom % 1f != 0f) "%.1fx".format(Locale.ROOT, zoom) else "${zoom.toInt()}x"

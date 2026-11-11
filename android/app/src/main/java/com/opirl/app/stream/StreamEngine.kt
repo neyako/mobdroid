@@ -1,5 +1,8 @@
 package com.opirl.app.stream
 
+import java.util.Locale
+import com.opirl.app.R
+import androidx.annotation.StringRes
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -166,6 +169,8 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         },
     )
     val obs = ObsClient(http, { showAlert(AlertLevel.ERROR, "OBS", it) })
+
+    private fun text(@StringRes id: Int, vararg args: Any): String = context.getString(id, *args)
     private val _alert = MutableStateFlow<Alert?>(null)
     val alert: StateFlow<Alert?> = _alert.asStateFlow()
     private val vibrator = context.getSystemService(Vibrator::class.java)
@@ -218,7 +223,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         camera.onActiveLens = ::onActiveLens
         scope.launch {
             settings.settings
-                .map { s -> listOf(s.selectedProfile.resolution, s.selectedProfile.fps, s.stabilization) }
+                .map { s -> listOf(s.selectedProfile.resolution, s.selectedProfile.portrait, s.selectedProfile.fps, s.stabilization) }
                 .distinctUntilChanged()
                 .drop(1)
                 .collect {
@@ -265,7 +270,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 }
         }
         scope.launch {
-            settings.settings.map { it.mirrorFrontCameraOnStream }.distinctUntilChanged().drop(1).collect {
+            settings.settings.map { it.mirrorFrontCameraOnStream to it.usbCameraRotation }.distinctUntilChanged().drop(1).collect {
                 synchronized(this@StreamEngine) { applyInputTransform() }
             }
         }
@@ -304,16 +309,23 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         ioScope.launch {
             val recovered = recordings.recover()
             if (recovered > 0) {
-                showAlert(AlertLevel.INFO, if (recovered == 1) "Recording recovered" else "$recovered recordings recovered")
+                showAlert(AlertLevel.INFO, context.resources.getQuantityString(R.plurals.recordings_recovered, recovered, recovered))
             }
         }
         powerManager.addThermalStatusListener(context.mainExecutor) { status ->
             val previous = _ui.value.thermal
             _ui.update { it.copy(thermal = status) }
-            if (status >= PowerManager.THERMAL_STATUS_CRITICAL && previous < PowerManager.THERMAL_STATUS_CRITICAL) {
-                showAlert(AlertLevel.ERROR, "Phone is overheating", "The stream may stop")
-            } else if (status == PowerManager.THERMAL_STATUS_SEVERE && previous < PowerManager.THERMAL_STATUS_SEVERE) {
-                showAlert(AlertLevel.WARNING, "Phone is hot", "Lower the bitrate or the frame rate")
+            scope.launch {
+                val lowered = applyThermal(status)
+                if (status >= PowerManager.THERMAL_STATUS_CRITICAL && previous < PowerManager.THERMAL_STATUS_CRITICAL) {
+                    showAlert(
+                        AlertLevel.ERROR,
+                        text(R.string.alert_overheating),
+                        text(if (lowered) R.string.alert_frame_rate_lowered else R.string.alert_overheating_detail),
+                    )
+                } else if (status == PowerManager.THERMAL_STATUS_SEVERE && previous < PowerManager.THERMAL_STATUS_SEVERE) {
+                    showAlert(AlertLevel.WARNING, text(R.string.alert_hot), text(R.string.alert_hot_detail))
+                }
             }
         }
         ContextCompat.registerReceiver(
@@ -328,7 +340,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                     _ui.update { it.copy(battery = battery, temperature = temperature) }
                     val charging = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
                     if (!charging && listOf(15, 5).any { battery <= it && previous > it }) {
-                        showAlert(AlertLevel.WARNING, "Battery low", "$battery%")
+                        showAlert(AlertLevel.WARNING, text(R.string.battery_low), "$battery%")
                     }
                 }
             },
@@ -366,7 +378,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         id = UVC_PREFIX + device.deviceName,
         physicalId = null,
         facing = Facing.EXTERNAL,
-        label = device.productName?.trim()?.takeIf { it.isNotEmpty() } ?: "USB camera",
+        label = device.productName?.trim()?.takeIf { it.isNotEmpty() } ?: text(R.string.camera_usb),
         zoomRatioRange = 1f..1f,
         lensZoomStops = emptyList(),
         sensorOrientation = 0,
@@ -450,6 +462,22 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         settings.update { it.copy(fixedLensCameras = it.fixedLensCameras - main.id) }
         _ui.update { it.copy(lens = null, zoom = 1f, torch = false) }
         if (previewActive) openCamera()
+    }
+
+    private val thermalGuard = ThermalGuard()
+
+    @Synchronized
+    private fun applyThermal(status: Int): Boolean {
+        val wanted = (liveProfile ?: settings.settings.value.selectedProfile).fps
+        val before = thermalGuard.fps(wanted)
+        thermalGuard.update(status, busy)
+        val after = thermalGuard.fps(wanted)
+        if (after == before) return false
+        Log.w(TAG, "Thermal status $status, frame rate $after")
+        compositor?.setFrameRate(after)
+        if (previewActive) openCamera()
+        restartVideoEncoders("thermal status $status")
+        return after < before
     }
 
     private fun defaultCamera(cameras: List<CameraDescriptor>) =
@@ -587,7 +615,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
 
     private fun hasLivePermissions(): Boolean {
         if (LIVE_PERMISSIONS.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }) return true
-        _ui.update { it.copy(error = "Allow camera and microphone access") }
+        _ui.update { it.copy(error = text(R.string.error_permissions)) }
         return false
     }
 
@@ -595,7 +623,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         val (w, h) = outputSize(profile)
         val codec = CodecCatalog.choose(profile.codec, profile.allowedCodecs, w, h, profile.fps)
         if (CodecCatalog.encoders[codec] == null) {
-            _ui.update { it.copy(error = "No hardware video encoder") }
+            _ui.update { it.copy(error = text(R.string.error_no_encoder)) }
             return false
         }
         liveProfile = profile
@@ -615,6 +643,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         ticker?.cancel()
         ticker = null
         liveProfile = null
+        scope.launch { applyThermal(_ui.value.thermal) }
         if (previewSurface == null) stopPreviewIfIdle() else if (previewActive) startAudioMeter()
     }
 
@@ -630,9 +659,9 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
 
     private fun updateService() {
         val title = when {
-            session != null && activeRecording != null -> "Live and recording"
-            session != null -> "Live"
-            activeRecording != null -> "Recording"
+            session != null && activeRecording != null -> text(R.string.notification_live_recording)
+            session != null -> text(R.string.notification_live)
+            activeRecording != null -> text(R.string.recording_now)
             else -> null
         }
         val service = Intent(context, StreamService::class.java)
@@ -675,7 +704,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start encoders", e)
             stopLive()
-            _ui.update { it.copy(error = e.message ?: "Encoder failed") }
+            _ui.update { it.copy(error = e.message ?: text(R.string.error_encoder)) }
             return
         }
         videoEncoder?.setBitrate(targetBitrate)
@@ -691,12 +720,12 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 newSession.state.collect { s ->
                     _ui.update { it.copy(live = s) }
                     if (s == LiveState.LIVE && previous != LiveState.LIVE) {
-                        showAlert(AlertLevel.INFO, if (wasLive) "Stream reconnected" else "You are live")
+                        showAlert(AlertLevel.INFO, text(if (wasLive) R.string.alert_reconnected else R.string.alert_live))
                         wasLive = true
                     } else if (s == LiveState.RECONNECTING && previous == LiveState.LIVE) {
-                        showAlert(AlertLevel.ERROR, "Stream disconnected", newSession.lastError.value ?: "Reconnecting")
+                        showAlert(AlertLevel.ERROR, text(R.string.alert_disconnected), newSession.lastError.value ?: text(R.string.reconnecting))
                     } else if (s == LiveState.RECONNECTING && previous == LiveState.CONNECTING) {
-                        showAlert(AlertLevel.ERROR, "Could not connect", newSession.lastError.value ?: "Retrying")
+                        showAlert(AlertLevel.ERROR, text(R.string.alert_connect_failed), newSession.lastError.value ?: text(R.string.retrying))
                     }
                     previous = s
                 }
@@ -757,14 +786,14 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         if (activeRecording != null || !hasLivePermissions()) return
         val profile = liveProfile ?: settings.settings.value.selectedProfile
         if (recordings.freeBytes() < MIN_FREE_BYTES) {
-            showAlert(AlertLevel.WARNING, "Storage is full", "Recording not started")
+            showAlert(AlertLevel.WARNING, text(R.string.alert_storage_full), text(R.string.alert_recording_not_started))
             return
         }
         val file = try {
             recordings.create()
         } catch (e: Exception) {
             Log.e(TAG, "Could not create a recording", e)
-            showAlert(AlertLevel.ERROR, "Could not start recording", e.message)
+            showAlert(AlertLevel.ERROR, text(R.string.alert_recording_start_failed), e.message)
             return
         }
         if (!busy && !begin(profile)) {
@@ -784,14 +813,14 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             syncEncoders()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start the recording encoders", e)
-            stopRecording(e.message ?: "Encoder failed")
+            stopRecording(e.message ?: text(R.string.error_encoder))
             return
         }
         videoEncoder?.requestKeyFrame()
         _recording.value = RecordingStats()
         startTicker()
         updateService()
-        showAlert(AlertLevel.INFO, "Recording started")
+        showAlert(AlertLevel.INFO, text(R.string.alert_recording_started))
     }
 
     @Synchronized
@@ -812,20 +841,20 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             } catch (e: Exception) {
                 Log.e(TAG, "Recording not finished", e)
                 active.file.close()
-                showAlert(AlertLevel.ERROR, "Recording not finished", "It is recovered when the app next starts")
+                showAlert(AlertLevel.ERROR, text(R.string.alert_recording_not_finished), text(R.string.alert_recording_recover_later))
                 return@launch
             }
             active.file.close()
             if (summary == null) {
                 recordings.delete(active.file.uri)
-                showAlert(AlertLevel.ERROR, "Recording failed", error ?: "Nothing was recorded")
+                showAlert(AlertLevel.ERROR, text(R.string.alert_recording_failed), error ?: text(R.string.nothing_recorded))
                 return@launch
             }
             recordings.publish(active.file.uri)
             if (error == null) {
-                showAlert(AlertLevel.INFO, "Recording saved", describe(summary))
+                showAlert(AlertLevel.INFO, text(R.string.alert_recording_saved), describe(summary))
             } else {
-                showAlert(AlertLevel.ERROR, "Recording stopped", error)
+                showAlert(AlertLevel.ERROR, text(R.string.alert_recording_stopped), error)
             }
         }
     }
@@ -836,7 +865,11 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             ioScope.launch {
                 val saved = bitmap != null && recordings.saveSnapshot(bitmap)
                 bitmap?.recycle()
-                if (saved) showAlert(AlertLevel.INFO, "Snapshot saved") else showAlert(AlertLevel.ERROR, "Snapshot failed")
+                if (saved) {
+                    showAlert(AlertLevel.INFO, text(R.string.alert_snapshot_saved))
+                } else {
+                    showAlert(AlertLevel.ERROR, text(R.string.alert_snapshot_failed))
+                }
             }
         }
     }
@@ -951,10 +984,10 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         videoEncoder = null
         recordEncoder = null
         if (!released) {
-            fail("Video encoder stopped responding")
+            fail(text(R.string.error_encoder_stalled))
             return
         }
-        runCatching { syncEncoders() }.onFailure { fail("Video encoder: ${it.message}") }
+        runCatching { syncEncoders() }.onFailure { fail(text(R.string.error_video_encoder, it.message.orEmpty())) }
     }
 
     private fun onEncoderError(message: String) {
@@ -973,7 +1006,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         _recording.value = null
         active?.let { finishRecording(it, message) }
         stopLive()
-        if (wasLive) showAlert(AlertLevel.ERROR, "Stream stopped", message)
+        if (wasLive) showAlert(AlertLevel.ERROR, text(R.string.alert_stream_stopped), message)
         _ui.update { it.copy(error = message) }
     }
 
@@ -991,7 +1024,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         synchronized(this) {
             val active = activeRecording ?: return
             _recording.value = RecordingStats((now - active.startedAt) / 1_000_000_000L, active.recorder.bytesWritten)
-            if (recordings.freeBytes() < MIN_FREE_BYTES) stopRecording("Storage is full")
+            if (recordings.freeBytes() < MIN_FREE_BYTES) stopRecording(text(R.string.alert_storage_full))
         }
     }
 
@@ -1005,12 +1038,12 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         if (session.state.value == LiveState.LIVE && System.nanoTime() - liveStartedAt > 15_000_000_000L &&
             lowBitrate.update(stats.sendBitrateBps)
         ) {
-            showAlert(AlertLevel.WARNING, "Low bitrate", formatKbps(stats.sendBitrateBps))
+            showAlert(AlertLevel.WARNING, text(R.string.alert_low_bitrate), formatKbps(stats.sendBitrateBps))
         }
         val linkStats = (session.publisher as? SrtPublisher)?.linkStats().orEmpty()
         val shares = linkShares(linkBytes, linkStats)
         linkBytes = linkStats.associate { it.id to it.bytesSent }
-        _stats.value = LiveStats(
+        val live = LiveStats(
             bitrateBps = stats.sendBitrateBps,
             targetBitrateBps = targetBitrate,
             fps = compositor?.measuredFps ?: 0f,
@@ -1021,6 +1054,16 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             codec = liveCodec,
             links = shares,
         )
+        _stats.value = live
+        if (live.uptimeSeconds % 10 == 0L) {
+            Log.i(
+                TAG,
+                "live state=${session.state.value} uptime=${live.uptimeSeconds} fps=${live.fps.toInt()} " +
+                    "sent=${live.bitrateBps / 1000} target=${live.targetBitrateBps / 1000} rtt=${live.rttMs.toInt()} " +
+                    "queued=${live.queuedBytes} dropped=${live.droppedFrames} thermal=${_ui.value.thermal} " +
+                    "temp=${_ui.value.temperature}",
+            )
+        }
     }
 
     @Volatile
@@ -1067,7 +1110,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         val profile = settings.settings.value.selectedProfile
         val (w, h) = outputSize(profile)
         compositor = VideoCompositor(w, h).also {
-            it.setFrameRate(profile.fps)
+            it.setFrameRate(thermalGuard.fps(profile.fps))
             it.setPreview(if (previewEnabled) previewSurface else null)
             it.setOverlays(overlays)
         }
@@ -1133,7 +1176,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private fun openVideo(scene: Scene, compositor: VideoCompositor) {
         val generation = cameraGeneration
         cameraFps = 0
-        compositor.setFrameRate((liveProfile ?: settings.settings.value.selectedProfile).fps)
+        compositor.setFrameRate(thermalGuard.fps((liveProfile ?: settings.settings.value.selectedProfile).fps))
         val player = VideoPlayer(
             context,
             scene.videos.map { VideoFile(Uri.parse(it.uri), it.name) },
@@ -1177,8 +1220,9 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         val (w, h) = outputSize(profile)
         val long = maxOf(w, h)
         val short = minOf(w, h)
-        val size = descriptor.chooseSize(long, short, profile.fps) ?: descriptor.sizes.firstOrNull() ?: return
-        val fps = minOf(profile.fps, descriptor.maxFps(size))
+        val wanted = thermalGuard.fps(profile.fps)
+        val size = descriptor.chooseSize(long, short, wanted) ?: descriptor.sizes.firstOrNull() ?: return
+        val fps = minOf(wanted, descriptor.maxFps(size))
         cameraFps = fps
         compositor.setFrameRate(encoderFps(profile))
         currentInputSize = size
@@ -1189,7 +1233,10 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private var currentInputSize = Size(1920, 1080)
     private var cameraFps = 0
 
-    private fun encoderFps(profile: StreamProfile) = if (cameraFps > 0) minOf(profile.fps, cameraFps) else profile.fps
+    private fun encoderFps(profile: StreamProfile): Int {
+        val wanted = thermalGuard.fps(profile.fps)
+        return if (cameraFps > 0) minOf(wanted, cameraFps) else wanted
+    }
 
     private fun openUvc(descriptor: CameraDescriptor, compositor: VideoCompositor) {
         val generation = cameraGeneration
@@ -1198,7 +1245,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         val (w, h) = outputSize(profile)
         uvcDevices.requestPermission(device) { granted ->
             if (!granted) {
-                _ui.update { it.copy(error = "USB camera permission denied") }
+                _ui.update { it.copy(error = text(R.string.error_usb_denied)) }
                 return@requestPermission
             }
             ioScope.launch {
@@ -1209,11 +1256,11 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                     onUvcError(generation, e.message ?: "open failed")
                     return@launch
                 }
-                val format = uvc.formats.closest(maxOf(w, h), minOf(w, h), profile.fps)
+                val format = uvc.formats.closest(maxOf(w, h), minOf(w, h), thermalGuard.fps(profile.fps))
                 val surface = synchronized(this@StreamEngine) {
                     if (generation != cameraGeneration || format == null) {
                         uvc.close()
-                        if (format == null) _ui.update { it.copy(error = "USB camera has no usable format") }
+                        if (format == null) _ui.update { it.copy(error = text(R.string.error_usb_format)) }
                         return@launch
                     }
                     uvcCamera = uvc
@@ -1246,7 +1293,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             val closedGeneration: Int
             synchronized(this@StreamEngine) {
                 if (generation != cameraGeneration) return@launch
-                _ui.update { it.copy(error = "USB camera: $message") }
+                _ui.update { it.copy(error = text(R.string.error_usb, message)) }
                 closeSources()
                 key = _ui.value.camera?.key
                 closedGeneration = cameraGeneration
@@ -1272,12 +1319,14 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             size.width,
             size.height,
             descriptor.sensorOrientation,
-            if (descriptor.facing == Facing.EXTERNAL) 0 else displayRotation,
+            if (descriptor.facing == Facing.EXTERNAL) usbRotation() else displayRotation,
             descriptor.facing == Facing.FRONT,
             settings.settings.value.mirrorFrontCameraOnStream,
             boottimeTimestamps = uvcCamera == null && descriptor.realtimeTimestamps,
         )
     }
+
+    private fun usbRotation() = (360 - settings.settings.value.usbCameraRotation) % 360
 
     private fun stabilization(): Stabilization {
         val modes = _ui.value.activeCamera?.stabilizationModes.orEmpty()
@@ -1304,12 +1353,14 @@ private fun formatKbps(bps: Long) = "${bps / 1000} kbps"
 
 private fun describe(summary: Mp4Summary): String {
     val seconds = summary.durationMs / 1000
-    return "%d:%02d:%02d, %s".format(seconds / 3600, seconds / 60 % 60, seconds % 60, formatBytes(summary.bytes))
+    return "%d:%02d:%02d, %s".format(Locale.ROOT, seconds / 3600, seconds / 60 % 60, seconds % 60, formatBytes(summary.bytes))
 }
 
 fun formatBytes(bytes: Long): String =
-    if (bytes >= 1 shl 30) "%.2f GB".format(bytes / 1073741824.0) else "${bytes shr 20} MB"
+    if (bytes >= 1 shl 30) "%.2f GB".format(Locale.ROOT, bytes / 1073741824.0) else "${bytes shr 20} MB"
 
-fun outputSize(profile: StreamProfile): Pair<Int, Int> {
-    return profile.resolution.width to profile.resolution.height
+fun outputSize(profile: StreamProfile): Pair<Int, Int> = if (profile.portrait) {
+    profile.resolution.height to profile.resolution.width
+} else {
+    profile.resolution.width to profile.resolution.height
 }

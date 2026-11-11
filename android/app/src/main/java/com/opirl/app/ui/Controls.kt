@@ -1,5 +1,9 @@
 package com.opirl.app.ui
 
+import java.util.Locale
+import androidx.compose.animation.core.animateDpAsState
+import androidx.annotation.StringRes
+import androidx.compose.ui.res.stringResource
 import android.os.PowerManager
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -142,7 +146,7 @@ private val Warning = Color(0xFFFF9500)
 private val Pending = Color(0xFFFFCC00)
 
 class QuickButton(
-    val label: String,
+    @StringRes val label: Int,
     val icon: ImageVector,
     val checked: Boolean,
     val color: Color? = null,
@@ -172,7 +176,7 @@ fun quickButtons(
     when (id) {
         QuickButtonId.CHAT -> QuickButton(id.label, Icons.Rounded.ChatBubble, chatOpen, onClick = onChat)
         QuickButtonId.RECORD -> QuickButton(
-            if (confirmRecordStop) "Confirm" else if (recording) "Stop" else id.label,
+            if (confirmRecordStop) R.string.confirm else if (recording) R.string.stop else id.label,
             if (recording) Icons.Rounded.Stop else Icons.Rounded.FiberManualRecord,
             recording,
             LiveRed,
@@ -206,6 +210,7 @@ fun quickButtons(
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun BarButton(icon: ImageVector, label: String, checked: Boolean, size: Dp, color: Color? = null, onClick: () -> Unit) {
+    val through = fadeThrough()
     IconToggleButton(
         checked = checked,
         onCheckedChange = { onClick() },
@@ -217,20 +222,23 @@ private fun BarButton(icon: ImageVector, label: String, checked: Boolean, size: 
             checkedContentColor = if (color != null) Color.White else MaterialTheme.colorScheme.onPrimary,
         ),
         modifier = Modifier.size(size),
-    ) { Icon(icon, label) }
+    ) {
+        AnimatedContent(icon, transitionSpec = { through }, label = "icon") { shown -> Icon(shown, label) }
+    }
 }
 
 @Composable
 fun QuickButtonView(button: QuickButton, size: Dp, width: Dp) {
+    val label = stringResource(button.label)
     Column(Modifier.width(width), horizontalAlignment = Alignment.CenterHorizontally) {
-        BarButton(button.icon, button.label, button.checked, size, button.color, button.onClick)
-        Text(button.label, fontSize = 10.sp, lineHeight = 12.sp, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
+        BarButton(button.icon, label, button.checked, size, button.color, button.onClick)
+        Text(label, fontSize = 10.sp, lineHeight = 12.sp, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
     }
 }
 
 @Composable
 fun SettingsButton(open: Boolean, size: Dp = 40.dp, onChange: (Boolean) -> Unit) {
-    BarButton(Icons.Rounded.Settings, "Settings", open, size, onClick = { onChange(!open) })
+    BarButton(Icons.Rounded.Settings, stringResource(R.string.settings), open, size, onClick = { onChange(!open) })
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -246,12 +254,12 @@ fun PanelButtons(hidden: Boolean, onHide: () -> Unit, onClose: () -> Unit, modif
         FilledIconButton(onHide, IconButtonDefaults.shapes(), size, colors = colors) {
             Icon(
                 if (hidden) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
-                if (hidden) "Show panel" else "Hide panel",
+                stringResource(if (hidden) R.string.show_panel else R.string.hide_panel),
                 icon,
             )
         }
         FilledIconButton(onClose, IconButtonDefaults.shapes(), size, colors = colors) {
-            Icon(Icons.Rounded.Close, "Close", icon)
+            Icon(Icons.Rounded.Close, stringResource(R.string.close), icon)
         }
     }
 }
@@ -292,21 +300,22 @@ fun LiveButton(state: LiveState, confirmStop: Boolean, onClick: () -> Unit, modi
     val live = state != LiveState.OFFLINE
     val haptics = LocalHapticFeedback.current
     val motion = MaterialTheme.motionScheme
+    val description = stringResource(if (confirmStop) R.string.confirm_stop else if (live) R.string.stop_stream else R.string.go_live)
+    val corner by animateDpAsState(if (live) 26.dp else 14.dp, motion.defaultSpatialSpec(), label = "corner")
+    val border by animateDpAsState(if (live) 2.dp else 0.dp, motion.defaultSpatialSpec(), label = "border")
     Button(
         onClick = {
             haptics.performHapticFeedback(if (live) HapticFeedbackType.Reject else HapticFeedbackType.Confirm)
             onClick()
         },
-        shapes = ButtonDefaults.shapes(shape = RoundedCornerShape(14.dp), pressedShape = RoundedCornerShape(8.dp)),
+        shapes = ButtonDefaults.shapes(shape = RoundedCornerShape(corner), pressedShape = RoundedCornerShape(8.dp)),
         colors = ButtonDefaults.buttonColors(containerColor = LiveRed, contentColor = Color.White),
-        border = if (live) BorderStroke(2.dp, Color.White) else null,
+        border = if (border > 0.dp) BorderStroke(border, Color.White) else null,
         contentPadding = PaddingValues(0.dp),
-        modifier = modifier.semantics {
-            contentDescription = if (confirmStop) "Confirm stop" else if (live) "Stop stream" else "Go live"
-        },
+        modifier = modifier.semantics { contentDescription = description },
     ) {
         AnimatedContent(
-            targetState = if (confirmStop) "Confirm" else if (live) "End" else "Go Live",
+            targetState = stringResource(if (confirmStop) R.string.confirm else if (live) R.string.end else R.string.go_live),
             transitionSpec = {
                 (scaleIn(motion.fastSpatialSpec(), initialScale = 0.8f) + fadeIn(motion.fastEffectsSpec())) togetherWith
                     fadeOut(motion.fastEffectsSpec())
@@ -322,7 +331,7 @@ fun LiveButton(state: LiveState, confirmStop: Boolean, onClick: () -> Unit, modi
 @Composable
 fun BitratePresets(presetsKbps: List<Int>, currentKbps: Int, onSelect: (Int) -> Unit) {
     Text(
-        "Bitrate, Mbps",
+        stringResource(R.string.bitrate_mbps),
         style = MaterialTheme.typography.titleMedium,
         modifier = Modifier.padding(start = 20.dp, bottom = 12.dp),
     )
@@ -345,10 +354,14 @@ fun BitratePresets(presetsKbps: List<Int>, currentKbps: Int, onSelect: (Int) -> 
     }
 }
 
-fun formatMbps(kbps: Int): String = "%.2f".format(kbps / 1000f).trimEnd('0').trimEnd('.')
+fun formatMbps(kbps: Int): String = "%.2f".format(Locale.ROOT, kbps / 1000f).trimEnd('0').trimEnd('.')
 
 @Composable
-fun Preview(engine: StreamEngine, ui: UiState, corner: Dp) {
+fun Preview(engine: StreamEngine, ui: UiState, corner: Dp, access: Access, flash: () -> Float) {
+    if (!access.ready) {
+        AccessPrompt(access, corner)
+        return
+    }
     var viewSize by remember { mutableStateOf(1 to 1) }
     AndroidView(
         factory = { context ->
@@ -384,7 +397,11 @@ fun Preview(engine: StreamEngine, ui: UiState, corner: Dp) {
                 addRect(size.toRect())
                 addRoundRect(RoundRect(size.toRect(), CornerRadius(corner.toPx())))
             }
-            onDrawBehind { drawPath(corners, Color.Black) }
+            onDrawBehind {
+                val white = flash()
+                if (white > 0f) drawRect(Color.White, alpha = white)
+                drawPath(corners, Color.Black)
+            }
         },
     )
     DisposableEffect(Unit) { onDispose { engine.setPreviewSurface(null) } }
@@ -413,29 +430,32 @@ fun Status(
                     else -> Color.White
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.Thermostat, "Temperature", tint = color, modifier = Modifier.size(14.dp))
+                    Icon(Icons.Rounded.Thermostat, stringResource(R.string.temperature), tint = color, modifier = Modifier.size(14.dp))
                     Text("${ui.temperature}°C", style = statusStyle.copy(color = color))
                 }
             }
-            if (showUptime) Row(verticalAlignment = Alignment.CenterVertically) {
+            Appear(showUptime, vertical = false) { Row(verticalAlignment = Alignment.CenterVertically) {
                 if (ui.battery <= 15) {
-                    Icon(Icons.Rounded.BatteryAlert, "Battery low", tint = Warning, modifier = Modifier.padding(end = 6.dp).size(14.dp))
+                    Icon(Icons.Rounded.BatteryAlert, stringResource(R.string.battery_low), tint = Warning, modifier = Modifier.padding(end = 6.dp).size(14.dp))
                 }
                 val (label, color) = when (ui.live) {
                     LiveState.LIVE -> formatUptime(stats.uptimeSeconds) to LiveRed
-                    LiveState.RECONNECTING -> "Reconnecting" to Pending
-                    else -> "Connecting" to Pending
+                    LiveState.RECONNECTING -> stringResource(R.string.reconnecting) to Pending
+                    else -> stringResource(R.string.connecting) to Pending
                 }
                 Box(Modifier.size(7.dp).clip(CircleShape).background(color))
                 Spacer(Modifier.width(5.dp))
                 Text(label, style = statusStyle)
-            }
+            } }
         }
     }
+    val lastRecording = remember { mutableStateOf(RecordingStats()) }
+    if (recording != null) lastRecording.value = recording
     val recorded: @Composable () -> Unit = {
-        if (recording != null && StatusItem.RECORDING !in hidden) {
+        Appear(recording != null && StatusItem.RECORDING !in hidden, !compact) {
+            val recording = lastRecording.value
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.Videocam, "Recording", tint = LiveRed, modifier = Modifier.padding(end = 4.dp).size(14.dp))
+                Icon(Icons.Rounded.Videocam, stringResource(R.string.recording_now), tint = LiveRed, modifier = Modifier.padding(end = 4.dp).size(14.dp))
                 Text(
                     if (compact) formatUptime(recording.seconds) else "${formatUptime(recording.seconds)}  ${formatBytes(recording.bytes)}",
                     style = statusStyle,
@@ -443,17 +463,20 @@ fun Status(
             }
         }
     }
+    val lastObs = remember { mutableStateOf(ObsState()) }
+    if (obs != null) lastObs.value = obs
     val remote: @Composable () -> Unit = {
-        if (obs != null && StatusItem.OBS !in hidden) {
+        Appear(obs != null && StatusItem.OBS !in hidden, !compact) {
+            val obs = lastObs.value
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(7.dp).clip(CircleShape).background(if (obs.connected) Color(0xFF34C759) else Warning))
                 Spacer(Modifier.width(5.dp))
-                Text(if (compact) "OBS" else obsStatus(obs), style = statusStyle, maxLines = 1, softWrap = false)
+                Text(if (compact) "OBS" else obsStatusText(obs), style = statusStyle, maxLines = 1, softWrap = false)
             }
         }
     }
     val bitrate: @Composable () -> Unit = {
-        if (live && StatusItem.BITRATE !in hidden) {
+        Appear(live && StatusItem.BITRATE !in hidden, !compact) {
             Text(
                 formatBitrate(stats.bitrateBps),
                 style = statusStyle.copy(fontSize = if (compact) 13.sp else 20.sp, fontWeight = FontWeight.Bold),
@@ -463,7 +486,7 @@ fun Status(
         }
     }
     val bonding: @Composable () -> Unit = {
-        if (live && StatusItem.BONDING !in hidden && stats.links.isNotEmpty()) {
+        Appear(live && StatusItem.BONDING !in hidden && stats.links.isNotEmpty(), !compact) {
             Text(stats.links.joinToString("  ") { "${it.name} ${it.percent}%" }, style = statusStyle, maxLines = 1)
         }
     }
@@ -474,7 +497,7 @@ fun Status(
     val errorText: @Composable () -> Unit = {
         if (error != null) {
             Text(
-                error,
+                localized(error),
                 style = statusStyle.copy(color = Color(0xFFFF8A80), fontSize = 12.sp),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -522,7 +545,7 @@ private fun AudioMeter(level: StateFlow<Float>, muted: Boolean) {
             modifier = Modifier.padding(end = 4.dp).size(14.dp),
         )
         if (muted) {
-            Text("Muted", style = statusStyle)
+            Text(stringResource(R.string.muted), style = statusStyle)
             return
         }
         val decibels = level.collectAsStateWithLifecycle()
@@ -541,13 +564,16 @@ private fun AudioMeter(level: StateFlow<Float>, muted: Boolean) {
 
 @Composable
 fun CameraControls(ui: UiState, scenes: List<Scene>, scene: Scene?, video: VideoPlayer?, engine: StreamEngine, modifier: Modifier) {
+    val through = fadeThrough()
     Column(modifier, horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (video != null) VideoStrip(video, Modifier.fillMaxWidth()) else ZoomStops(ui, engine::setZoom)
+        AnimatedContent(video, transitionSpec = { through }, contentAlignment = Alignment.CenterEnd, label = "source") { player ->
+            if (player != null) VideoStrip(player, Modifier.fillMaxWidth()) else ZoomStops(ui, engine::setZoom)
+        }
         SceneSwitch(scenes, scene, engine::selectScene, Modifier)
     }
 }
 
-fun formatClock(ms: Long): String = "%d:%02d".format(ms / 60_000, ms / 1000 % 60)
+fun formatClock(ms: Long): String = "%d:%02d".format(Locale.ROOT, ms / 60_000, ms / 1000 % 60)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -555,6 +581,7 @@ fun VideoStrip(video: VideoPlayer, modifier: Modifier) {
     val state by video.state.collectAsStateWithLifecycle()
     val duration = state.durationMs.coerceAtLeast(1)
     val slider = remember { SliderState() }
+    val position = stringResource(R.string.video_position)
     LaunchedEffect(state.positionMs, duration) {
         if (!slider.isDragging) slider.value = (state.positionMs.toFloat() / duration).coerceIn(0f, 1f)
     }
@@ -562,13 +589,13 @@ fun VideoStrip(video: VideoPlayer, modifier: Modifier) {
         modifier.height(40.dp).clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.55f)).padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CompactIconButton(Icons.Rounded.SkipPrevious, "Previous video", onClick = video::previous)
+        CompactIconButton(Icons.Rounded.SkipPrevious, stringResource(R.string.previous_video), onClick = video::previous)
         CompactIconButton(
             if (state.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-            if (state.playing) "Pause video" else "Play video",
+            stringResource(if (state.playing) R.string.pause_video else R.string.play_video),
             onClick = video::togglePlay,
         )
-        CompactIconButton(Icons.Rounded.SkipNext, "Next video", onClick = video::next)
+        CompactIconButton(Icons.Rounded.SkipNext, stringResource(R.string.next_video), onClick = video::next)
         Text(
             formatClock(if (slider.isDragging) (slider.value * duration).toLong() else state.positionMs),
             style = statusStyle,
@@ -577,7 +604,7 @@ fun VideoStrip(video: VideoPlayer, modifier: Modifier) {
         Slider(
             state = slider,
             onValueChange = { slider.value = it },
-            modifier = Modifier.weight(1f).padding(horizontal = 10.dp).semantics { contentDescription = "Video position" },
+            modifier = Modifier.weight(1f).padding(horizontal = 10.dp).semantics { contentDescription = position },
             onValueChangeFinished = { video.seekTo((slider.value * duration).toLong()) },
             thumb = { Box(Modifier.size(12.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary)) },
             track = { SliderDefaults.Track(it, Modifier.height(4.dp), thumbTrackGapSize = 0.dp, drawStopIndicator = null) },

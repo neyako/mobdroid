@@ -59,4 +59,4 @@ jobs:
           ./gradlew :engine:test
       - name: App unit tests and build
         run: |
-          ./gradlew :app:testDebugUnitTest :app:assembleDebug
+          ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease :app:lintRelease

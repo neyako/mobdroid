@@ -321,6 +321,52 @@ them, not code style.
   panel open it is 100 dp with two columns, as in Moblin. Near-square screens (the Flip cover,
   `maxWidth / maxHeight < 1.5`): status, logo and settings button in a top band, the preview with zoom
   stops left and scenes right, quick buttons and Go Live in a bottom band.
+- `StreamProfile.portrait` (Streams, a stream, Video, Portrait) swaps the output size (1080p becomes
+  1080x1920) and makes the activity request `sensorPortrait` instead of `sensorLandscape`. The compositor
+  already rotates by the display rotation and crops to the output aspect, so a portrait stream is upright
+  in any window. Widget text scales with the picture's short side. Displays with a smallest width of
+  600 dp and more ignore orientation requests since Android 16, so every layout has to work in any window
+  shape: a portrait window gets the near-square layout.
+- Large windows (smallest side 600 dp or more: tablets, unfolded foldables): the preview pinned to the top
+  with the logo, the settings button, one row of 48 dp quick buttons and Go Live directly under it, and the
+  panel docked on the right (up to 400 dp) while one is open, or filling what is left under the controls in
+  a portrait window. The quick buttons start right after the settings button, and the logo, every button
+  circle and Go Live share one centre line, with the labels below it. The preview takes its new size at
+  once when a panel opens or closes.
+- Half open with the hinge across the screen (`MainActivity` reads Jetpack WindowManager's `FoldingFeature`
+  and hands its bounds to `MainScreen`): the preview with its status and camera controls above the hinge,
+  the quick buttons, Go Live and any panel below it. A device whose hinge is horizontal in its natural
+  orientation (the Flip) is turned to portrait while half open, so it works standing on a table.
+- In the near-square layout the zoom stops and the scene row sit at the bottom of the preview band, across
+  the whole width, so a narrow portrait picture does not squeeze them out.
+- First run (`AppSettings.setupDone` is false): `ui/Wizard.kt`, three steps. Access lists camera, microphone
+  and notifications with one line each on why, and its button asks for the ones missing; a permission
+  denied for good turns the button into Open settings. Then the destination (opIRL relay, Twitch, YouTube,
+  Kick, Facebook, Custom), then only what that destination needs (a stream key, or a URL) and one of four
+  quality presets in one row (1080p30, 1080p60, 1440p30, 4K30), 1080p30 by default. Done writes them into
+  the selected stream; Skip leaves it alone.
+  Settings saved before the wizard existed have no `setupDone` key and count as set up. The wizard is a popup
+  over the dimmed main screen on every window size, as tall as its step and scrolling when the window is
+  shorter. The destination and stream steps draw no cards: choices are toggle buttons and the stream
+  step's fields are plain filled text fields with a primary outline while focused, so nothing is nested
+  inside another container. Nothing asks for a
+  permission at launch any more: `ui/Access.kt` holds the permission state, and without camera and
+  microphone the preview shows the same reason with an Allow button.
+- `AppSettings.usbCameraRotation` (Settings, Camera) turns a USB camera's picture clockwise by 0, 90, 180
+  or 270 degrees before it is cropped to the output, so a camera mounted upright fills a portrait stream.
+- Read sizes from `constraints` with `LocalDensity`, not from `BoxWithConstraints`' `maxWidth`/`maxHeight`:
+  those keep the density of the last measure, and a density change that leaves the pixel size alone (the
+  display size setting) lays the screen out wrong.
+- Colours come from `OpirlTheme` (`ui/Theme.kt`): the system's dynamic dark scheme on Android 12 and later
+  (the user's wallpaper or chosen colour), the Material default below that, with background and surface
+  forced to black. Accents use `MaterialTheme.colorScheme`, never a literal; only colours with a fixed
+  meaning stay literal (live red, warning and level colours, platform colours, the settings badges).
+- Motion uses the theme's expressive `motionScheme` only, spatial specs for movement and effects specs for
+  fades, and runs on events, never continuously. `ui/Motion.kt` has the shared pieces: `fadeThrough` for
+  content that swaps (panels, quick button icons, zoom stops and the video strip), `Appear` for status
+  items, and `backProgress` with `Modifier.backGesture`, which shrinks a panel or a settings page with the
+  system back gesture before it closes. A snapshot flashes the preview, settings groups resize with a
+  spring when rows come and go, and the Go Live button rounds into a pill while live.
 - The preview `SurfaceView` has exactly the output aspect, so the corner mask drawn over it rounds the
   picture. Never animate its size: it takes its final size the moment a panel opens or closes, and the
   rest moves over it. The control bar's width and the quick buttons' positions follow one spring
@@ -381,7 +427,21 @@ Run from `android/`. `local.properties` (gitignored) needs `sdk.dir=$HOME/Androi
 ./gradlew :app:assembleDebug    # builds the APK (arm64-v8a)
 ./gradlew :app:installDebug     # installs on the connected device
 ./gradlew :app:assembleRelease  # minified APK, signed with the release key when it is present
+./gradlew :app:bundleRelease    # the bundle for the Play Store, signed the same way
+./gradlew :app:lintRelease      # Android lint, no errors allowed
+tools/soak.sh <adb serial> <minutes> [srt port] [output directory]
 ```
+
+`versionCode` in `app/build.gradle.kts` goes up by one with every build that is published.
+
+`tools/soak.sh` is the long-session and heat test. It runs an `ffmpeg` SRT listener that decodes the stream,
+and every 30 seconds samples the app's memory, threads, file descriptors and CPU, the battery temperature,
+the thermal status, and the app's own `live ...` log line (`StreamEngine` logs its stats every 10 seconds
+while live). Point a stream profile at `srt://<this computer>:<port>`, start the script, go live. It writes
+`samples.csv` and a summary, and force-stops the app when the thermal status reaches 5 or the battery 50 °C
+(`SOAK_MAX_THERMAL`, `SOAK_MAX_BATTERY`), so a heat test cannot cook the phone. Needs a debug build
+(`run-as`). On the folded Flip5 a 1080p60 stream from the back camera reaches thermal status 4 in four
+minutes and 5 in twenty.
 
 The app is opIRL, application ID and package `com.opirl.app` (the engine is `com.opirl.app.engine`). The
 application ID is fixed once the app is on the Play Store, so never change it.
@@ -391,8 +451,13 @@ The release build is signed with the keystore named in a properties file (`store
 `OPIRL_SIGNING`, else `~/.config/opirl/signing.properties`. The keystore and that file are never in the
 repository. Without them (CI) the release build is signed with the debug key and must not be published.
 
-Settings, About, Licenses lists the bundled software with its licence text from `assets/licenses/`. Add a
-row and a text there with every new bundled library or asset.
+Backups (`res/xml/data_extraction_rules.xml`, `backup_rules.xml`): `settings.json` and the widget images
+go to the cloud backup only when it is end-to-end encrypted, since the settings hold stream keys;
+`logins.json` only moves in a device-to-device transfer.
+
+Settings, About has a Source code row (the LGPL and MIT texts require a way to the source), and Licenses
+lists the bundled software with its licence text from `assets/licenses/`. Add a row and a text there with
+every new bundled library or asset.
 
 Engine tests that talk to a real server use the system `ffmpeg`/`ffprobe` as the receiver and are
 skipped when they are missing. The SRTLA end-to-end tests also need `SRTLA_REC` pointing at a built
@@ -400,6 +465,11 @@ skipped when they are missing. The SRTLA end-to-end tests also need `SRTLA_REC` 
 
 ## Stream service
 
+- `ThermalGuard` lowers the frame rate to 30 when the thermal status reaches critical (4): the compositor
+  paces at the lower rate (a playing video is not restarted), the camera is reopened at it and the video
+  encoders are restarted, with an alert. It stays lowered while
+  live or recording, and goes back to the profile's rate once the status is moderate (2) or lower and
+  nothing is running.
 - `StreamEngine.goLive` needs CAMERA and RECORD_AUDIO and reports an error without them. It starts
   `StreamService` only after the encoders have started.
 - `stopLive` sends `StreamService.ACTION_STOP` instead of calling `stopService`: a service started with
@@ -408,9 +478,13 @@ skipped when they are missing. The SRTLA end-to-end tests also need `SRTLA_REC` 
 
 ## Conventions
 
-- Landscape only (`sensorLandscape` in the manifest). Vertical streaming for TikTok or Shorts belongs in
-  the platforms' own apps, so there is no portrait output.
-
+- Every string the user reads is a resource (`res/values/strings.xml`, Vietnamese in `values-vi`), read with
+  `stringResource` in Compose and `Context.getString` elsewhere. Brand names, units (`Mbps`, `kbps`, `s`)
+  and technical fault details stay literal. Enum labels are `@StringRes` ids. Fixed English messages that
+  come from the engine module or from `describeError` are mapped to resources by `ui/Messages.kt`
+  (`messageRes`, `localized`) where they are shown; add a line there with every new fixed message.
+  `res/xml/locales_config.xml` lists the languages for the per-app language setting of Android 13 and later.
+  Text made for the stream itself (widget text, recording names) is not translated.
 - No comments or docstrings in code, same as the iOS project. Contracts live in this file.
 - Performance matters more than abstraction: the phone's budget belongs to the encoder. No per-frame
   allocations in hot paths that can reuse a buffer, no polling loops, no continuously repainting UI.

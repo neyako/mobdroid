@@ -1,5 +1,6 @@
 package com.opirl.app.media
 
+import com.opirl.app.R
 import android.content.Context
 import android.media.MediaCodec
 import android.media.MediaExtractor
@@ -142,7 +143,7 @@ class VideoPlayer(
             } catch (e: Exception) {
                 if (!running) break
                 Log.e(TAG, "Cannot play ${file.name}", e)
-                onError("Cannot play ${file.name}")
+                onError(context.getString(R.string.error_cannot_play, file.name))
                 failures++
                 pause(if (failures >= files.size) 3000 else 300)
                 1

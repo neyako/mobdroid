@@ -1,5 +1,6 @@
 package com.opirl.app.camera
 
+import com.opirl.app.R
 import android.content.Context
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCharacteristics
@@ -24,7 +25,16 @@ object CameraCatalog {
         val ids = LinkedHashSet(visible)
         for (i in 0 until PROBE_LIMIT) ids += i.toString()
         val cameras = ids.mapNotNull { readCamera(manager, it, it in visible) }
-        return buildCatalog(cameras).map { it.toDescriptor() }
+        val words = CameraWords(
+            back = context.getString(R.string.camera_back),
+            front = context.getString(R.string.camera_front),
+            ultraWide = context.getString(R.string.camera_ultra_wide),
+            wide = context.getString(R.string.camera_wide),
+            telephoto = context.getString(R.string.camera_telephoto),
+            frontLens = context.getString(R.string.camera_front_lens),
+            usb = context.getString(R.string.camera_usb),
+        )
+        return buildCatalog(cameras, words).map { it.toDescriptor() }
     }
 }
 

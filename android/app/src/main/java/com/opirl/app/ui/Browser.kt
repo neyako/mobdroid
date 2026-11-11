@@ -1,5 +1,7 @@
 package com.opirl.app.ui
 
+import com.opirl.app.R
+import androidx.compose.ui.res.stringResource
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
@@ -180,24 +182,24 @@ fun BrowserPanel(store: SettingsStore, settings: AppSettings, browser: BrowserSt
                 Row(Modifier.fillMaxWidth().height(PanelHeaderHeight).padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.width(70.dp)) {
                         IconButton({ showBookmarks = false }, Modifier.size(44.dp)) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Navigate back", Modifier.size(20.dp))
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.navigate_back), Modifier.size(20.dp))
                         }
                     }
-                    Text("Bookmarks", style = PanelTitle, textAlign = TextAlign.Center, maxLines = 1, modifier = Modifier.weight(1f))
+                    Text(stringResource(R.string.bookmarks), style = PanelTitle, textAlign = TextAlign.Center, maxLines = 1, modifier = Modifier.weight(1f))
                     PanelButtons(hidden = false, onHide, onClose)
                 }
                 Bookmarks(store, settings, browser, add = true, open)
             } else {
                 Row(Modifier.fillMaxWidth().height(PanelHeaderHeight).padding(start = 4.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    CompactIconButton(Icons.AutoMirrored.Rounded.ArrowBack, "Previous page", browser.canGoBack) { view?.goBack() }
-                    CompactIconButton(Icons.AutoMirrored.Rounded.ArrowForward, "Next page", browser.canGoForward) { view?.goForward() }
+                    CompactIconButton(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.previous_page), browser.canGoBack) { view?.goBack() }
+                    CompactIconButton(Icons.AutoMirrored.Rounded.ArrowForward, stringResource(R.string.next_page), browser.canGoForward) { view?.goForward() }
                     AddressField(browser.url, Modifier.weight(1f), open)
                     if (browser.progress < 100) {
-                        CompactIconButton(Icons.Rounded.Close, "Stop loading") { view?.stopLoading() }
+                        CompactIconButton(Icons.Rounded.Close, stringResource(R.string.stop_loading)) { view?.stopLoading() }
                     } else {
-                        CompactIconButton(Icons.Rounded.Refresh, "Reload", view != null) { view?.reload() }
+                        CompactIconButton(Icons.Rounded.Refresh, stringResource(R.string.reload), view != null) { view?.reload() }
                     }
-                    CompactIconButton(Icons.Rounded.Bookmarks, "Bookmarks") { showBookmarks = true }
+                    CompactIconButton(Icons.Rounded.Bookmarks, stringResource(R.string.bookmarks)) { showBookmarks = true }
                     Spacer(Modifier.width(4.dp))
                     PanelButtons(hidden = false, onHide, onClose)
                 }
@@ -256,7 +258,7 @@ private fun AddressField(url: String, modifier: Modifier, onGo: (String) -> Unit
         ) {
             if (value.text.isEmpty()) {
                 Text(
-                    "Search or address",
+                    stringResource(R.string.search_or_address),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -278,7 +280,12 @@ private fun Bookmarks(store: SettingsStore, settings: AppSettings, browser: Brow
             val url = browser.url
             Group {
                 row { shapes ->
-                    ActionRow(shapes, "Add this page", Icons.Rounded.Add, enabled = url.isNotEmpty() && settings.bookmarks.none { it.url == url }) {
+                    ActionRow(
+                        shapes,
+                        stringResource(R.string.add_this_page),
+                        Icons.Rounded.Add,
+                        enabled = url.isNotEmpty() && settings.bookmarks.none { it.url == url },
+                    ) {
                         val name = browser.title.ifBlank { Uri.parse(url).host ?: url }
                         store.update { it.copy(bookmarks = it.bookmarks + Bookmark(name = name, url = url)) }
                     }
@@ -287,7 +294,7 @@ private fun Bookmarks(store: SettingsStore, settings: AppSettings, browser: Brow
         }
         if (settings.bookmarks.isEmpty()) {
             Text(
-                "No bookmarks",
+                stringResource(R.string.no_bookmarks),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 4.dp),

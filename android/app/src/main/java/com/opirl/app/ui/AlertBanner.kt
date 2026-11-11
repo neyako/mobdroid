@@ -71,7 +71,7 @@ private fun AlertCard(alert: Alert, onDismiss: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
             )
             alert.detail?.let {
-                Text(it, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(localized(it), style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
     }

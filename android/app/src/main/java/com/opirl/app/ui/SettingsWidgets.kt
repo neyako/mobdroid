@@ -1,5 +1,8 @@
 package com.opirl.app.ui
 
+import androidx.compose.animation.animateContentSize
+import com.opirl.app.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -89,14 +92,17 @@ class GroupBuilder {
 @Composable
 fun Group(build: GroupBuilder.() -> Unit) {
     val rows = GroupBuilder().apply(build).rows
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(
+        Modifier.animateContentSize(MaterialTheme.motionScheme.defaultSpatialSpec()),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
         rows.forEachIndexed { index, row -> row(ListItemDefaults.segmentedShapes(index, rows.size)) }
     }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun BadgeIcon(badge: Badge) {
+fun BadgeIcon(badge: Badge) {
     Box(Modifier.size(26.dp).clip(badge.shape.toShape()).background(badge.color), contentAlignment = Alignment.Center) {
         Icon(badge.icon, null, tint = Color.Black, modifier = Modifier.size(15.dp))
     }
@@ -244,7 +250,7 @@ fun <T> ChoiceRow(
     title: String,
     values: List<T>,
     selected: T,
-    label: (T) -> String,
+    label: @Composable (T) -> String,
     isEnabled: (T) -> Boolean = { true },
     enabled: Boolean = true,
     onSelect: (T) -> Unit,
@@ -369,7 +375,7 @@ fun RemovableRow(shapes: ListItemShapes, title: String, value: String, onClick: 
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.widthIn(max = 120.dp),
             )
-            CompactIconButton(Icons.Rounded.Close, "Remove $title", onClick = onRemove)
+            CompactIconButton(Icons.Rounded.Close, stringResource(R.string.remove_item, title), onClick = onRemove)
         }
     }
     val content: @Composable () -> Unit = { Text(title, style = RowTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }
