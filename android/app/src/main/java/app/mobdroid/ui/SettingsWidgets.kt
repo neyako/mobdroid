@@ -187,6 +187,46 @@ fun SwitchRow(shapes: ListItemShapes, title: String, checked: Boolean, enabled: 
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
+fun SwitchNavRow(shapes: ListItemShapes, title: String, checked: Boolean, onChange: (Boolean) -> Unit, onClick: () -> Unit) {
+    SegmentedListItem(
+        contentPadding = RowPadding,
+        colors = rowColors(),
+        onClick = onClick,
+        shapes = shapes,
+        modifier = Modifier.heightIn(max = RowHeight),
+        trailingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked, onChange, Modifier.scale(0.85f))
+                Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+    ) { Text(title, style = RowTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun SliderRow(shapes: ListItemShapes, title: String, value: Int, range: IntRange, label: String, onChange: (Int) -> Unit) {
+    SegmentedListItem(shapes = shapes, contentPadding = RowPadding, colors = rowColors()) {
+        Column {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(title, style = RowTitle)
+                Text(
+                    label,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Slider(
+                value = value.toFloat().coerceIn(range.first.toFloat(), range.last.toFloat()),
+                onValueChange = { onChange(it.toInt().coerceIn(range)) },
+                valueRange = range.first.toFloat()..range.last.toFloat(),
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
 fun <T> ChoiceRow(
     shapes: ListItemShapes,
     title: String,

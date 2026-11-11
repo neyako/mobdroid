@@ -117,6 +117,8 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
         chatOpen = side == Side.CHAT && !panelHidden,
         recording = recording != null,
         confirmRecordStop = confirmRecordStop,
+        widgetsOpen = side == Side.WIDGETS && !panelHidden,
+        onWidgets = { toggle(Side.WIDGETS) },
         onChat = { toggle(Side.CHAT) },
         onRecord = {
             when {
@@ -188,7 +190,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                         ) {
                             ZoomStops(ui, engine::setZoom)
                             Spacer(Modifier.width(8.dp))
-                            CameraSwitch(ui, engine::selectCamera, Modifier.weight(1f, fill = false))
+                            SceneSwitch(appSettings.scenes, appSettings.selectedScene, engine::selectScene, Modifier.weight(1f, fill = false))
                         }
                     }
                     Row(
@@ -235,10 +237,24 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                                 )
                                 floatingButtons(Modifier.align(Alignment.TopEnd).padding(8.dp))
                                 if (!below) {
-                                    CameraControls(ui, engine, Modifier.align(Alignment.BottomEnd).padding(10.dp))
+                                    CameraControls(
+                                        ui,
+                                        appSettings.scenes,
+                                        appSettings.selectedScene,
+                                        engine,
+                                        Modifier.align(Alignment.BottomEnd).padding(10.dp),
+                                    )
                                 }
                             }
-                            if (below) CameraControls(ui, engine, Modifier.width(width).padding(top = 8.dp))
+                            if (below) {
+                                CameraControls(
+                                    ui,
+                                    appSettings.scenes,
+                                    appSettings.selectedScene,
+                                    engine,
+                                    Modifier.width(width).padding(top = 8.dp),
+                                )
+                            }
                         }
                     }
                     Box(Modifier.weight(1f).fillMaxHeight()) {
@@ -258,10 +274,17 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                                 exit = slideOutHorizontally(motion.fastSpatialSpec()) { it / 4 } +
                                     fadeOut(motion.fastEffectsSpec()),
                             ) {
-                                if (shownSide == Side.CHAT) {
-                                    ChatPanel(engine, appSettings, chatDraft, onHide = { panelHidden = true }, onClose = closePanel)
-                                } else {
-                                    SettingsPanel(settings, engine, busy, settingsPages, onHide = { panelHidden = true }, onClose = closePanel)
+                                when (shownSide) {
+                                    Side.CHAT -> ChatPanel(engine, appSettings, chatDraft, onHide = { panelHidden = true }, onClose = closePanel)
+                                    Side.WIDGETS -> WidgetsPanel(settings, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
+                                    Side.SETTINGS -> SettingsPanel(
+                                        settings,
+                                        engine,
+                                        busy,
+                                        settingsPages,
+                                        onHide = { panelHidden = true },
+                                        onClose = closePanel,
+                                    )
                                 }
                             }
                         }
@@ -324,6 +347,8 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
                                 Modifier,
                             )
                         }
+                    } else if (shownSide == Side.WIDGETS) {
+                        WidgetsPanel(settings, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
                     } else {
                         SettingsPanel(settings, engine, busy, settingsPages, onHide = { panelHidden = true }, onClose = closePanel)
                     }
@@ -368,7 +393,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore) {
     }
 }
 
-private enum class Side { SETTINGS, CHAT }
+private enum class Side { SETTINGS, CHAT, WIDGETS }
 
 fun formatBitrate(bps: Long): String = if (bps >= 1_000_000) "%.1f Mbps".format(bps / 1e6) else "${bps / 1000} kbps"
 
