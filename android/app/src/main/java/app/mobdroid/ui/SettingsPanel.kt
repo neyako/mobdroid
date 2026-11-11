@@ -13,6 +13,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.provider.Settings
 import android.util.Size
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -351,7 +352,7 @@ fun SettingsPanel(
                             if (scene != null && widget != null) PlacementPage(store, scene, widget)
                         }
                         is Route.WidgetPage -> settings.widgets.firstOrNull { it.id == route.id }?.let {
-                            WidgetPage(store, it, pop)
+                            WidgetPage(store, it, engine, pop)
                         }
                         Route.TwitchAccount -> TwitchAccountPage(engine)
                         Route.KickAccount -> KickAccountPage(engine)
@@ -894,7 +895,7 @@ private fun PlacementPage(store: SettingsStore, scene: Scene, widget: Widget) {
         }
         row { SliderRow(it, "X", placement.x, 0..100, "${placement.x}%") { x -> update(placement.copy(x = x)) } }
         row { SliderRow(it, "Y", placement.y, 0..100, "${placement.y}%") { y -> update(placement.copy(y = y)) } }
-        if (widget.type != WidgetType.TEXT) {
+        if (widget.type != WidgetType.TEXT && widget.type != WidgetType.MUSIC) {
             row { SliderRow(it, "Size", placement.size, 5..100, "${placement.size}%") { size -> update(placement.copy(size = size)) } }
         }
     }
@@ -904,7 +905,7 @@ private fun PlacementPage(store: SettingsStore, scene: Scene, widget: Widget) {
 }
 
 @Composable
-private fun WidgetPage(store: SettingsStore, widget: Widget, pop: () -> Unit) {
+private fun WidgetPage(store: SettingsStore, widget: Widget, engine: StreamEngine, pop: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val update = { changed: Widget -> store.update { s -> s.copy(widgets = s.widgets.map { if (it.id == widget.id) changed else it }) } }
@@ -955,6 +956,30 @@ private fun WidgetPage(store: SettingsStore, widget: Widget, pop: () -> Unit) {
             row { shapes ->
                 SliderRow(shapes, "Height", widget.browserHeight, 100..1080, "${widget.browserHeight}", 10) {
                     update(widget.copy(browserHeight = it))
+                }
+            }
+        }
+        WidgetType.MUSIC -> {
+            val allowed by engine.nowPlaying.allowed.collectAsStateWithLifecycle()
+            if (allowed) {
+                Group {
+                    row { SwitchRow(it, "Cover", widget.cover) { on -> update(widget.copy(cover = on)) } }
+                    row { SliderRow(it, "Text size", widget.textSize, 8..60, "${widget.textSize}") { size -> update(widget.copy(textSize = size)) } }
+                    row { SwitchRow(it, "Hide when paused", widget.hideWhenPaused) { on -> update(widget.copy(hideWhenPaused = on)) } }
+                }
+            } else {
+                Text(
+                    "The playing track comes from Android's media controls, which needs notification access.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+                Group {
+                    row { shapes ->
+                        NavRow(shapes, "Allow notification access") {
+                            context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }
+                    }
                 }
             }
         }

@@ -72,6 +72,8 @@ import app.mobdroid.settings.SettingsStore
 import app.mobdroid.settings.streamUrl
 import app.mobdroid.settings.StabilizationSetting
 import app.mobdroid.settings.StreamProfile
+import app.mobdroid.settings.WidgetType
+import app.mobdroid.widgets.NowPlaying
 import app.mobdroid.uvc.UvcCamera
 import app.mobdroid.uvc.UvcDevices
 import app.mobdroid.uvc.closest
@@ -195,6 +197,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private var ticker: Job? = null
     val recordings = RecordingStore(context)
     private val audioMix = AudioMix()
+    val nowPlaying = NowPlaying(context)
     private val _videoPlayer = MutableStateFlow<VideoPlayer?>(null)
     val videoPlayer: StateFlow<VideoPlayer?> = _videoPlayer.asStateFlow()
     private var videoInput: Triple<Int, Int, Int>? = null
@@ -284,6 +287,11 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 .drop(1)
                 .debounce(1000)
                 .collect { synchronized(this@StreamEngine) { syncObs() } }
+        }
+        scope.launch {
+            settings.settings.map { s -> s.widgets.any { it.type == WidgetType.MUSIC } }.distinctUntilChanged().drop(1).collect {
+                synchronized(this@StreamEngine) { syncNowPlaying() }
+            }
         }
         scope.launch {
             logins.logins.drop(1).collect { synchronized(this@StreamEngine) { if (previewActive || isLive) chat.start() } }
@@ -489,6 +497,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                     chat.start()
                 }
                 syncObs()
+                syncNowPlaying()
             }
         }
     }
@@ -521,6 +530,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         previewActive = false
         chat.stop()
         obs.stop()
+        nowPlaying.setEnabled(false)
         audioEncoder?.release()
         audioEncoder = null
         closeSources()
@@ -704,6 +714,10 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
 
     private fun connectedObs(wanted: ObsSettings): ObsState? =
         obs.state.value.takeIf { it.connected && wanted.enabled && obs.isFor(obsUrl(wanted.url), wanted.password) }
+
+    private fun syncNowPlaying() {
+        nowPlaying.setEnabled((previewActive || busy) && settings.settings.value.widgets.any { it.type == WidgetType.MUSIC })
+    }
 
     private fun syncObs() {
         val wanted = settings.settings.value.selectedProfile.obs
@@ -1059,7 +1073,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         }
         syncBrowsers()
         if (widgetRenderer == null) {
-            widgetRenderer = WidgetRenderer(File(context.filesDir, "widgets"), scope, settings.settings, chat.lines) { next ->
+            widgetRenderer = WidgetRenderer(File(context.filesDir, "widgets"), scope, settings.settings, chat.lines, nowPlaying.track) { next ->
                 synchronized(this) {
                     overlays = next
                     compositor?.setOverlays(next)

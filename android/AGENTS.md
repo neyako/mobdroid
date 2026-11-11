@@ -199,8 +199,8 @@ them, not code style.
   scene: while one is attached it replaces the camera of every scene (`sceneCamera`), and with several
   attached the one in use stays in use. A scene that plays videos (see Video scenes) keeps playing them.
 - `AppSettings.widgets` are global; a `SceneWidget` places one in a scene: on or off, a corner, X and Y
-  offsets from that corner in percent of the picture, and a size in percent of its width. Text widgets
-  ignore the size, their text size sets it. `Widget.previewOnly` keeps a widget out of the stream, the
+  offsets from that corner in percent of the picture, and a size in percent of its width. Text and Music
+  widgets ignore the size, their text size sets it. `Widget.previewOnly` keeps a widget out of the stream, the
   recording and snapshots.
 - `widgets/WidgetRenderer` turns the selected scene's widgets into `Overlay`s (a bitmap and a rectangle in
   picture coordinates, origin top left). Text fills in `{time}` and `{date}` and is redrawn each minute;
@@ -220,6 +220,20 @@ them, not code style.
   is not drawn before its first frame, and a page whose renderer process dies is closed (it would
   otherwise take the app down) and reopens at the next change. The page's sound plays on the phone and is not in the stream. Cleartext HTTP is allowed
   (`usesCleartextTraffic`) because overlay pages are often served from a computer on the local network.
+- The Music widget shows the track that is playing in any other app: the cover, the title in bold and the
+  artist under it, sized by its text size. `widgets/NowPlaying` reads it from the system's media sessions
+  (`MediaSessionManager.getActiveSessions`), which Android only allows for an app with notification access;
+  `MediaListener` is an empty `NotificationListenerService` that exists to be granted that, and no
+  notification is read. The widget's page opens the system screen for it until it is granted. `NowPlaying`
+  listens only while the preview runs or the app is live and a Music widget exists, on the main thread, and
+  registers again from scratch whenever that or the access setting changes (it observes the setting), so a
+  revoked and returned access is picked up. It takes the session that is playing, else the first one, never
+  the app's own (`currentSession`). Each session's metadata and play state are kept from its callbacks, so
+  a state update costs no call to the other app. The cover is bounded to 256 px and kept when the new
+  one has the same pixels, and a new `Track` is published only when something changed, so a player that
+  resends its state does not make the widget redraw. The text size is clamped to the slider's range and the
+  bitmap to the picture. "Hide when paused" (on by default) removes the
+  widget while nothing plays; "Cover" off leaves the text.
 - `VideoCompositor.setOverlays` draws them over the camera with premultiplied alpha blending: all of them
   on the preview, the ones that are not preview only on the encoder and recorder surfaces and in snapshots.
   They are never mirrored.
