@@ -1307,7 +1307,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         ) {
             showAlert(AlertLevel.WARNING, text(R.string.alert_low_bitrate), formatKbps(stats.sendBitrateBps))
         }
-        val linkStats = (session.publisher as? BondedPublisher)?.linkUsage().orEmpty()
+        val linkStats = if (liveProfile?.bonded == true) (session.publisher as? BondedPublisher)?.linkUsage().orEmpty() else emptyList()
         val shares = linkShares(linkBytes, linkStats)
         linkBytes = linkStats.associate { it.id to it.bytesSent }
         val live = LiveStats(
