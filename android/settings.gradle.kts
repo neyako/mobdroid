@@ -14,6 +14,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "mobdroid"
+rootProject.name = "opirl"
 
 include(":engine", ":app")

@@ -17,7 +17,7 @@
 
 #include "yuv.h"
 
-#define TAG "mobdroid-uvc"
+#define TAG "opirl-uvc"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
 
@@ -193,7 +193,7 @@ static void destroy(Camera *c) {
     free(c);
 }
 
-JNIEXPORT jlong JNICALL Java_app_mobdroid_uvc_UvcNative_open(JNIEnv *env, jobject thiz, jint fd) {
+JNIEXPORT jlong JNICALL Java_com_opirl_app_uvc_UvcNative_open(JNIEnv *env, jobject thiz, jint fd) {
     Camera *c = calloc(1, sizeof(Camera));
     if (c == NULL) {
         throwNew(env, "java/io/IOException", "Out of memory");
@@ -240,7 +240,7 @@ JNIEXPORT jlong JNICALL Java_app_mobdroid_uvc_UvcNative_open(JNIEnv *env, jobjec
     return (jlong)(uintptr_t)c;
 }
 
-JNIEXPORT jintArray JNICALL Java_app_mobdroid_uvc_UvcNative_frameDescriptors(JNIEnv *env, jobject thiz,
+JNIEXPORT jintArray JNICALL Java_com_opirl_app_uvc_UvcNative_frameDescriptors(JNIEnv *env, jobject thiz,
                                                                             jlong handle) {
     Camera *c = (Camera *)(uintptr_t)handle;
     jint *out = malloc(sizeof(jint) * MAX_DESCRIPTOR_INTS);
@@ -288,7 +288,7 @@ JNIEXPORT jintArray JNICALL Java_app_mobdroid_uvc_UvcNative_frameDescriptors(JNI
     return result;
 }
 
-JNIEXPORT void JNICALL Java_app_mobdroid_uvc_UvcNative_start(JNIEnv *env, jobject thiz, jlong handle,
+JNIEXPORT void JNICALL Java_com_opirl_app_uvc_UvcNative_start(JNIEnv *env, jobject thiz, jlong handle,
                                                              jboolean mjpeg, jint width, jint height, jint fps,
                                                              jobject surface) {
     Camera *c = (Camera *)(uintptr_t)handle;
@@ -350,16 +350,16 @@ JNIEXPORT void JNICALL Java_app_mobdroid_uvc_UvcNative_start(JNIEnv *env, jobjec
          ctrl.dwMaxPayloadTransferSize);
 }
 
-JNIEXPORT void JNICALL Java_app_mobdroid_uvc_UvcNative_stop(JNIEnv *env, jobject thiz, jlong handle) {
+JNIEXPORT void JNICALL Java_com_opirl_app_uvc_UvcNative_stop(JNIEnv *env, jobject thiz, jlong handle) {
     stopStream((Camera *)(uintptr_t)handle);
 }
 
-JNIEXPORT jlong JNICALL Java_app_mobdroid_uvc_UvcNative_idleMs(JNIEnv *env, jobject thiz, jlong handle) {
+JNIEXPORT jlong JNICALL Java_com_opirl_app_uvc_UvcNative_idleMs(JNIEnv *env, jobject thiz, jlong handle) {
     Camera *c = (Camera *)(uintptr_t)handle;
     return (nowNs() - atomic_load_explicit(&c->lastFrameNs, memory_order_relaxed)) / 1000000LL;
 }
 
-JNIEXPORT void JNICALL Java_app_mobdroid_uvc_UvcNative_close(JNIEnv *env, jobject thiz, jlong handle) {
+JNIEXPORT void JNICALL Java_com_opirl_app_uvc_UvcNative_close(JNIEnv *env, jobject thiz, jlong handle) {
     destroy((Camera *)(uintptr_t)handle);
     LOGI("closed");
 }

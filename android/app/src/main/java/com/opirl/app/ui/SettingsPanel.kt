@@ -1,0 +1,1365 @@
+package com.opirl.app.ui
+
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.provider.Settings
+import android.util.Size
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.rounded.Layers
+import androidx.compose.material.icons.rounded.Videocam
+import androidx.activity.result.PickVisualMediaRequest
+import com.opirl.app.camera.Facing
+import com.opirl.app.scenes.placement
+import com.opirl.app.scenes.withPlacement
+import com.opirl.app.scenes.withoutWidget
+import com.opirl.app.settings.Corner
+import com.opirl.app.settings.Scene
+import com.opirl.app.settings.SceneVideo
+import com.opirl.app.settings.SceneWidget
+import com.opirl.app.settings.Widget
+import com.opirl.app.settings.WidgetType
+import java.io.File
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import com.opirl.app.recording.Recording
+import com.opirl.app.settings.RECORDING_CODECS
+import com.opirl.app.settings.ObsSettings
+import com.opirl.app.settings.RecordingSettings
+import com.opirl.app.stream.formatBytes
+import com.opirl.app.stream.key
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ChatBubble
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.FileDownload
+import androidx.compose.material.icons.rounded.FileUpload
+import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.ImportExport
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.PhotoCamera
+import androidx.compose.material.icons.rounded.PictureInPictureAlt
+import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.Sensors
+import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialShapes
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.SegmentedListItem
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.opirl.app.BuildConfig
+import com.opirl.app.engine.media.VideoCodec
+import com.opirl.app.engine.net.LinkType
+import com.opirl.app.media.CodecCatalog
+import com.opirl.app.media.label
+import com.opirl.app.settings.AppSettings
+import com.opirl.app.settings.BONDING_NETWORKS
+import com.opirl.app.settings.ChatTextSize
+import com.opirl.app.settings.MicSource
+import com.opirl.app.settings.Platform
+import com.opirl.app.settings.QuickButtonId
+import com.opirl.app.settings.Resolution
+import com.opirl.app.settings.SettingsStore
+import com.opirl.app.settings.StabilizationSetting
+import com.opirl.app.settings.StatusItem
+import com.opirl.app.settings.StreamProfile
+import com.opirl.app.settings.allowedCodecs
+import com.opirl.app.settings.fpsChoices
+import com.opirl.app.stream.StreamEngine
+import com.opirl.app.stream.outputSize
+import java.util.UUID
+
+class SettingsPages {
+    internal val stack = mutableStateListOf<Route>(Route.Home)
+
+    fun reset() {
+        if (stack.size > 1) stack.removeRange(1, stack.size)
+    }
+
+    internal fun open(vararg routes: Route) {
+        reset()
+        stack += routes
+    }
+}
+
+internal sealed interface Route {
+    data object Home : Route
+
+    data object Streams : Route
+
+    data class Stream(val id: String) : Route
+
+    data class StreamUrl(val id: String) : Route
+
+    data class StreamVideo(val id: String) : Route
+
+    data class StreamAudio(val id: String) : Route
+
+    data class StreamTransport(val id: String) : Route
+
+    data class StreamChat(val id: String) : Route
+
+    data class StreamRecording(val id: String) : Route
+
+    data class StreamObs(val id: String) : Route
+
+    data object Recordings : Route
+
+    data object Scenes : Route
+
+    data class ScenePage(val id: String) : Route
+
+    data class SceneVideos(val id: String) : Route
+
+    data class Placement(val sceneId: String, val widgetId: String) : Route
+
+    data class WidgetPage(val id: String) : Route
+
+    data object Chat : Route
+
+    data object TwitchAccount : Route
+
+    data object KickAccount : Route
+
+    data object Display : Route
+
+    data object StatusItems : Route
+
+    data object QuickButtons : Route
+
+    data object Camera : Route
+
+    data object Audio : Route
+
+    data object BitratePresets : Route
+
+    data object About : Route
+
+    data object Licenses : Route
+
+    data class License(val name: String) : Route
+
+    data object ImportExport : Route
+}
+
+private fun AppSettings.profile(id: String) = profiles.firstOrNull { it.id == id }
+
+private fun transportName(profile: StreamProfile) = when {
+    profile.url.startsWith("srtla") -> "SRTLA"
+    profile.url.startsWith("srt") -> "SRT"
+    else -> "RTMP"
+}
+
+private fun title(route: Route, settings: AppSettings) = when (route) {
+    Route.Home -> "Settings"
+    Route.Streams -> "Streams"
+    is Route.Stream -> settings.profile(route.id)?.name.orEmpty()
+    is Route.StreamUrl -> "URL"
+    is Route.StreamVideo -> "Video"
+    is Route.StreamAudio -> "Audio"
+    is Route.StreamTransport -> settings.profile(route.id)?.let(::transportName).orEmpty()
+    is Route.StreamChat -> "Chat"
+    is Route.StreamRecording -> "Recording"
+    is Route.StreamObs -> "OBS remote"
+    Route.Recordings -> "Recordings"
+    Route.Scenes -> "Scenes"
+    is Route.ScenePage -> settings.scenes.firstOrNull { it.id == route.id }?.name.orEmpty()
+    is Route.SceneVideos -> "Videos"
+    is Route.Placement -> listOfNotNull(
+        settings.widgets.firstOrNull { it.id == route.widgetId }?.name,
+        settings.scenes.firstOrNull { it.id == route.sceneId }?.name,
+    ).joinToString(" in ")
+    is Route.WidgetPage -> settings.widgets.firstOrNull { it.id == route.id }?.name.orEmpty()
+    Route.Chat -> "Chat"
+    Route.TwitchAccount -> "Twitch account"
+    Route.KickAccount -> "Kick account"
+    Route.Display -> "Display"
+    Route.StatusItems -> "Status"
+    Route.QuickButtons -> "Quick buttons"
+    Route.Camera -> "Camera"
+    Route.Audio -> "Audio"
+    Route.BitratePresets -> "Bitrate presets"
+    Route.About -> "About"
+    Route.Licenses -> "Licenses"
+    is Route.License -> route.name
+    Route.ImportExport -> "Import and export settings"
+}
+
+private fun videoSummary(profile: StreamProfile): String {
+    val (w, h) = outputSize(profile)
+    val codec = CodecCatalog.choose(profile.codec, profile.allowedCodecs, w, h, profile.fps)
+    return "${profile.resolution.label}${profile.fps} ${codec.label} ${formatMbps(profile.bitrateKbps)} Mbps"
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun SettingsPanel(
+    store: SettingsStore,
+    engine: StreamEngine,
+    live: Boolean,
+    pages: SettingsPages,
+    onHide: () -> Unit,
+    onClose: () -> Unit,
+) {
+    val settings by store.settings.collectAsStateWithLifecycle()
+    val stack = pages.stack
+    val push: (Route) -> Unit = { stack += it }
+    val pop = { if (stack.size > 1) stack.removeAt(stack.lastIndex) }
+    BackHandler(stack.size > 1) { pop() }
+    val motion = MaterialTheme.motionScheme
+    val spatial = motion.defaultSpatialSpec<IntOffset>()
+    val fastSpatial = motion.fastSpatialSpec<IntOffset>()
+    val effects = motion.defaultEffectsSpec<Float>()
+    val fastEffects = motion.fastEffectsSpec<Float>()
+    Surface(
+        Modifier.fillMaxSize(),
+        color = Color.Black,
+    ) {
+        Column {
+            Row(Modifier.fillMaxWidth().height(PanelHeaderHeight).padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.width(70.dp)) {
+                    if (stack.size > 1) {
+                        IconButton({ pop() }, Modifier.size(44.dp)) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Navigate back", Modifier.size(20.dp))
+                        }
+                    }
+                }
+                Text(
+                    title(stack.last(), settings),
+                    style = PanelTitle,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                PanelButtons(hidden = false, onHide, onClose)
+            }
+            AnimatedContent(
+                targetState = stack.size to stack.last(),
+                transitionSpec = {
+                    val forward = targetState.first > initialState.first
+                    (slideInHorizontally(spatial) { if (forward) it / 4 else -it / 4 } + fadeIn(effects)) togetherWith
+                        (slideOutHorizontally(fastSpatial) { if (forward) -it / 4 else it / 4 } + fadeOut(fastEffects))
+                },
+                label = "settings",
+            ) { (_, route) ->
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .imePadding()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp)
+                        .padding(bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    when (route) {
+                        Route.Home -> Home(settings, push)
+                        Route.Streams -> Streams(store, settings, live, push)
+                        is Route.Stream -> settings.profile(route.id)?.let { StreamPage(store, settings, it, live, push, pop) }
+                        is Route.StreamUrl -> settings.profile(route.id)?.let { StreamUrl(store, it, editable(settings, it, live)) }
+                        is Route.StreamVideo -> settings.profile(route.id)?.let { StreamVideo(store, it, editable(settings, it, live)) }
+                        is Route.StreamAudio -> settings.profile(route.id)?.let { StreamAudio(store, it, editable(settings, it, live)) }
+                        is Route.StreamTransport -> settings.profile(route.id)?.let {
+                            StreamTransport(store, it, editable(settings, it, live))
+                        }
+                        is Route.StreamChat -> settings.profile(route.id)?.let { profile ->
+                            Group {
+                                row { shapes ->
+                                    TextRow(shapes, "Twitch channel", profile.twitchChannel) {
+                                        store.updateProfile(profile.copy(twitchChannel = it.trim()))
+                                    }
+                                }
+                                row { shapes ->
+                                    TextRow(shapes, "YouTube handle or video ID", profile.youtubeChannel) {
+                                        store.updateProfile(profile.copy(youtubeChannel = it.trim()))
+                                    }
+                                }
+                                row { shapes ->
+                                    TextRow(shapes, "Kick channel", profile.kickChannel) {
+                                        store.updateProfile(profile.copy(kickChannel = it.trim()))
+                                    }
+                                }
+                            }
+                        }
+                        is Route.StreamRecording -> settings.profile(route.id)?.let {
+                            StreamRecording(store, it, editable(settings, it, live))
+                        }
+                        is Route.StreamObs -> settings.profile(route.id)?.let { StreamObs(store, it) }
+                        Route.Recordings -> RecordingsPage(engine)
+                        Route.Scenes -> ScenesPage(store, settings, engine, push)
+                        is Route.ScenePage -> settings.scenes.firstOrNull { it.id == route.id }?.let {
+                            ScenePage(store, settings, it, engine, push, pop)
+                        }
+                        is Route.SceneVideos -> settings.scenes.firstOrNull { it.id == route.id }?.let { SceneVideosPage(store, it) }
+                        is Route.Placement -> {
+                            val scene = settings.scenes.firstOrNull { it.id == route.sceneId }
+                            val widget = settings.widgets.firstOrNull { it.id == route.widgetId }
+                            if (scene != null && widget != null) PlacementPage(store, scene, widget)
+                        }
+                        is Route.WidgetPage -> settings.widgets.firstOrNull { it.id == route.id }?.let {
+                            WidgetPage(store, it, engine, pop)
+                        }
+                        Route.TwitchAccount -> TwitchAccountPage(engine)
+                        Route.KickAccount -> KickAccountPage(engine)
+                        Route.Chat -> ChatPage(store, settings, engine, push)
+                        Route.Display -> Display(store, settings, push)
+                        Route.StatusItems -> Group {
+                            StatusItem.entries.forEach { item ->
+                                row { shapes ->
+                                    SwitchRow(shapes, item.label, item !in settings.hiddenStatusItems) { shown ->
+                                        store.update { it.copy(hiddenStatusItems = it.hiddenStatusItems.toggled(item, !shown)) }
+                                    }
+                                }
+                            }
+                        }
+                        Route.QuickButtons -> Group {
+                            QuickButtonId.entries.forEach { item ->
+                                row { shapes ->
+                                    SwitchRow(shapes, item.label, item !in settings.hiddenQuickButtons) { shown ->
+                                        store.update { it.copy(hiddenQuickButtons = it.hiddenQuickButtons.toggled(item, !shown)) }
+                                    }
+                                }
+                            }
+                        }
+                        Route.Camera -> Camera(store, settings)
+                        Route.Audio -> Group {
+                            row { shapes ->
+                                ChoiceRow(shapes, "Microphone", MicSource.entries, settings.mic, { it.label }, enabled = !live) { mic ->
+                                    store.update { it.copy(mic = mic) }
+                                }
+                            }
+                        }
+                        Route.BitratePresets -> BitratePresetsPage(store, settings)
+                        Route.About -> Group {
+                            row { ValueRow(it, "Version", BuildConfig.VERSION_NAME) }
+                            row { ValueRow(it, "Based on", "Moblin") }
+                            row { NavRow(it, "Licenses") { push(Route.Licenses) } }
+                        }
+                        Route.Licenses -> Group {
+                            LICENSES.forEach { item -> row { NavRow(it, item.name, item.license) { push(Route.License(item.name)) } } }
+                        }
+                        is Route.License -> LICENSES.firstOrNull { it.name == route.name }?.let { LicenseText(it.file) }
+                        Route.ImportExport -> ImportExport(store, live)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TwitchAccountPage(engine: StreamEngine) {
+    val logins by engine.logins.logins.collectAsStateWithLifecycle()
+    var loggingIn by remember { mutableStateOf(false) }
+    val account = logins.twitch
+    Group {
+        if (account != null) {
+            row { ValueRow(it, "Logged in as", account.login) }
+            row { shapes ->
+                ActionRow(shapes, "Log out", Icons.Rounded.Close, MaterialTheme.colorScheme.error) {
+                    engine.logins.update { it.copy(twitch = null) }
+                }
+            }
+        } else {
+            row { ActionRow(it, "Log in", Icons.Rounded.Add) { loggingIn = true } }
+        }
+    }
+    if (loggingIn) {
+        TwitchLoginDialog(
+            engine.http,
+            onAccount = { added ->
+                engine.logins.update { it.copy(twitch = added) }
+                loggingIn = false
+            },
+            onClose = { loggingIn = false },
+        )
+    }
+}
+
+@Composable
+private fun KickAccountPage(engine: StreamEngine) {
+    val logins by engine.logins.logins.collectAsStateWithLifecycle()
+    var loggingIn by remember { mutableStateOf(false) }
+    val account = logins.kick
+    Group {
+        if (account != null) {
+            row { ValueRow(it, "Logged in as", account.username) }
+            row { shapes ->
+                ActionRow(shapes, "Log out", Icons.Rounded.Close, MaterialTheme.colorScheme.error) {
+                    engine.logins.update { it.copy(kick = null) }
+                }
+            }
+        } else {
+            row { ActionRow(it, "Log in", Icons.Rounded.Add) { loggingIn = true } }
+        }
+    }
+    if (loggingIn) {
+        KickLoginDialog(
+            engine.http,
+            onAccount = { added ->
+                engine.logins.update { it.copy(kick = added) }
+                loggingIn = false
+            },
+            onClose = { loggingIn = false },
+        )
+    }
+}
+
+@Composable
+private fun ChatPage(store: SettingsStore, settings: AppSettings, engine: StreamEngine, push: (Route) -> Unit) {
+    val logins by engine.logins.logins.collectAsStateWithLifecycle()
+    Group {
+        row { shapes ->
+            NavRow(shapes, "Twitch account", logins.twitch?.login ?: "Not logged in") { push(Route.TwitchAccount) }
+        }
+        row { shapes ->
+            NavRow(shapes, "Kick account", logins.kick?.username ?: "Not logged in") { push(Route.KickAccount) }
+        }
+    }
+    Group {
+        row { shapes ->
+            ChoiceRow(shapes, "Text size", ChatTextSize.entries, settings.chatTextSize, { it.label }) { size ->
+                store.update { it.copy(chatTextSize = size) }
+            }
+        }
+        row { shapes ->
+            SwitchRow(shapes, "Show on the preview on small screens", settings.chatOnPreview) { on ->
+                store.update { it.copy(chatOnPreview = on) }
+            }
+        }
+        row { shapes ->
+            SwitchRow(shapes, "Text to speech", settings.chatSpeech) { on -> store.update { it.copy(chatSpeech = on) } }
+        }
+        if (settings.chatSpeech) {
+            row { shapes ->
+                SwitchRow(shapes, "Say who wrote the message", settings.chatSpeechNames) { on ->
+                    store.update { it.copy(chatSpeechNames = on) }
+                }
+            }
+        }
+    }
+}
+
+private fun <T> Set<T>.toggled(item: T, present: Boolean) = if (present) this + item else this - item
+
+private fun editable(settings: AppSettings, profile: StreamProfile, live: Boolean) =
+    !(live && profile.id == settings.selectedProfile.id)
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun Home(settings: AppSettings, push: (Route) -> Unit) {
+    Group {
+        row {
+            NavRow(
+                it,
+                "Streams",
+                settings.selectedProfile.name,
+                Badge(Icons.Rounded.Sensors, Color(0xFFFF8A7A), MaterialShapes.Cookie9Sided),
+            ) { push(Route.Streams) }
+        }
+        row {
+            NavRow(
+                it,
+                "Scenes",
+                settings.selectedScene?.name,
+                Badge(Icons.Rounded.Layers, Color(0xFFFFB86B), MaterialShapes.Slanted),
+            ) { push(Route.Scenes) }
+        }
+        row {
+            NavRow(it, "Chat", badge = Badge(Icons.Rounded.ChatBubble, Color(0xFFFF9ECF), MaterialShapes.Pill)) {
+                push(Route.Chat)
+            }
+        }
+        row {
+            NavRow(it, "Display", badge = Badge(Icons.Rounded.PictureInPictureAlt, Color(0xFF8AB4FF), MaterialShapes.Square)) {
+                push(Route.Display)
+            }
+        }
+        row {
+            NavRow(it, "Camera", badge = Badge(Icons.Rounded.PhotoCamera, Color(0xFF7DDB8B), MaterialShapes.Clover4Leaf)) {
+                push(Route.Camera)
+            }
+        }
+        row {
+            NavRow(it, "Audio", settings.mic.label, Badge(Icons.Rounded.GraphicEq, Color(0xFFFFC46B), MaterialShapes.Sunny)) {
+                push(Route.Audio)
+            }
+        }
+    }
+    Group {
+        row {
+            NavRow(it, "Recordings", badge = Badge(Icons.Rounded.Videocam, Color(0xFF6FE3C8), MaterialShapes.Gem)) {
+                push(Route.Recordings)
+            }
+        }
+        row {
+            NavRow(it, "Bitrate presets", badge = Badge(Icons.Rounded.Speed, Color(0xFFC3A6FF), MaterialShapes.Pentagon)) {
+                push(Route.BitratePresets)
+            }
+        }
+    }
+    Group {
+        row {
+            NavRow(it, "About", BuildConfig.VERSION_NAME, Badge(Icons.Rounded.Info, Color(0xFF9FDCE8), MaterialShapes.Circle)) {
+                push(Route.About)
+            }
+        }
+        row {
+            NavRow(
+                it,
+                "Import and export settings",
+                badge = Badge(Icons.Rounded.ImportExport, Color(0xFFD6D6D6), MaterialShapes.Arch),
+            ) { push(Route.ImportExport) }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun Streams(store: SettingsStore, settings: AppSettings, live: Boolean, push: (Route) -> Unit) {
+    Group {
+        settings.profiles.forEach { profile ->
+            row { shapes ->
+                NavRow(
+                    shapes,
+                    profile.name,
+                    leading = {
+                        RadioButton(
+                            profile.id == settings.selectedProfile.id,
+                            { store.update { it.copy(selectedProfileId = profile.id) } },
+                            enabled = !live,
+                        )
+                    },
+                    supporting = "${profile.platform.label}  ${videoSummary(profile)}",
+                ) { push(Route.Stream(profile.id)) }
+            }
+        }
+    }
+    Group {
+        row { shapes ->
+            ActionRow(shapes, "Create stream", Icons.Rounded.Add) {
+                val profile = StreamProfile(name = "Stream ${settings.profiles.size + 1}")
+                store.update { it.copy(profiles = it.profiles + profile) }
+                push(Route.Stream(profile.id))
+            }
+        }
+    }
+}
+
+@Composable
+private fun StreamPage(
+    store: SettingsStore,
+    settings: AppSettings,
+    profile: StreamProfile,
+    live: Boolean,
+    push: (Route) -> Unit,
+    pop: () -> Unit,
+) {
+    val editable = editable(settings, profile, live)
+    Group {
+        row { TextRow(it, "Name", profile.name) { name -> store.updateProfile(profile.copy(name = name)) } }
+    }
+    Group {
+        row { shapes ->
+            NavRow(shapes, "URL", profile.url.substringAfter("://").substringBefore('/').substringBefore('?').ifEmpty { "Not set" }) {
+                push(Route.StreamUrl(profile.id))
+            }
+        }
+        row { NavRow(it, "Video", videoSummary(profile)) { push(Route.StreamVideo(profile.id)) } }
+        row { NavRow(it, "Audio", "${profile.audioBitrateKbps} kbps") { push(Route.StreamAudio(profile.id)) } }
+        row { shapes ->
+            NavRow(shapes, transportName(profile), if (profile.adaptiveBitrate) "Adaptive bitrate" else "Fixed bitrate") {
+                push(Route.StreamTransport(profile.id))
+            }
+        }
+        row { shapes ->
+            val channels = listOf(profile.twitchChannel, profile.youtubeChannel, profile.kickChannel).count { it.isNotBlank() }
+            NavRow(shapes, "Chat", if (channels == 0) "Off" else "$channels on") { push(Route.StreamChat(profile.id)) }
+        }
+        row { NavRow(it, "Recording", recordingSummary(profile)) { push(Route.StreamRecording(profile.id)) } }
+        row { NavRow(it, "OBS remote", if (profile.obs.enabled) "On" else "Off") { push(Route.StreamObs(profile.id)) } }
+    }
+    Group {
+        row { shapes ->
+            ActionRow(shapes, "Duplicate", Icons.Rounded.ContentCopy) {
+                val copy = profile.copy(id = UUID.randomUUID().toString(), name = "${profile.name} copy")
+                store.update { it.copy(profiles = it.profiles + copy) }
+                pop()
+            }
+        }
+        if (settings.profiles.size > 1) {
+            row { shapes ->
+                ActionRow(shapes, "Delete", Icons.Rounded.Delete, MaterialTheme.colorScheme.error, editable) {
+                    pop()
+                    store.update { s -> s.copy(profiles = s.profiles.filterNot { it.id == profile.id }) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StreamUrl(store: SettingsStore, profile: StreamProfile, editable: Boolean) {
+    val update: (StreamProfile) -> Unit = store::updateProfile
+    Group {
+        row { shapes ->
+            ChoiceRow(shapes, "Platform", Platform.entries, profile.platform, { it.label }, enabled = editable) { platform ->
+                update(
+                    profile.copy(
+                        platform = platform,
+                        url = if (profile.url.isBlank() || Platform.entries.any { it.defaultUrl == profile.url }) {
+                            platform.defaultUrl
+                        } else {
+                            profile.url
+                        },
+                        codec = profile.codec?.takeIf { it in platform.codecs },
+                    ),
+                )
+            }
+        }
+        row { shapes ->
+            TextRow(shapes, "URL", profile.url, "rtmps://, srt://, srtla://", editable, KeyboardType.Uri) {
+                update(profile.copy(url = it.trim()))
+            }
+        }
+        if (profile.url.startsWith("rtmp")) {
+            row { shapes ->
+                TextRow(shapes, "Stream key", profile.streamKey, enabled = editable, keyboard = KeyboardType.Password) {
+                    update(profile.copy(streamKey = it.trim()))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StreamVideo(store: SettingsStore, profile: StreamProfile, editable: Boolean) {
+    val update: (StreamProfile) -> Unit = store::updateProfile
+    val (w, h) = outputSize(profile)
+    Group {
+        row { shapes ->
+            ChoiceRow(shapes, "Resolution", Resolution.entries.reversed(), profile.resolution, { it.label }, enabled = editable) {
+                update(profile.copy(resolution = it))
+            }
+        }
+        row { shapes ->
+            ChoiceRow(shapes, "Frame rate", fpsChoices, profile.fps, { "$it" }, enabled = editable) { update(profile.copy(fps = it)) }
+        }
+        row { shapes ->
+            ChoiceRow(
+                shapes,
+                "Codec",
+                listOf<VideoCodec?>(null) + profile.allowedCodecs.reversed(),
+                profile.codec,
+                { it?.label ?: "Auto ${CodecCatalog.choose(null, profile.allowedCodecs, w, h, profile.fps).label}" },
+                { it == null || CodecCatalog.available(it, w, h, profile.fps) },
+                editable,
+            ) { update(profile.copy(codec = it)) }
+        }
+    }
+    Group {
+        row { shapes ->
+            BitrateRow(shapes, "Bitrate", profile.bitrateKbps, 1000..20000, editable) { update(profile.copy(bitrateKbps = it)) }
+        }
+        row { shapes ->
+            ChoiceRow(shapes, "Key frame interval", listOf(1, 2, 3, 4, 5), profile.keyFrameIntervalSeconds, { "$it s" }, enabled = editable) {
+                update(profile.copy(keyFrameIntervalSeconds = it))
+            }
+        }
+    }
+}
+
+@Composable
+private fun StreamAudio(store: SettingsStore, profile: StreamProfile, editable: Boolean) {
+    Group {
+        row { shapes ->
+            ChoiceRow(shapes, "Bitrate", listOf(96, 128, 160, 192, 256), profile.audioBitrateKbps, { "$it kbps" }, enabled = editable) {
+                store.updateProfile(profile.copy(audioBitrateKbps = it))
+            }
+        }
+    }
+}
+
+private fun cameraLabel(engine: StreamEngine, scene: Scene): String =
+    if (scene.video) "Video" else engine.ui.value.cameras.firstOrNull { it.key == scene.cameraKey }?.label ?: "Default"
+
+@Composable
+private fun ScenesPage(store: SettingsStore, settings: AppSettings, engine: StreamEngine, push: (Route) -> Unit) {
+    Group {
+        settings.scenes.forEach { scene ->
+            row { shapes ->
+                val count = scene.widgets.count { it.enabled }
+                NavRow(shapes, scene.name, "${cameraLabel(engine, scene)}, $count ${if (count == 1) "widget" else "widgets"}") {
+                    push(Route.ScenePage(scene.id))
+                }
+            }
+        }
+        row { shapes ->
+            ActionRow(shapes, "Create scene", Icons.Rounded.Add) {
+                val scene = Scene(name = "Scene ${settings.scenes.size + 1}", cameraKey = settings.selectedScene?.cameraKey)
+                store.update { it.copy(scenes = it.scenes + scene) }
+                push(Route.ScenePage(scene.id))
+            }
+        }
+    }
+    Group {
+        settings.widgets.forEach { widget ->
+            row { shapes -> NavRow(shapes, widget.name, widget.type.label) { push(Route.WidgetPage(widget.id)) } }
+        }
+        row { shapes ->
+            ActionRow(shapes, "Create widget", Icons.Rounded.Add) {
+                val widget = Widget(name = "Widget ${settings.widgets.size + 1}")
+                store.update { it.copy(widgets = it.widgets + widget) }
+                push(Route.WidgetPage(widget.id))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScenePage(
+    store: SettingsStore,
+    settings: AppSettings,
+    scene: Scene,
+    engine: StreamEngine,
+    push: (Route) -> Unit,
+    pop: () -> Unit,
+) {
+    val ui by engine.ui.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val cameras = ui.cameras.filter { it.facing != Facing.EXTERNAL }
+    val update = { changed: Scene -> store.update { s -> s.copy(scenes = s.scenes.map { if (it.id == scene.id) changed else it }) } }
+    Group {
+        row { TextRow(it, "Name", scene.name) { name -> update(scene.copy(name = name)) } }
+        row { shapes ->
+            ChoiceRow(
+                shapes,
+                "Source",
+                cameras.map { it.key } + VIDEO_SOURCE,
+                if (scene.video) VIDEO_SOURCE else scene.cameraKey,
+                { key -> if (key == VIDEO_SOURCE) "Video" else cameras.firstOrNull { it.key == key }?.label.orEmpty() },
+            ) { update(if (it == VIDEO_SOURCE) scene.copy(video = true) else scene.copy(video = false, cameraKey = it)) }
+        }
+        if (scene.video) {
+            row { shapes ->
+                NavRow(shapes, "Videos", if (scene.videos.size == 1) "1 file" else "${scene.videos.size} files") {
+                    push(Route.SceneVideos(scene.id))
+                }
+            }
+        }
+    }
+    if (settings.widgets.isNotEmpty()) {
+        Group {
+            settings.widgets.forEach { widget ->
+                val placement = scene.placement(widget)
+                row { shapes ->
+                    SwitchNavRow(
+                        shapes,
+                        widget.name,
+                        placement.enabled,
+                        { on -> store.update { it.withPlacement(scene.id, placement.copy(enabled = on)) } },
+                    ) {
+                        store.update { it.withPlacement(scene.id, placement) }
+                        push(Route.Placement(scene.id, widget.id))
+                    }
+                }
+            }
+        }
+    }
+    Group {
+        row { shapes ->
+            ActionRow(shapes, "Duplicate", Icons.Rounded.ContentCopy) {
+                val copy = scene.copy(id = UUID.randomUUID().toString(), name = "${scene.name} copy")
+                store.update { it.copy(scenes = it.scenes + copy) }
+                pop()
+            }
+        }
+        if (settings.scenes.size > 1) {
+            row { shapes ->
+                ActionRow(shapes, "Delete", Icons.Rounded.Delete, MaterialTheme.colorScheme.error) {
+                    pop()
+                    store.update { s -> s.copy(scenes = s.scenes.filterNot { it.id == scene.id }) }
+                    releaseUnusedVideos(context, store, scene.videos)
+                }
+            }
+        }
+    }
+}
+
+private const val VIDEO_SOURCE = "video"
+
+private class LicenseItem(val name: String, val license: String, val file: String)
+
+private val LICENSES = listOf(
+    LicenseItem("Moblin", "MIT", "moblin.txt"),
+    LicenseItem("libusb", "LGPL 2.1", "libusb.txt"),
+    LicenseItem("libuvc", "BSD", "libuvc.txt"),
+    LicenseItem("libjpeg-turbo", "BSD, IJG, zlib", "libjpeg-turbo.txt"),
+    LicenseItem("OkHttp", "Apache 2.0", "apache-2.0.txt"),
+    LicenseItem("Okio", "Apache 2.0", "apache-2.0.txt"),
+    LicenseItem("Coil", "Apache 2.0", "apache-2.0.txt"),
+    LicenseItem("Kotlin and JetBrains libraries", "Apache 2.0", "apache-2.0.txt"),
+    LicenseItem("AndroidX and Compose", "Apache 2.0", "apache-2.0.txt"),
+    LicenseItem("Accompanist", "Apache 2.0", "apache-2.0.txt"),
+    LicenseItem("Guava", "Apache 2.0", "apache-2.0.txt"),
+    LicenseItem("JSpecify", "Apache 2.0", "apache-2.0.txt"),
+    LicenseItem("OBS logo", "GPL 2.0", "gpl-2.0.txt"),
+)
+
+@Composable
+private fun LicenseText(file: String) {
+    val context = LocalContext.current
+    val text by produceState("", file) {
+        value = withContext(Dispatchers.IO) {
+            runCatching { context.assets.open("licenses/$file").bufferedReader().use { it.readText() } }.getOrDefault("")
+        }
+    }
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 4.dp),
+    )
+}
+
+private fun releaseUnusedVideos(context: Context, store: SettingsStore, videos: List<SceneVideo>) {
+    val used = store.settings.value.scenes.flatMap { it.videos }.map { it.uri }.toSet()
+    videos.filter { it.uri !in used }.forEach { video ->
+        runCatching {
+            context.contentResolver.releasePersistableUriPermission(Uri.parse(video.uri), Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+    }
+}
+
+@Composable
+private fun SceneVideosPage(store: SettingsStore, scene: Scene) {
+    val context = LocalContext.current
+    val update = { changed: Scene -> store.update { s -> s.copy(scenes = s.scenes.map { if (it.id == scene.id) changed else it }) } }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        val added = uris.filter { uri -> scene.videos.none { it.uri == uri.toString() } }.map { uri ->
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            val name = runCatching {
+                context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                    if (it.moveToFirst()) it.getString(0) else null
+                }
+            }.getOrNull()
+            SceneVideo(uri.toString(), name ?: uri.lastPathSegment ?: "Video")
+        }
+        if (added.isNotEmpty()) store.update { s -> s.copy(scenes = s.scenes.map { if (it.id == scene.id) it.copy(videos = it.videos + added) else it }) }
+    }
+    Group {
+        scene.videos.forEach { video ->
+            row { shapes ->
+                RemovableRow(shapes, video.name, "", null) {
+                    store.update { s ->
+                        s.copy(scenes = s.scenes.map { if (it.id == scene.id) it.copy(videos = it.videos - video) else it })
+                    }
+                    releaseUnusedVideos(context, store, listOf(video))
+                }
+            }
+        }
+        row { ActionRow(it, "Add video", Icons.Rounded.Add) { pick.launch(arrayOf("video/*")) } }
+    }
+    Group {
+        row { shapes ->
+            SliderRow(shapes, "Video volume", scene.videoVolume, 0..100, "${scene.videoVolume}%") { update(scene.copy(videoVolume = it)) }
+        }
+        row { SwitchRow(it, "Mic while playing", scene.micWithVideo) { on -> update(scene.copy(micWithVideo = on)) } }
+    }
+}
+
+@Composable
+private fun PlacementPage(store: SettingsStore, scene: Scene, widget: Widget) {
+    val placement = scene.placement(widget)
+    val update = { changed: SceneWidget -> store.update { it.withPlacement(scene.id, changed) } }
+    Group {
+        row { shapes ->
+            ChoiceRow(shapes, "Corner", Corner.entries, placement.corner, { it.label }) { update(placement.copy(corner = it)) }
+        }
+        row { SliderRow(it, "X", placement.x, 0..100, "${placement.x}%") { x -> update(placement.copy(x = x)) } }
+        row { SliderRow(it, "Y", placement.y, 0..100, "${placement.y}%") { y -> update(placement.copy(y = y)) } }
+        if (widget.type != WidgetType.TEXT && widget.type != WidgetType.MUSIC) {
+            row { SliderRow(it, "Size", placement.size, 5..100, "${placement.size}%") { size -> update(placement.copy(size = size)) } }
+        }
+    }
+    Group {
+        row { SwitchRow(it, "Show in this scene", placement.enabled) { on -> update(placement.copy(enabled = on)) } }
+    }
+}
+
+@Composable
+private fun WidgetPage(store: SettingsStore, widget: Widget, engine: StreamEngine, pop: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val update = { changed: Widget -> store.update { s -> s.copy(widgets = s.widgets.map { if (it.id == widget.id) changed else it }) } }
+    val directory = File(context.filesDir, "widgets")
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) {
+            scope.launch(Dispatchers.IO) {
+                val name = "${widget.id}-${System.currentTimeMillis()}"
+                val copied = runCatching {
+                    directory.mkdirs()
+                    context.contentResolver.openInputStream(uri)!!.use { input ->
+                        File(directory, name).outputStream().use { input.copyTo(it) }
+                    }
+                }.isSuccess
+                if (copied) {
+                    widget.image?.let { File(directory, it).delete() }
+                    store.update { s -> s.copy(widgets = s.widgets.map { if (it.id == widget.id) it.copy(image = name) else it }) }
+                }
+            }
+        }
+    }
+    Group {
+        row { TextRow(it, "Name", widget.name) { name -> update(widget.copy(name = name)) } }
+        row { shapes ->
+            ChoiceRow(shapes, "Type", WidgetType.entries, widget.type, { it.label }) { update(widget.copy(type = it)) }
+        }
+    }
+    when (widget.type) {
+        WidgetType.TEXT -> Group {
+            row { TextRow(it, "Text", widget.text, "{time} and {date} are filled in") { text -> update(widget.copy(text = text)) } }
+            row { SliderRow(it, "Text size", widget.textSize, 8..60, "${widget.textSize}") { size -> update(widget.copy(textSize = size)) } }
+        }
+        WidgetType.IMAGE -> Group {
+            row { shapes ->
+                ActionRow(shapes, if (widget.image == null) "Choose image" else "Change image", Icons.Rounded.Add) {
+                    pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                }
+            }
+        }
+        WidgetType.CHAT -> Unit
+        WidgetType.BROWSER -> Group {
+            row { TextRow(it, "URL", widget.url, "https://", keyboard = KeyboardType.Uri) { url -> update(widget.copy(url = url.trim())) } }
+            row { shapes ->
+                SliderRow(shapes, "Width", widget.browserWidth, 200..1920, "${widget.browserWidth}", 10) {
+                    update(widget.copy(browserWidth = it))
+                }
+            }
+            row { shapes ->
+                SliderRow(shapes, "Height", widget.browserHeight, 100..1080, "${widget.browserHeight}", 10) {
+                    update(widget.copy(browserHeight = it))
+                }
+            }
+        }
+        WidgetType.MUSIC -> {
+            val allowed by engine.nowPlaying.allowed.collectAsStateWithLifecycle()
+            if (allowed) {
+                Group {
+                    row { SwitchRow(it, "Cover", widget.cover) { on -> update(widget.copy(cover = on)) } }
+                    row { SliderRow(it, "Text size", widget.textSize, 8..60, "${widget.textSize}") { size -> update(widget.copy(textSize = size)) } }
+                    row { SwitchRow(it, "Hide when paused", widget.hideWhenPaused) { on -> update(widget.copy(hideWhenPaused = on)) } }
+                }
+            } else {
+                Text(
+                    "The playing track comes from Android's media controls, which needs notification access.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+                Group {
+                    row { shapes ->
+                        NavRow(shapes, "Allow notification access") {
+                            context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Group {
+        row { shapes ->
+            ChoiceRow(shapes, "Show on", listOf(false, true), widget.previewOnly, { if (it) "Preview only" else "Stream and preview" }) {
+                update(widget.copy(previewOnly = it))
+            }
+        }
+    }
+    Group {
+        row { shapes ->
+            ActionRow(shapes, "Delete", Icons.Rounded.Delete, MaterialTheme.colorScheme.error) {
+                pop()
+                widget.image?.let { File(directory, it).delete() }
+                store.update { it.withoutWidget(widget.id) }
+            }
+        }
+    }
+}
+
+private fun recordingCodec(profile: StreamProfile): VideoCodec {
+    val (w, h) = outputSize(profile)
+    return CodecCatalog.choose(profile.recording.codec, RECORDING_CODECS, w, h, profile.fps)
+}
+
+private fun recordingSummary(profile: StreamProfile) = if (profile.recording.separate) {
+    "${recordingCodec(profile).label} ${formatMbps(profile.recording.bitrateKbps)} Mbps"
+} else {
+    "Same as stream"
+}
+
+@Composable
+private fun StreamRecording(store: SettingsStore, profile: StreamProfile, editable: Boolean) {
+    val recording = profile.recording
+    val update = { changed: RecordingSettings -> store.updateProfile(profile.copy(recording = changed)) }
+    val (w, h) = outputSize(profile)
+    Group {
+        row { shapes ->
+            ChoiceRow(
+                shapes,
+                "Quality",
+                listOf(false, true),
+                recording.separate,
+                { if (it) "Separate" else "Same as stream" },
+                enabled = editable,
+            ) { update(recording.copy(separate = it)) }
+        }
+        if (recording.separate) {
+            row { shapes ->
+                ChoiceRow(
+                    shapes,
+                    "Codec",
+                    listOf<VideoCodec?>(null) + RECORDING_CODECS.reversed(),
+                    recording.codec,
+                    { it?.label ?: "Auto ${recordingCodec(profile.copy(recording = recording.copy(codec = null))).label}" },
+                    { it == null || CodecCatalog.available(it, w, h, profile.fps) },
+                    editable,
+                ) { update(recording.copy(codec = it)) }
+            }
+            row { shapes ->
+                BitrateRow(shapes, "Bitrate", recording.bitrateKbps, 2000..60000, editable) { update(recording.copy(bitrateKbps = it)) }
+            }
+        }
+    }
+    Group {
+        row { shapes ->
+            SwitchRow(shapes, "Start when going live", recording.startWithStream, editable) {
+                update(recording.copy(startWithStream = it))
+            }
+        }
+        row { shapes ->
+            SwitchRow(shapes, "Stop when the stream ends", recording.stopWithStream, editable) {
+                update(recording.copy(stopWithStream = it))
+            }
+        }
+    }
+}
+
+@Composable
+private fun StreamObs(store: SettingsStore, profile: StreamProfile) {
+    val obs = profile.obs
+    val update = { changed: ObsSettings -> store.updateProfile(profile.copy(obs = changed)) }
+    Group {
+        row { SwitchRow(it, "Enabled", obs.enabled) { on -> update(obs.copy(enabled = on)) } }
+    }
+    Group {
+        row { shapes ->
+            TextRow(shapes, "URL", obs.url, "ws://192.168.1.20:4455", keyboard = KeyboardType.Uri) { update(obs.copy(url = it.trim())) }
+        }
+        row { shapes ->
+            TextRow(shapes, "Password", obs.password, keyboard = KeyboardType.Password) { update(obs.copy(password = it)) }
+        }
+    }
+    Group {
+        row { SwitchRow(it, "Start OBS stream on Go Live", obs.startStream) { on -> update(obs.copy(startStream = on)) } }
+        row { SwitchRow(it, "Stop OBS stream on End", obs.stopStream) { on -> update(obs.copy(stopStream = on)) } }
+        row { SwitchRow(it, "Start OBS recording on Go Live", obs.startRecording) { on -> update(obs.copy(startRecording = on)) } }
+        row { SwitchRow(it, "Stop OBS recording on End", obs.stopRecording) { on -> update(obs.copy(stopRecording = on)) } }
+    }
+}
+
+@Composable
+private fun RecordingThumbnail(uri: Uri) {
+    val context = LocalContext.current
+    val image by produceState<ImageBitmap?>(null, uri) {
+        value = withContext(Dispatchers.IO) {
+            runCatching { context.contentResolver.loadThumbnail(uri, Size(192, 108), null).asImageBitmap() }.getOrNull()
+        }
+    }
+    Box(Modifier.size(64.dp, 36.dp).clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest)) {
+        image?.let { Image(it, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun RecordingsPage(engine: StreamEngine) {
+    val recordings by engine.recordings.recordings.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var deleting by remember { mutableStateOf<Recording?>(null) }
+    LaunchedEffect(Unit) { withContext(Dispatchers.IO) { engine.recordings.refresh() } }
+    if (recordings.isEmpty()) {
+        Text("No recordings", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 12.dp))
+    } else {
+        Group {
+            recordings.forEach { recording ->
+                row { shapes ->
+                    SegmentedListItem(
+                        contentPadding = RowPadding,
+                        colors = rowColors(),
+                        shapes = shapes,
+                        onClick = {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW)
+                                        .setDataAndType(recording.uri, "video/mp4")
+                                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+                                )
+                            }
+                        },
+                        modifier = Modifier.heightIn(max = TwoLineRowHeight),
+                        verticalAlignment = Alignment.CenterVertically,
+                        leadingContent = { RecordingThumbnail(recording.uri) },
+                        supportingContent = {
+                            Text("${formatUptime(recording.durationMs / 1000)}  ${formatBytes(recording.bytes)}", maxLines = 1)
+                        },
+                        trailingContent = {
+                            IconButton({ deleting = recording }) { Icon(Icons.Rounded.Delete, "Delete ${recording.name}") }
+                        },
+                    ) { Text(recording.name, style = RowTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                }
+            }
+        }
+    }
+    Group { row { ValueRow(it, "Saved to", "Movies/opIRL") } }
+    deleting?.let { recording ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("Delete recording?") },
+            text = { Text(recording.name) },
+            confirmButton = {
+                TextButton({
+                    deleting = null
+                    scope.launch(Dispatchers.IO) { engine.recordings.delete(recording.uri) }
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton({ deleting = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+@Composable
+private fun StreamTransport(store: SettingsStore, profile: StreamProfile, editable: Boolean) {
+    val update: (StreamProfile) -> Unit = store::updateProfile
+    Group {
+        row { SwitchRow(it, "Adaptive bitrate", profile.adaptiveBitrate, editable) { on -> update(profile.copy(adaptiveBitrate = on)) } }
+        if (profile.adaptiveBitrate) {
+            row { shapes ->
+                BitrateRow(shapes, "Minimum bitrate", profile.minBitrateKbps, 250..profile.bitrateKbps, editable) {
+                    update(profile.copy(minBitrateKbps = it))
+                }
+            }
+        }
+    }
+    if (profile.url.startsWith("srt")) {
+        Group {
+            row { shapes ->
+                ChoiceRow(
+                    shapes,
+                    "Latency",
+                    (listOf(1000, 2000, 3000, 4000, 6000, 8000) + profile.srtLatencyMs).distinct().sorted(),
+                    profile.srtLatencyMs,
+                    { "${formatMbps(it)} s" },
+                    enabled = editable,
+                ) { update(profile.copy(srtLatencyMs = it)) }
+            }
+        }
+    }
+    if (profile.url.startsWith("srtla")) {
+        Group {
+            for ((type, label) in listOf(LinkType.WIFI to "Wi-Fi", LinkType.CELLULAR to "Cellular", LinkType.ETHERNET to "Ethernet")) {
+                row { shapes ->
+                    SwitchRow(shapes, "Bond over $label", type in profile.bondingNetworks, editable) { on ->
+                        val networks = profile.bondingNetworks.toggled(type, on)
+                        update(profile.copy(bondingNetworks = networks.ifEmpty { BONDING_NETWORKS }))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Display(store: SettingsStore, settings: AppSettings, push: (Route) -> Unit) {
+    Group {
+        row { SwitchRow(it, "Keep screen on", settings.keepScreenOn) { on -> store.update { s -> s.copy(keepScreenOn = on) } } }
+        row { SwitchRow(it, "Vibrate on alerts", settings.alertHaptics) { on -> store.update { s -> s.copy(alertHaptics = on) } } }
+    }
+    Group {
+        row { shapes ->
+            NavRow(shapes, "Status", "${StatusItem.entries.size - settings.hiddenStatusItems.size} shown") {
+                push(Route.StatusItems)
+            }
+        }
+        row { shapes ->
+            NavRow(shapes, "Quick buttons", "${QuickButtonId.entries.size - settings.hiddenQuickButtons.size} shown") {
+                push(Route.QuickButtons)
+            }
+        }
+    }
+}
+
+@Composable
+private fun Camera(store: SettingsStore, settings: AppSettings) {
+    Group {
+        row { shapes ->
+            ChoiceRow(
+                shapes,
+                "Stabilization",
+                StabilizationSetting.entries,
+                settings.stabilization,
+                {
+                    when (it) {
+                        StabilizationSetting.OFF -> "Off"
+                        StabilizationSetting.STANDARD -> "Standard"
+                        StabilizationSetting.PREVIEW -> "Enhanced"
+                    }
+                },
+            ) { value -> store.update { it.copy(stabilization = value) } }
+        }
+        row { shapes ->
+            SwitchRow(shapes, "Mirror front camera on stream", settings.mirrorFrontCameraOnStream) { on ->
+                store.update { it.copy(mirrorFrontCameraOnStream = on) }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun BitratePresetsPage(store: SettingsStore, settings: AppSettings) {
+    var kbps by remember { mutableIntStateOf(5000) }
+    Group {
+        row { BitrateRow(it, "New preset", kbps, 250..30000) { value -> kbps = value } }
+        row { shapes ->
+            ActionRow(shapes, "Add preset", Icons.Rounded.Add, enabled = kbps !in settings.bitratePresetsKbps) {
+                store.update { it.copy(bitratePresetsKbps = (it.bitratePresetsKbps + kbps).sorted()) }
+            }
+        }
+    }
+    Group {
+        settings.bitratePresetsKbps.forEach { preset ->
+            row { shapes ->
+                SegmentedListItem(
+                    contentPadding = RowPadding,
+                    colors = rowColors(),
+                    shapes = shapes,
+                    modifier = Modifier.heightIn(max = RowHeight),
+                    trailingContent = {
+                        IconButton(
+                            { store.update { it.copy(bitratePresetsKbps = it.bitratePresetsKbps - preset) } },
+                            enabled = settings.bitratePresetsKbps.size > 1,
+                        ) { Icon(Icons.Rounded.Delete, "Delete ${formatMbps(preset)} Mbps") }
+                    },
+                ) { Text("${formatMbps(preset)} Mbps", style = RowTitle) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImportExport(store: SettingsStore, live: Boolean) {
+    val context = LocalContext.current
+    var message by remember { mutableStateOf<String?>(null) }
+    var confirmReset by remember { mutableStateOf(false) }
+    val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) {
+            message = runCatching {
+                context.contentResolver.openOutputStream(uri)!!.use { it.write(store.exportJson().toByteArray()) }
+            }.fold({ "Settings exported" }, { "Export failed" })
+        }
+    }
+    val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val text = runCatching { context.contentResolver.openInputStream(uri)!!.use { it.readBytes().decodeToString() } }
+            message = if (text.isSuccess && store.importJson(text.getOrThrow())) "Settings imported" else "Not a settings file"
+        }
+    }
+    Group {
+        row { ActionRow(it, "Export settings", Icons.Rounded.FileUpload) { export.launch("opirl-settings.json") } }
+        row { ActionRow(it, "Import settings", Icons.Rounded.FileDownload, enabled = !live) { import.launch(arrayOf("*/*")) } }
+    }
+    Group {
+        row { shapes ->
+            ActionRow(shapes, "Reset settings", Icons.Rounded.RestartAlt, MaterialTheme.colorScheme.error, !live) {
+                confirmReset = true
+            }
+        }
+    }
+    message?.let { Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 12.dp)) }
+    if (confirmReset) {
+        AlertDialog(
+            onDismissRequest = { confirmReset = false },
+            title = { Text("Reset settings?") },
+            text = { Text("All streams and settings are removed.") },
+            confirmButton = {
+                TextButton({
+                    confirmReset = false
+                    store.update { AppSettings() }
+                    message = "Settings reset"
+                }) { Text("Reset", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton({ confirmReset = false }) { Text("Cancel") } },
+        )
+    }
+}

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(mobdroid_uvc C)
+project(opirl_uvc C)
 
 if(POLICY CMP0169)
   cmake_policy(SET CMP0169 OLD)
@@ -105,7 +105,7 @@ set_target_properties(turbojpeg PROPERTIES
 )
 add_dependencies(turbojpeg libjpeg_turbo_build)
 
-add_library(mobdroid_uvc SHARED uvc_jni.c)
-target_compile_options(mobdroid_uvc PRIVATE -O3 -Wall -Wextra -Wno-unused-parameter)
-target_link_libraries(mobdroid_uvc PRIVATE uvc usb turbojpeg android log)
-target_link_options(mobdroid_uvc PRIVATE -Wl,--exclude-libs,ALL -Wl,--gc-sections -Wl,-z,max-page-size=16384)
+add_library(opirl_uvc SHARED uvc_jni.c)
+target_compile_options(opirl_uvc PRIVATE -O3 -Wall -Wextra -Wno-unused-parameter)
+target_link_libraries(opirl_uvc PRIVATE uvc usb turbojpeg android log)
+target_link_options(opirl_uvc PRIVATE -Wl,--exclude-libs,ALL -Wl,--gc-sections -Wl,-z,max-page-size=16384)

@@ -1,4 +1,4 @@
-# Mobdroid (Android)
+# opIRL (Android)
 
 Native Android port of Moblin: Kotlin, Jetpack Compose with Material 3 Expressive, no cross-platform
 layers. The iOS sources in the repository root are the reference implementation; port behavior from
@@ -175,11 +175,11 @@ them, not code style.
   samples per frame and follows the timestamps only when they drift more than half a frame.
 - H264 and HEVC samples are length prefixed and keep their in-band parameter sets (`avc1`, `hvc1`); AV1
   samples drop temporal delimiters and get the sequence header on key frames (`av01`).
-- The app side (`recording/RecordingStore`): a recording is a MediaStore video in `Movies/Mobdroid`,
+- The app side (`recording/RecordingStore`): a recording is a MediaStore video in `Movies/opIRL`,
   pending while it is written and published when finished, so the gallery never shows a half written file.
   `recover()` runs once at start, finishes every pending recording an earlier run of the app left behind
   (older than this process, so never the one being written) and deletes the ones with nothing in them.
-  Snapshots go to `Pictures/Mobdroid`.
+  Snapshots go to `Pictures/opIRL`.
 - `StreamEngine` runs the encoders while it is live or recording (`busy`). `MediaTee` takes the output of
   the stream video encoder and the audio encoder to the stream session and the recorder, and replays the
   formats to a sink attached later. `RecordingSettings.separate` adds a second video encoder
@@ -380,7 +380,19 @@ Run from `android/`. `local.properties` (gitignored) needs `sdk.dir=$HOME/Androi
 ./gradlew :engine:test          # JVM unit and loopback tests
 ./gradlew :app:assembleDebug    # builds the APK (arm64-v8a)
 ./gradlew :app:installDebug     # installs on the connected device
+./gradlew :app:assembleRelease  # minified APK, signed with the release key when it is present
 ```
+
+The app is opIRL, application ID and package `com.opirl.app` (the engine is `com.opirl.app.engine`). The
+application ID is fixed once the app is on the Play Store, so never change it.
+
+The release build is signed with the keystore named in a properties file (`storeFile`, `storePassword`,
+`keyAlias`, `keyPassword`): the Gradle property `opirl.signing`, else the environment variable
+`OPIRL_SIGNING`, else `~/.config/opirl/signing.properties`. The keystore and that file are never in the
+repository. Without them (CI) the release build is signed with the debug key and must not be published.
+
+Settings, About, Licenses lists the bundled software with its licence text from `assets/licenses/`. Add a
+row and a text there with every new bundled library or asset.
 
 Engine tests that talk to a real server use the system `ffmpeg`/`ffprobe` as the receiver and are
 skipped when they are missing. The SRTLA end-to-end tests also need `SRTLA_REC` pointing at a built

@@ -1,5 +1,5 @@
-#ifndef MOBDROID_YUV_H
-#define MOBDROID_YUV_H
+#ifndef OPIRL_YUV_H
+#define OPIRL_YUV_H
 
 #include <stddef.h>
 #include <stdint.h>
