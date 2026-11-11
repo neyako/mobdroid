@@ -58,8 +58,8 @@ them, not code style.
   and what ffmpeg and OBS listen with, or `simple`, which needs an even port and uses port+1 for RTCP),
   `buffer` (ms, 1000), `cname`, `virt-dst-port` or `stream-id` (1968), `session-timeout` (ms, 2000) and
   `bandwidth` (kbps). Encryption, authentication and compression are refused. MPEG-TS in RTP payload type
-  33, seven TS packets per datagram. Main profile is GRE over UDP with keepalives; the sender offers GRE
-  version 2 and follows the receiver down to 1. Retransmission answers both NACK forms out of a buffer of
+  33, seven TS packets per datagram. Main profile is GRE over UDP with keepalives; the sender starts with
+  GRE version 1 and moves to 2 when the receiver uses it. Retransmission answers both NACK forms out of a buffer of
   `buffer` plus a margin, at most 20 times a packet and never above `bandwidth`, with the SSRC's low bit
   set as librist does. `onConnected` at the first RTCP from a peer; `onDisconnected` when no peer has
   answered within 5 s ("RIST handshake timed out") or every peer has been silent for the session timeout
