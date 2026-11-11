@@ -763,7 +763,8 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         videoEncoder?.setBitrate(targetBitrate)
         updateService()
         newSession.start()
-        extraOutputs.forEach { it.session.start() }
+        val extras = extraOutputs
+        extras.forEach { it.session.start() }
         liveStartedAt = System.nanoTime()
         lowBitrate = LowBitrateWatch()
         _ui.update { it.copy(error = null) }
@@ -785,7 +786,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 }
             }
             launch { newSession.lastError.collect { e -> if (e != null) _ui.update { it.copy(error = e) } } }
-            for (output in extraOutputs) launch { watchDestination(output) }
+            for (output in extras) launch { watchDestination(output) }
             if (profile.adaptiveBitrate) launch { runAdaptiveBitrate(newSession, profile) }
         }
         startTicker()

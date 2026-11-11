@@ -180,15 +180,51 @@ them, not code style.
   `recover()` runs once at start, finishes every pending recording an earlier run of the app left behind
   (older than this process, so never the one being written) and deletes the ones with nothing in them.
   Snapshots go to `Pictures/opIRL`.
-- `StreamEngine` runs the encoders while it is live or recording (`busy`). `MediaTee` takes the output of
-  the stream video encoder and the audio encoder to the stream session and the recorder, and replays the
-  formats to a sink attached later. `RecordingSettings.separate` adds a second video encoder
+- `StreamEngine` runs the encoders while it is live, recording or sending the preview stream (`busy`).
+  `MediaTee` takes the output of the stream video encoder and the audio encoder to its stream sinks (the
+  main session, every destination and the replay buffer, `setStreams`) and to the recorder, and replays
+  the formats to a sink attached later. `RecordingSettings.separate` adds a second video encoder
   (`VideoCompositor.setRecorder`) with its own codec and bitrate at the stream's resolution and frame rate;
   otherwise the recorder gets the stream's frames, at the profile's bitrate while not live. `syncEncoders`
   is the one place that creates and releases encoders for the current state. `fail` clears the recording
   and the session before it reconciles, so a teardown never tries to create an encoder. The stream profile cannot
   change while busy. Recording stops with an alert when free storage falls under 300 MiB.
 - The foreground service runs while live or recording; its notification title says which.
+
+## Outputs
+
+- `StreamEngine.syncSinks` is the one place that decides which sink gets what, and `syncEncoders` calls it
+  first. A `LiveOutput` is a `StreamSession` with its sinks: a WHIP output takes its video through a
+  `VideoOnlySink` and its sound through an `AudioOnlySink` on `opusTee`, since WebRTC carries Opus and
+  everything else AAC. `AudioEncoder.opusSink` is set while any output wants Opus; the encoder thread then
+  runs an Opus `MediaCodec` beside the AAC one on the same PCM.
+- Multi-streaming: `StreamProfile.destinations` (name, URL, key or token, on or off). Going live starts one
+  `StreamSession` per enabled destination next to the main one. They all get the stream encoder's frames, so
+  a destination must accept the stream's codec; adaptive bitrate follows the main session only, and a slow
+  destination drops frames in its own publisher. Each destination reconnects by itself, reports "Live at"
+  and "failed" alerts, and its state is in `StreamEngine.destinations` (shown on the Destinations page
+  while live). The profile, its destinations included, cannot change while busy.
+- Replay (`StreamProfile.replay`): while live with replay on, `engine/replay/ReplayBuffer` keeps the last
+  60 seconds plus the delay of what the stream encoder made (whole groups of pictures, at most 96 MiB, the
+  oldest dropped first; a new codec config starts over). It holds the frames the encoders already
+  allocated, nothing is copied. `saveReplay` waits the delay, takes a `ReplayClip` of the wanted length
+  starting at a key frame, writes it with `Mp4Recorder` into `Movies/opIRL` as "opIRL Replay ..." and
+  publishes it. `instantReplay` does the same and then plays the file over the stream: `replayPlaying`
+  takes the place of the scene's source in `openCamera`, a `VideoPlayer` that plays once (`loop = false`)
+  at the replay speed and reopens the scene's source when it ends. Sound plays only at normal speed. The
+  Replay quick button stops a running replay. The buffer is fed only while the stream encoder runs, so not
+  while recording with a separate encoder off air.
+- Preview stream (`StreamProfile.previewStream`, Moblin's name; `monitor` in the code because preview is
+  the on-screen picture here): a WHIP session of its own with a small H.264 encoder on the compositor's
+  third surface (`VideoCompositor.setMonitor`, drawn at the surface's size) and Opus sound. The Preview
+  quick button turns it on and off, on air or not, and it keeps the foreground service running.
+- Microphones: `media/MicCatalog` lists the connected inputs (phone, USB, wired headset, Bluetooth) from
+  `AudioManager` and follows `AudioDeviceCallback`. `AppSettings.micKey` is null for the system's choice,
+  a `Mic.key`, or a bare kind (`USB`) from settings saved before there was a list. `MicCatalog.open`
+  turns it into a `MicInput`; a Bluetooth one makes the device the communication device (SCO) and records
+  with `VOICE_COMMUNICATION`, everything else with `CAMCORDER`. A mic that is not connected falls back to
+  the system's choice and is taken again when it connects. `AudioEncoder.input` can change at any time: the
+  encoder thread reopens its `AudioRecord` and keeps the codecs, so the mic switches on air.
 
 ## Scenes and widgets
 
