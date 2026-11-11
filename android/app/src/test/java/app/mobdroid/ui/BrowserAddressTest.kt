@@ -25,11 +25,24 @@ class BrowserAddressTest {
         assertEquals("https://www.google.com/search?q=file%3A%2F%2F%2Fdata%2Fx", browserAddress("file:///data/x"))
         assertEquals("https://www.google.com/search?q=javascript%3Aalert%281%29", browserAddress("javascript:alert(1)"))
         assertEquals("https://www.google.com/search?q=about%3Acrash", browserAddress("about:crash"))
+        assertEquals("https://www.google.com/search?q=mailto%3Ame%40example.com", browserAddress("mailto:me@example.com"))
+        assertEquals(
+            "https://www.google.com/search?q=javascript%3Aalert%28document.domain%29",
+            browserAddress("javascript:alert(document.domain)"),
+        )
+        assertEquals("https://example.com:8080/a", browserAddress("example.com:8080/a"))
     }
 
     @Test
     fun theAddressFieldHidesTheSecureSchemeOnly() {
         assertEquals("www.twitch.tv/dashboard/", shortAddress("https://www.twitch.tv/dashboard/"))
         assertEquals("http://10.60.2.113:8000/", shortAddress("http://10.60.2.113:8000/"))
+    }
+
+    @Test
+    fun goOnAnUnchangedAddressLoadsTheSamePage() {
+        val url = "https://10.60.2.113:8000/?view=chat"
+        assertEquals(url, browserAddress(editedAddress(shortAddress(url), url)))
+        assertEquals("http://10.60.2.113:8000/", browserAddress(editedAddress("10.60.2.113:8000/", url)))
     }
 }

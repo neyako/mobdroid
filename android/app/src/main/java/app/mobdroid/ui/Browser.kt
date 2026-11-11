@@ -83,15 +83,16 @@ import app.mobdroid.settings.Bookmark
 import app.mobdroid.settings.SettingsStore
 import java.net.URLEncoder
 
-private val SCHEME = Regex("^([a-zA-Z][a-zA-Z0-9+.-]*)://")
+private val SCHEME = Regex("^([a-zA-Z][a-zA-Z0-9+.-]*):(?!\\d+([/?#]|$))")
 private val LOCAL_HOST = Regex("^(localhost|\\d{1,3}(\\.\\d{1,3}){3})(:\\d+)?([/?#].*)?$")
 
 fun browserAddress(text: String): String {
     val trimmed = text.trim()
     val scheme = SCHEME.find(trimmed)?.groupValues?.get(1)?.lowercase()
+    val web = (scheme == "http" || scheme == "https") && trimmed.startsWith("//", scheme.length + 1)
     return when {
         trimmed.isEmpty() || trimmed == "about:blank" -> "about:blank"
-        scheme == "http" || scheme == "https" -> trimmed
+        web -> trimmed
         scheme == null && LOCAL_HOST.matches(trimmed) -> "http://$trimmed"
         scheme == null && ' ' !in trimmed && '.' in trimmed -> "https://$trimmed"
         else -> "https://www.google.com/search?q=" + URLEncoder.encode(trimmed, "UTF-8")
@@ -99,6 +100,8 @@ fun browserAddress(text: String): String {
 }
 
 fun shortAddress(url: String): String = url.removePrefix("https://")
+
+fun editedAddress(text: String, url: String): String = if (text == shortAddress(url)) url else text
 
 class BrowserState {
     var webView by mutableStateOf<WebView?>(null)
@@ -254,7 +257,7 @@ private fun AddressField(url: String, modifier: Modifier, onGo: (String) -> Unit
         keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
         keyboardActions = KeyboardActions(
             onGo = {
-                if (value.text.isNotBlank()) onGo(value.text)
+                if (value.text.isNotBlank()) onGo(editedAddress(value.text, url))
                 focus.clearFocus()
             },
         ),
