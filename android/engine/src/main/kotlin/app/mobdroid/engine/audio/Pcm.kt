@@ -1,6 +1,7 @@
 package app.mobdroid.engine.audio
 
 import java.nio.ShortBuffer
+import kotlin.math.abs
 
 const val PCM_RATE = 48_000
 const val NO_AUDIO = Long.MIN_VALUE
@@ -50,6 +51,8 @@ class PcmRing(private val capacityFrames: Int, private val toleranceUs: Long = 8
     private var count = 0
     private var basePtsUs = 0L
     private var readFrames = 0L
+    private var boundary = -1
+    private var boundaryPtsUs = 0L
 
     private val headPtsUs: Long get() = basePtsUs + readFrames * 1_000_000 / PCM_RATE
 
@@ -57,6 +60,7 @@ class PcmRing(private val capacityFrames: Int, private val toleranceUs: Long = 8
     fun clear() {
         head = 0
         count = 0
+        boundary = -1
     }
 
     @Synchronized
@@ -67,9 +71,14 @@ class PcmRing(private val capacityFrames: Int, private val toleranceUs: Long = 8
         if (count == 0) {
             basePtsUs = ptsUs
             readFrames = 0
+            boundary = -1
+        } else if (boundary < 0 && abs(ptsUs - headPtsUs - count * 1_000_000L / PCM_RATE) > 20_000) {
+            boundary = count
+            boundaryPtsUs = ptsUs
         }
         val skipped = maxOf(frames - capacityFrames, 0)
         drop(maxOf(count + frames - skipped - capacityFrames, 0))
+        consumed(skipped)
         var tail = (head + count) % capacityFrames
         for (frame in skipped until frames) {
             data[tail * 2] = samples[frame * 2]
@@ -84,8 +93,11 @@ class PcmRing(private val capacityFrames: Int, private val toleranceUs: Long = 8
         if (count == 0) return NO_AUDIO
         val deviationUs = headPtsUs - positionUs
         if (deviationUs > toleranceUs) return NO_AUDIO
-        if (deviationUs < -toleranceUs) drop(minOf(count.toLong(), -deviationUs * PCM_RATE / 1_000_000).toInt())
-        val frames = minOf(pcm.size / 4, count)
+        if (deviationUs < -toleranceUs) {
+            drop(minOf(count.toLong(), -deviationUs * PCM_RATE / 1_000_000).toInt())
+            if (count == 0 || headPtsUs - positionUs > toleranceUs) return NO_AUDIO
+        }
+        val frames = minOf(pcm.size / 4, count, if (boundary > 0) boundary else count)
         val gain = (volume * 256).toInt()
         for (frame in 0 until frames) {
             for (channel in 0..1) {
@@ -98,13 +110,24 @@ class PcmRing(private val capacityFrames: Int, private val toleranceUs: Long = 8
             head = (head + 1) % capacityFrames
         }
         count -= frames
-        readFrames += frames
+        consumed(frames)
         return if (frames > 0 && deviationUs >= -toleranceUs) deviationUs else NO_AUDIO
     }
 
     private fun drop(frames: Int) {
         head = (head + frames) % capacityFrames
         count -= frames
+        consumed(frames)
+    }
+
+    private fun consumed(frames: Int) {
         readFrames += frames
+        if (boundary < 0) return
+        boundary -= frames
+        if (boundary <= 0) {
+            basePtsUs = boundaryPtsUs
+            readFrames = -boundary.toLong()
+            boundary = -1
+        }
     }
 }

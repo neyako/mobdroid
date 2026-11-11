@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -775,6 +776,7 @@ private fun ScenePage(
     pop: () -> Unit,
 ) {
     val ui by engine.ui.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val cameras = ui.cameras.filter { it.facing != Facing.EXTERNAL }
     val update = { changed: Scene -> store.update { s -> s.copy(scenes = s.scenes.map { if (it.id == scene.id) changed else it }) } }
     Group {
@@ -827,6 +829,7 @@ private fun ScenePage(
                 ActionRow(shapes, "Delete", Icons.Rounded.Delete, MaterialTheme.colorScheme.error) {
                     pop()
                     store.update { s -> s.copy(scenes = s.scenes.filterNot { it.id == scene.id }) }
+                    releaseUnusedVideos(context, store, scene.videos)
                 }
             }
         }
@@ -834,6 +837,15 @@ private fun ScenePage(
 }
 
 private const val VIDEO_SOURCE = "video"
+
+private fun releaseUnusedVideos(context: Context, store: SettingsStore, videos: List<SceneVideo>) {
+    val used = store.settings.value.scenes.flatMap { it.videos }.map { it.uri }.toSet()
+    videos.filter { it.uri !in used }.forEach { video ->
+        runCatching {
+            context.contentResolver.releasePersistableUriPermission(Uri.parse(video.uri), Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+    }
+}
 
 @Composable
 private fun SceneVideosPage(store: SettingsStore, scene: Scene) {
@@ -858,11 +870,7 @@ private fun SceneVideosPage(store: SettingsStore, scene: Scene) {
                     store.update { s ->
                         s.copy(scenes = s.scenes.map { if (it.id == scene.id) it.copy(videos = it.videos - video) else it })
                     }
-                    if (store.settings.value.scenes.none { other -> other.videos.any { it.uri == video.uri } }) {
-                        runCatching {
-                            context.contentResolver.releasePersistableUriPermission(Uri.parse(video.uri), Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }
-                    }
+                    releaseUnusedVideos(context, store, listOf(video))
                 }
             }
         }

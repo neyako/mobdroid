@@ -83,6 +83,30 @@ class PcmTest {
     }
 
     @Test
+    fun audioAfterATimestampGapPlaysAtItsOwnTime() {
+        val ring = PcmRing(48_000)
+        ring.write(ShortArray(9600) { 1 }, 4800, 0)
+        ring.write(ShortArray(9600) { 2 }, 4800, 1_000_000)
+        val pcm = ByteArray(4800 * 4 + 400)
+        assertEquals(0, ring.mixInto(pcm, 0, 1f))
+        assertEquals(listOf<Short>(1, 0), listOf(samples(pcm)[9599], samples(pcm)[9600]))
+        assertEquals(NO_AUDIO, ring.mixInto(ByteArray(4), 100_000, 1f))
+        val later = ByteArray(4)
+        assertEquals(0, ring.mixInto(later, 1_000_000, 1f))
+        assertEquals(2, samples(later)[0].toInt())
+    }
+
+    @Test
+    fun aWriteLargerThanTheRingKeepsItsEndAtTheRightTime() {
+        val ring = PcmRing(48_000)
+        ring.write(ShortArray(192_000) { (it / 2 / 480).toShort() }, 96_000, 0)
+        val pcm = ByteArray(4)
+        assertEquals(NO_AUDIO, ring.mixInto(pcm, 0, 1f))
+        assertEquals(0, ring.mixInto(pcm, 1_000_000, 1f))
+        assertEquals(100, samples(pcm)[0].toInt())
+    }
+
+    @Test
     fun aFullRingDropsTheOldestAudio() {
         val ring = PcmRing(4)
         ring.write(shortArrayOf(1, 1, 2, 2, 3, 3), 3, 0)

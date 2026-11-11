@@ -109,10 +109,14 @@ class VideoPlayer(
         commands += { skip = -1 }
     }
 
-    fun release() {
+    fun release(): Boolean {
         running = false
+        thread.interrupt()
         thread.join(1000)
+        return !thread.isAlive
     }
+
+    fun awaitStopped() = thread.join()
 
     private fun positionUs(): Long = if (clockRunning) baseUs + slewUs + (System.nanoTime() - startNs) / 1000 else baseUs
 
@@ -136,8 +140,9 @@ class VideoPlayer(
             val step = try {
                 play(file, index).also { failures = 0 }
             } catch (e: Exception) {
+                if (!running) break
                 Log.e(TAG, "Cannot play ${file.name}", e)
-                if (running) onError("Cannot play ${file.name}")
+                onError("Cannot play ${file.name}")
                 failures++
                 pause(if (failures >= files.size) 3000 else 300)
                 1
@@ -145,13 +150,18 @@ class VideoPlayer(
             index = (index + step + files.size) % files.size
         }
         clockRunning = false
+        surface.release()
     }
 
     private fun pause(ms: Long) {
         val until = System.nanoTime() + ms * 1_000_000
         while (running && System.nanoTime() < until) {
             onIdle()
-            Thread.sleep(50)
+            try {
+                Thread.sleep(50)
+            } catch (e: InterruptedException) {
+                return
+            }
         }
     }
 
@@ -276,15 +286,14 @@ class VideoPlayer(
                     val output = videoCodec.dequeueOutputBuffer(info, 0)
                     if (output >= 0) {
                         worked = true
-                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
-                            videoCodec.releaseOutputBuffer(output, false)
-                            videoDone = true
-                        } else if (info.presentationTimeUs < seekTargetUs) {
+                        val last = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
+                        if ((last && info.size == 0) || info.presentationTimeUs < seekTargetUs) {
                             videoCodec.releaseOutputBuffer(output, false)
                         } else {
                             pendingIndex = output
                             pendingPtsUs = info.presentationTimeUs
                         }
+                        videoDone = last
                     }
                 }
                 val now = System.nanoTime()
@@ -325,9 +334,8 @@ class VideoPlayer(
                     } else if (output >= 0) {
                         worked = true
                         val active = converter
-                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
-                            audioDone = true
-                        } else if (info.size > 0 && active != null && info.presentationTimeUs + 50_000 >= seekTargetUs) {
+                        audioDone = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
+                        if (info.size > 0 && active != null && info.presentationTimeUs + 50_000 >= seekTargetUs) {
                             val buffer = audioCodec.getOutputBuffer(output)!!
                             buffer.position(info.offset).limit(info.offset + info.size)
                             val frames = info.size / 2 / channels

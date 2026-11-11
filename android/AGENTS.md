@@ -228,7 +228,11 @@ them, not code style.
 
 - A scene with `video` on and at least one file in `videos` (`Scene.playsVideo`) shows those files in
   place of the camera: `StreamEngine.openCamera` closes the camera and starts a `media/VideoPlayer`, which
-  feeds the compositor's input surface like a camera does. Leaving the scene or the preview releases it.
+  feeds the compositor's input surface like a camera does. Leaving the scene or the preview releases it:
+  `release()` interrupts the player thread and waits up to a second for it; the thread itself releases the
+  decoders and then the surface. If it has not stopped by then (a stalled file read), the engine opens the
+  new source anyway and opens it once more when the thread has finished, since the old decoder may still
+  have held the surface.
   `openCamera` keeps a running player when called again for the same scene and file list, so a USB camera
   or a settings change does not restart the video; a changed list restarts it.
 - `VideoPlayer` is one thread that demuxes and decodes with two `MediaExtractor`s and `MediaCodec`s, no
@@ -242,7 +246,9 @@ them, not code style.
 - Rotation metadata is applied by the decoder; the engine passes the size and rotation to
   `VideoCompositor.setInput`, which fills the picture and crops the rest, as for a camera.
 - Sound: the audio track is decoded, resampled to 48 kHz stereo (`engine/audio/PcmConverter`, linear) and
-  written with its time to a one second `PcmRing`, kept 300 ms ahead of the clock. `AudioEncoder` hands
+  written with its time to a one second `PcmRing`, kept 300 ms ahead of the clock. The ring keeps one
+  timestamp gap (audio written more than 20 ms away from where the buffered audio ends starts a new
+  segment at its own time), and a write larger than the ring keeps its end at the right time. `AudioEncoder` hands
   every microphone buffer to `AudioMix`, which mutes the mic if the mic button is on or the scene's "Mic
   while playing" is off, then adds the video's sound at the scene's volume. So the sound is in the stream
   and the recording and is not played on the phone. The phone's audio clock and its system clock differ
@@ -251,7 +257,8 @@ them, not code style.
 - The strip over the preview (`VideoStrip`, in place of the zoom stops) has previous, play or pause, next
   and a seek bar. A seek goes to the previous key frame and decodes without showing up to the target.
 - Videos are added with the system file picker and played from where they are; the app keeps a persisted
-  read permission for each and releases it when no scene uses the file any more.
+  read permission for each and releases it when no scene uses the file any more (a file removed from a
+  list, a scene deleted).
 
 ## OBS remote
 

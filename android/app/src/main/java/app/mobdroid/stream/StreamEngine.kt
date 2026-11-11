@@ -197,7 +197,6 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private val audioMix = AudioMix()
     private val _videoPlayer = MutableStateFlow<VideoPlayer?>(null)
     val videoPlayer: StateFlow<VideoPlayer?> = _videoPlayer.asStateFlow()
-    private var videoSurface: Surface? = null
     private var videoInput: Triple<Int, Int, Int>? = null
     private var playingVideo: Pair<String, List<SceneVideo>>? = null
     private val _recording = MutableStateFlow<RecordingStats?>(null)
@@ -1091,10 +1090,19 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         _videoPlayer.value?.let { player ->
             _videoPlayer.value = null
             audioMix.source = null
-            player.release()
+            if (!player.release()) {
+                val generation = cameraGeneration
+                ioScope.launch {
+                    player.awaitStopped()
+                    synchronized(this@StreamEngine) {
+                        if (generation == cameraGeneration && previewActive) {
+                            playingVideo = null
+                            openCamera()
+                        }
+                    }
+                }
+            }
         }
-        videoSurface?.release()
-        videoSurface = null
         videoInput = null
         playingVideo = null
         camera.close()
@@ -1112,11 +1120,10 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         val generation = cameraGeneration
         cameraFps = 0
         compositor.setFrameRate((liveProfile ?: settings.settings.value.selectedProfile).fps)
-        val surface = compositor.newInputSurface().also { videoSurface = it }
         val player = VideoPlayer(
             context,
             scene.videos.map { VideoFile(Uri.parse(it.uri), it.name) },
-            surface,
+            compositor.newInputSurface(),
             { width, height, rotation ->
                 scope.launch {
                     synchronized(this@StreamEngine) {
