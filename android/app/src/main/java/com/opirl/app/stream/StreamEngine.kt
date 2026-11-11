@@ -35,8 +35,10 @@ import com.opirl.app.engine.abr.ADAPTIVE_BITRATE_UPDATE_INTERVAL_MS
 import com.opirl.app.engine.abr.AdaptiveBitrate
 import com.opirl.app.engine.abr.BelaboxAdaptiveBitrate
 import com.opirl.app.engine.abr.QueueAdaptiveBitrate
+import com.opirl.app.engine.abr.RistAdaptiveBitrate
 import com.opirl.app.engine.abr.TransportBitrateMeter
 import com.opirl.app.engine.abr.toStreamStats
+import com.opirl.app.engine.rist.RistPublisher
 import com.opirl.app.engine.rtmp.RtmpPublisher
 import com.opirl.app.engine.srt.SrtPublisher
 import com.opirl.app.settings.allowedCodecs
@@ -1109,6 +1111,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         Transport.RTMP -> RtmpPublisher(url, key.trim(), listener)
         Transport.SRTLA -> SrtPublisher(url, listener, links)
         Transport.SRT -> SrtPublisher(url, listener)
+        Transport.RIST -> RistPublisher(url, listener, links.takeIf { bonded })
         else -> throw IllegalArgumentException("Unsupported URL: $url")
     }
 
@@ -1337,10 +1340,10 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             val min = minOf(profile.minBitrateKbps * 1000L, cap)
             if (owner !== publisher) {
                 owner = publisher
-                abr = if (publisher is SrtPublisher) {
-                    BelaboxAdaptiveBitrate(cap, min)
-                } else {
-                    QueueAdaptiveBitrate(cap, min)
+                abr = when (publisher) {
+                    is SrtPublisher -> BelaboxAdaptiveBitrate(cap, min)
+                    is RistPublisher -> RistAdaptiveBitrate(cap, min)
+                    else -> QueueAdaptiveBitrate(cap, min)
                 }
                 max = cap
             } else if (cap != max) {
