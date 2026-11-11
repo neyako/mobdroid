@@ -18,6 +18,11 @@ them, not code style.
   - `audio/` — PCM helpers for the video player: the resampler and the timed ring buffer.
   - `srt/` — SRT caller, a port of Moblin's own `SrtSender.swift`. `srtla/` — SRTLA bonding client,
     a port of `Moblin/Media/Srtla/Client`. `abr/` — adaptive bitrate (Belabox port).
+  - `rist/` — RIST sender (Simple and Main profile, bonding). Moblin uses librist; this is the protocol
+    written in Kotlin.
+  - `whip/` — WHIP publisher: a send-only WebRTC stack (ICE, DTLS-SRTP, RTP and RTCP). Moblin uses
+    libdatachannel. DTLS comes from BouncyCastle's lightweight API, the only dependency it adds.
+  - `replay/` — the replay buffer.
 - `app/` — the Android app: camera sources, GL compositor, MediaCodec encoders, the foreground
   streaming service and the Compose UI. `src/main/cpp/` holds the native UVC driver
   (libusb + libuvc + libjpeg-turbo).
@@ -49,14 +54,47 @@ them, not code style.
   (bonded over `links`). No encryption: a passphrase is rejected. Frames before `onConnected` are
   dropped, so the session requests a key frame on connect. `NetworkLink.createDatagramSocket()` must
   return an unconnected socket.
-- Both: `stop()` never calls `onDisconnected`; any other end calls it exactly once, on an internal
+- `RistPublisher(url, listener, links)`: `rist://host:port` with librist's `profile` (`main`, the default
+  and what ffmpeg and OBS listen with, or `simple`, which needs an even port and uses port+1 for RTCP),
+  `buffer` (ms, 1000), `cname`, `virt-dst-port` or `stream-id` (1968), `session-timeout` (ms, 2000) and
+  `bandwidth` (kbps). Encryption, authentication and compression are refused. MPEG-TS in RTP payload type
+  33, seven TS packets per datagram. Main profile is GRE over UDP with keepalives; the sender offers GRE
+  version 2 and follows the receiver down to 1. Retransmission answers both NACK forms out of a buffer of
+  `buffer` plus a margin, at most 20 times a packet and never above `bandwidth`, with the SSRC's low bit
+  set as librist does. `onConnected` at the first RTCP from a peer; `onDisconnected` when no peer has
+  answered within 5 s ("RIST handshake timed out") or every peer has been silent for the session timeout
+  ("RIST receiver stopped answering"). With `links` there is one peer per `NetworkLink`, following the
+  flow; media is shared out by weight (librist's weighted load balancing) and each weight follows the
+  peer's round trip time through `RistAdaptiveBitrate`, Moblin's `updateConnectionsWeights`. A peer that
+  has been silent for 300 ms gets no media while another one answers. `stats()`: `rttMs` is the best
+  peer's, `lostPercent` the larger of the receiver's reports and retransmit requests per packet sent.
+- `WhipPublisher(url, headers, listener, http, requestKeyFrame)`: `whip://` is HTTP and `whips://` HTTPS
+  (Moblin's rule), plain `http(s)://` works too. The app sends the stream's token as
+  `Authorization: Bearer`. It waits up to 2 s for `setVideoFormat` so the offer names H.264 or HEVC (AV1
+  fails), gathers host candidates on one UDP socket, POSTs the offer (non-trickle, `actpass`) and takes
+  the answer and the `Location` header as the session, which `stop()` deletes. Then ICE as the
+  controlling agent (works with ICE-lite and with full agents, no TURN and no STUN server), DTLS 1.2 in
+  whichever role the answer picks with the answer's fingerprint checked, and SRTP (AES-CM-HMAC-SHA1-80
+  or AES-GCM). Video is packetized per RFC 6184 or 7798 with the parameter sets on every key frame; audio
+  must be Opus (`AudioFormat.codec`), anything else is not sent. One clock gives both tracks their RTP
+  times. It answers NACKs out of a history (8192 video packets, 512 audio; RTX when the answer has it),
+  turns PLI and FIR into `requestKeyFrame` at most every 500 ms, and reads the round trip time and loss
+  from the receiver reports into `stats()`. `onConnected` once media can flow (it asks for a key frame);
+  everything else ends in one `onDisconnected`: an HTTP status, "WHIP connection timed out" after 10 s,
+  "Consent lost" when the server stops answering ICE checks for 10 s, a DTLS alert, an RTCP BYE. The send
+  queue holds one second or 4 MiB and drops video up to the next key frame.
+- All of them: `stop()` never calls `onDisconnected`; any other end calls it exactly once, on an internal
   thread. `stop()` blocks up to about 2 s.
 - AV1 is offered only over RTMP. FFmpeg 7.1 cannot decode AV1 in MPEG-TS, so `StreamProfile.allowedCodecs`
-  drops it for `srt`/`srtla` URLs. Codec choice is `CodecCatalog.choose`: the profile's codec if the
+  drops it for `srt`/`srtla`/`rist` URLs, and for `whip` because the publisher does not packetize it.
+  `transportOf(url)` is the one place that reads the scheme. Codec choice is `CodecCatalog.choose`: the profile's codec if the
   phone has a hardware encoder for it, else the first hardware codec in the platform's priority list
   (Twitch, Kick, Facebook: H.264 only; YouTube and Custom: AV1, HEVC, H.264). Software encoders are
   never used.
-- ABR: `BelaboxAdaptiveBitrate` for SRT, `QueueAdaptiveBitrate` for RTMP, ticked every
+- ABR: `BelaboxAdaptiveBitrate` for SRT, `QueueAdaptiveBitrate` for RTMP, `RistAdaptiveBitrate` for RIST
+  (Moblin's RIST experiment: the best peer's round trip time with a constant ten packets in flight) and
+  `LossAdaptiveBitrate` for WHIP (Moblin has none there: down by half the reported loss once a second
+  above 10% loss, up 5% a second under 2% once it has been quiet for 4 s), ticked every
   `ADAPTIVE_BITRATE_UPDATE_INTERVAL_MS` (20 ms) with the transport bitrate measured once a second.
   Both cap the target near the measured transport bitrate, as Moblin does. `TransportBitrateMeter` is
   new for each session and pauses while reconnecting, so time offline does not pull the cap down.
@@ -189,7 +227,8 @@ them, not code style.
   is the one place that creates and releases encoders for the current state. `fail` clears the recording
   and the session before it reconciles, so a teardown never tries to create an encoder. The stream profile cannot
   change while busy. Recording stops with an alert when free storage falls under 300 MiB.
-- The foreground service runs while live or recording; its notification title says which.
+- The foreground service runs while live, recording or sending the preview stream; its notification
+  title says which.
 
 ## Outputs
 
@@ -423,11 +462,13 @@ them, not code style.
   second to `StreamEngine.audioLevel`, which the meter reads in its draw phase only.
 - The status temperature is the battery temperature from `ACTION_BATTERY_CHANGED`, coloured by the thermal
   status.
-- `LiveStats.links` is each SRTLA link's share of the bytes sent in the last second (`linkShares`).
+- `LiveStats.links` is each bonded link's share of the bytes sent in the last second (`linkShares`), from
+  `BondedPublisher.linkUsage` (SRTLA and RIST).
 - `AppSettings` stores the status items and quick buttons the user hid, not the ones shown, so an item
   added later is shown by default.
 - `streamUrl` adds the profile's SRT latency to an `srt`/`srtla` URL that does not name one.
-  `StreamProfile.bondingNetworks` limits which networks SRTLA requests.
+  `StreamProfile.bondingNetworks` limits which networks bonding requests: for `srtla://` always, for
+  `rist://` when the stream's Bonding switch (`ristBonding`) is on.
 - `mirrorFrontCameraOnStream` makes the encoder draw the same mirrored picture as the preview.
 - The Widgets quick button opens a panel that turns the selected scene's widgets on and off. Scenes and
   widgets are edited under Settings, Scenes: a scene page has the source (a camera or Video), the video list when the source is
@@ -497,7 +538,11 @@ every new bundled library or asset.
 
 Engine tests that talk to a real server use the system `ffmpeg`/`ffprobe` as the receiver and are
 skipped when they are missing. The SRTLA end-to-end tests also need `SRTLA_REC` pointing at a built
-`srtla_rec` from https://github.com/BELABOX/srtla.
+`srtla_rec` from https://github.com/BELABOX/srtla. The WHIP end-to-end tests need `MEDIAMTX` pointing at
+a MediaMTX binary (https://github.com/bluenviron/mediamtx/releases): they publish to it and read the
+stream back over RTSP. The RIST tests use ffmpeg's `rist` protocol (librist) as the receiver, with
+`-rw_timeout` so it ends by itself: once media stops, ffmpeg's librist input ignores a single SIGTERM,
+and a second one makes it exit without flushing its output.
 
 ## Stream service
 
