@@ -57,7 +57,9 @@ class ChatBot(
         }
     }
 
-    private fun reply(message: ChatMessage, text: String) = engine.chat.send(message.platform, text) {}
+    private fun reply(message: ChatMessage, text: String) {
+        scope.launch { engine.chat.send(message.platform, text) {} }
+    }
 
     private suspend fun run(action: BotAction, message: ChatMessage) {
         engine.showAlert(AlertLevel.INFO, title, "${message.user}: ${message.text}")

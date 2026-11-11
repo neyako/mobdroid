@@ -30,13 +30,17 @@ class YouTubeApiTest {
     }
 
     @Test
-    fun changesTheTitleOfTheBroadcast() {
-        server.reply(BROADCAST)
+    fun changesOnlyTheTitleOfTheBroadcast() {
+        server.reply(
+            """{"items":[{"id":"vid12345678","snippet":{"title":"Saigon","description":"Walking tour","publishedAt":"2026-11-10T08:00:00Z",
+            "scheduledStartTime":"2026-11-11T10:00:00Z","scheduledEndTime":"2026-11-11T12:00:00Z","liveChatId":"chat-1"}}]}""",
+        )
         server.reply()
         api.setTitle("Hanoi")
         server.request()
         assertEquals(
-            """PUT /youtube/v3/liveBroadcasts?part=snippet {"id":"vid12345678","snippet":{"title":"Hanoi","scheduledStartTime":"2026-11-11T10:00:00Z"}}""",
+            """PUT /youtube/v3/liveBroadcasts?part=snippet {"id":"vid12345678","snippet":{"title":"Hanoi","description":"Walking tour",""" +
+                """"scheduledStartTime":"2026-11-11T10:00:00Z","scheduledEndTime":"2026-11-11T12:00:00Z"}}""",
             server.request(),
         )
     }

@@ -24,11 +24,14 @@ class YouTubeApi internal constructor(http: OkHttpClient, accessToken: String, b
 
     override fun setTitle(title: String) {
         val broadcast = broadcast()
+        val snippet = broadcast.obj("snippet")
         val body = buildJsonObject {
             put("id", broadcast.string("id"))
             putJsonObject("snippet") {
                 put("title", title)
-                put("scheduledStartTime", broadcast.obj("snippet")?.string("scheduledStartTime"))
+                for (kept in listOf("description", "scheduledStartTime", "scheduledEndTime")) {
+                    snippet?.string(kept)?.let { put(kept, it) }
+                }
             }
         }
         api.call("PUT", "liveBroadcasts", query = listOf("part" to "snippet"), body = body)
