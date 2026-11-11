@@ -85,7 +85,7 @@ data class ObsSettings(
 val RECORDING_CODECS = listOf(VideoCodec.HEVC, VideoCodec.H264, VideoCodec.AV1)
 
 @Serializable
-enum class WidgetType(val label: String) { TEXT("Text"), IMAGE("Image"), CHAT("Chat"), BROWSER("Browser") }
+enum class WidgetType(val label: String) { TEXT("Text"), IMAGE("Image"), CHAT("Chat"), BROWSER("Browser"), MUSIC("Music") }
 
 @Serializable
 enum class Corner(val label: String, val left: Boolean, val top: Boolean) {
@@ -107,6 +107,8 @@ data class Widget(
     val browserWidth: Int = 1280,
     val browserHeight: Int = 720,
     val previewOnly: Boolean = false,
+    val cover: Boolean = true,
+    val hideWhenPaused: Boolean = true,
 )
 
 @Serializable

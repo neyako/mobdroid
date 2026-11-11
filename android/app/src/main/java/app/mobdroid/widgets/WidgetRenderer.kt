@@ -5,12 +5,16 @@ import android.graphics.ImageDecoder
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.text.Layout
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.StaticLayout
 import android.text.TextPaint
+import android.text.TextUtils
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import app.mobdroid.chat.ChatLine
@@ -52,6 +56,7 @@ class WidgetRenderer(
     scope: CoroutineScope,
     settings: StateFlow<AppSettings>,
     chat: StateFlow<List<ChatLine>>,
+    track: StateFlow<Track?>,
     private val onOverlays: (List<Overlay>) -> Unit,
 ) {
     private val cache = HashMap<String, Rendered>()
@@ -68,9 +73,17 @@ class WidgetRenderer(
         val withChat = inputs.flatMapLatest { input ->
             if (input.placed.any { it.widget.type == WidgetType.CHAT }) chat.map { input to it } else flowOf(input to emptyList())
         }
+        @OptIn(ExperimentalCoroutinesApi::class)
+        val withMusic = withChat.flatMapLatest { (input, lines) ->
+            if (input.placed.any { it.widget.type == WidgetType.MUSIC }) {
+                track.map { Triple(input, lines, it) }
+            } else {
+                flowOf(Triple(input, lines, null))
+            }
+        }
         scope.launch(Dispatchers.Default) {
-            combine(withChat, minutes) { state, _ -> state }.conflate().collect { (input, lines) ->
-                onOverlays(render(input, lines))
+            combine(withMusic, minutes) { state, _ -> state }.conflate().collect { (input, lines, playing) ->
+                onOverlays(render(input, lines, playing))
             }
         }
     }
@@ -83,7 +96,7 @@ class WidgetRenderer(
         return Inputs(placed, width, height, settings.chatTextSize.sp)
     }
 
-    private fun render(input: Inputs, lines: List<ChatLine>): List<Overlay> {
+    private fun render(input: Inputs, lines: List<ChatLine>, track: Track?): List<Overlay> {
         cache.keys.retainAll(input.placed.map { it.widget.id }.toSet())
         return input.placed.mapNotNull { (widget, placement) ->
             if (widget.type == WidgetType.BROWSER) {
@@ -111,6 +124,12 @@ class WidgetRenderer(
                         }
                     }
                     WidgetType.BROWSER -> null
+                    WidgetType.MUSIC -> track?.takeIf { it.playing || !widget.hideWhenPaused }?.let { shown ->
+                        val art = shown.cover.takeIf { widget.cover }
+                        cached(widget.id, listOf(shown.title, shown.artist, art, widget.textSize, input.height)) {
+                            music(shown.title, shown.artist, art, widget.textSize * input.height / 400f, input.width)
+                        }
+                    }
                 }
             }.getOrNull() ?: return@mapNotNull null
             val width = if (widget.type == WidgetType.IMAGE) placement.size / 100f else bitmap.width.toFloat() / input.width
@@ -145,6 +164,46 @@ class WidgetRenderer(
         canvas.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), size * 0.4f, size * 0.4f, background)
         lines.forEachIndexed { index, line ->
             canvas.drawText(line, padding, padding / 2 - paint.fontMetrics.ascent + lineHeight * index, paint)
+        }
+        return bitmap
+    }
+
+    private fun music(title: String, artist: String, cover: Bitmap?, size: Float, maxWidth: Int): Bitmap {
+        val titlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = size
+            typeface = Typeface.DEFAULT_BOLD
+            setShadowLayer(size * 0.2f, 0f, 0f, Color.BLACK)
+        }
+        val artistPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xE6FFFFFF.toInt()
+            textSize = size * 0.85f
+            setShadowLayer(size * 0.2f, 0f, 0f, Color.BLACK)
+        }
+        val side = if (cover == null) 0f else size * 3.1f
+        val gap = if (cover == null) 0f else size * 0.55f
+        val pad = size * 0.25f
+        val room = maxWidth * 0.6f - side - gap - pad
+        val shownTitle = TextUtils.ellipsize(title, titlePaint, room, TextUtils.TruncateAt.END).toString()
+        val shownArtist = TextUtils.ellipsize(artist, artistPaint, room, TextUtils.TruncateAt.END).toString()
+        val lines = if (shownArtist.isEmpty()) titlePaint.fontSpacing else titlePaint.fontSpacing + artistPaint.fontSpacing
+        val height = maxOf(side, lines) + pad * 2
+        val width = side + gap + maxOf(titlePaint.measureText(shownTitle), artistPaint.measureText(shownArtist)) + pad * 2
+        val bitmap = Bitmap.createBitmap(width.toInt().coerceAtLeast(1), height.toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        if (cover != null) {
+            val rect = RectF(pad, (height - side) / 2, pad + side, (height + side) / 2)
+            val crop = minOf(cover.width, cover.height)
+            val source = Rect((cover.width - crop) / 2, (cover.height - crop) / 2, (cover.width + crop) / 2, (cover.height + crop) / 2)
+            canvas.save()
+            canvas.clipPath(Path().apply { addRoundRect(rect, side * 0.14f, side * 0.14f, Path.Direction.CW) })
+            canvas.drawBitmap(cover, source, rect, Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG))
+            canvas.restore()
+        }
+        val top = (height - lines) / 2
+        canvas.drawText(shownTitle, pad + side + gap, top - titlePaint.fontMetrics.ascent, titlePaint)
+        if (shownArtist.isNotEmpty()) {
+            canvas.drawText(shownArtist, pad + side + gap, top + titlePaint.fontSpacing - artistPaint.fontMetrics.ascent, artistPaint)
         }
         return bitmap
     }
