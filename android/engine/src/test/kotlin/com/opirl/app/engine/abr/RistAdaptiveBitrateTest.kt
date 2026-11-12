@@ -26,6 +26,13 @@ class RistAdaptiveBitrateTest {
     }
 
     @Test
+    fun theMeasuredTransportBitrateCapsTheClimb() {
+        val abr = RistAdaptiveBitrate(6_000_000, 500_000)
+        repeat(200) { abr.update(StreamStats(rttMs = 30.0, packetsInFlight = 0.0, transportBitrate = 1_000_000)) }
+        assertEquals(2_000_000, abr.bitrate)
+    }
+
+    @Test
     fun aLowerTargetCapsTheBitrate() {
         val abr = RistAdaptiveBitrate(6_000_000, 500_000)
         repeat(200) { abr.update(stats(30.0)) }

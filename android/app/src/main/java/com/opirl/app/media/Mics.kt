@@ -85,7 +85,10 @@ class MicCatalog(context: Context) {
         if (bluetooth) {
             communication = true
             if (Build.VERSION.SDK_INT >= 31) {
-                if (!audioManager.setCommunicationDevice(device)) Log.w(TAG, "Bluetooth microphone not accepted")
+                val outputs = audioManager.availableCommunicationDevices
+                val output = outputs.firstOrNull { it.type == device.type && it.address == device.address }
+                    ?: outputs.firstOrNull { it.type == device.type }
+                if (output == null || !audioManager.setCommunicationDevice(output)) Log.w(TAG, "Bluetooth microphone not accepted")
             } else {
                 @Suppress("DEPRECATION")
                 audioManager.startBluetoothSco()

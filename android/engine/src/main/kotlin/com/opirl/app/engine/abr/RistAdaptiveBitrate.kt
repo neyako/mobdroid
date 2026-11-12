@@ -30,9 +30,9 @@ class RistAdaptiveBitrate(
         minimum = bitrate
     }
 
-    override fun update(stats: StreamStats, nowNanos: Long): Long = update(stats.rttMs)
+    override fun update(stats: StreamStats, nowNanos: Long): Long = update(stats.rttMs, stats = stats)
 
-    fun update(rttMs: Double, packetsInFlight: Double = CONSTANT_PACKETS_IN_FLIGHT): Long {
+    fun update(rttMs: Double, packetsInFlight: Double = CONSTANT_PACKETS_IN_FLIGHT, stats: StreamStats? = null): Long {
         calculatePackets(packetsInFlight)
         calculateRtts(rttMs)
         increaseMaximum(packetsInFlight, allowedRttJitter = 15.0, allowedPacketsJitter = 10.0)
@@ -45,7 +45,7 @@ class RistAdaptiveBitrate(
         if (rttMs > averageRtt + RTT_DIFF_HIGH_ALLOWED_SPIKE) {
             decreaseMaximum(RTT_DIFF_HIGH_FACTOR, RTT_DIFF_HIGH_MINIMUM_DECREASE)
         }
-        calculateBitrate()
+        calculateBitrate(stats)
         return bitrate
     }
 
@@ -96,7 +96,7 @@ class RistAdaptiveBitrate(
         maximumBitrate -= maxOf((maximumBitrate * (1 - factor)).toLong(), minimumDecrease)
     }
 
-    private fun calculateBitrate() {
+    private fun calculateBitrate(stats: StreamStats?) {
         var spike = fastPackets.toLong() - smoothPackets.toLong()
         if (spike > PACKETS_IN_FLIGHT_LIMIT) {
             maximumBitrate = (maximumBitrate * 0.95).toLong()
@@ -108,6 +108,7 @@ class RistAdaptiveBitrate(
         if (spike == PACKETS_IN_FLIGHT_LIMIT) {
             maximumBitrate -= 500_000
         }
+        if (stats != null) maximumBitrate = stats.limitByTransportBitrate(maximumBitrate)
         maximumBitrate = minOf(maxOf(maximumBitrate, minimum), maxOf(target, minimum))
         bitrate = maxOf(maximumBitrate * (PACKETS_IN_FLIGHT_LIMIT - spike) / PACKETS_IN_FLIGHT_LIMIT, minimum)
         if ((fastPackets - smoothPackets).toInt() > PACKETS_IN_FLIGHT_LIMIT * 2) {

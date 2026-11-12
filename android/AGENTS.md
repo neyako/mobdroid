@@ -96,7 +96,7 @@ them, not code style.
   `LossAdaptiveBitrate` for WHIP (Moblin has none there: down by half the reported loss once a second
   above 10% loss, up 5% a second under 2% once it has been quiet for 4 s), ticked every
   `ADAPTIVE_BITRATE_UPDATE_INTERVAL_MS` (20 ms) with the transport bitrate measured once a second.
-  Both cap the target near the measured transport bitrate, as Moblin does. `TransportBitrateMeter` is
+  All of them cap the target near the measured transport bitrate, as Moblin does. `TransportBitrateMeter` is
   new for each session and pauses while reconnecting, so time offline does not pull the cap down.
 
 ## Cameras
@@ -264,7 +264,8 @@ them, not code style.
 - Microphones: `media/MicCatalog` lists the connected inputs (phone, USB, wired headset, Bluetooth) from
   `AudioManager` and follows `AudioDeviceCallback`. `AppSettings.micKey` is null for the system's choice,
   a `Mic.key`, or a bare kind (`USB`) from settings saved before there was a list. `MicCatalog.open`
-  turns it into a `MicInput`; a Bluetooth one makes the device the communication device (SCO) and records
+  turns it into a `MicInput`; a Bluetooth one makes the headset's output the communication device (SCO;
+  `setCommunicationDevice` only takes an output from `availableCommunicationDevices`) and records
   with `VOICE_COMMUNICATION`, everything else with `CAMCORDER`. A mic that is not connected falls back to
   the system's choice and is taken again when it connects. `AudioEncoder.input` can change at any time: the
   encoder thread reopens its `AudioRecord` and keeps the codecs, so the mic switches on air.
