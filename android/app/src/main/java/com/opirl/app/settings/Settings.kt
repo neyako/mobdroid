@@ -97,26 +97,32 @@ enum class StatusItem(@StringRes val label: Int) {
 }
 
 @Serializable
-enum class QuickButtonId(@StringRes val label: Int) {
-    CHAT(R.string.quick_chat),
-    RECORD(R.string.quick_record),
-    SNAPSHOT(R.string.quick_snapshot),
-    REPLAY(R.string.replay),
-    INSTANT_REPLAY(R.string.quick_instant_replay),
-    WIDGETS(R.string.quick_widgets),
-    OBS(R.string.quick_obs),
-    BROWSER(R.string.quick_browser),
-    REMOTE(R.string.quick_remote),
-    BITRATE(R.string.quick_bitrate),
-    MIC(R.string.quick_mic),
-    STEALTH(R.string.quick_stealth),
-    TORCH(R.string.quick_torch),
-    PREVIEW_STREAM(R.string.quick_preview_stream),
-    FILTERS(R.string.filters),
-    DRAW(R.string.quick_draw),
-    OVERLAYS(R.string.quick_overlays),
-    AUTO_SWITCHER(R.string.quick_auto_switcher),
-    MACROS(R.string.macros),
+enum class QuickButtonPage(@StringRes val label: Int) {
+    STREAM(R.string.quick_page_stream),
+    SCENE(R.string.quick_page_scene),
+    CONNECT(R.string.quick_page_connect),
+}
+
+enum class QuickButtonId(@StringRes val label: Int, val page: QuickButtonPage) {
+    CHAT(R.string.quick_chat, QuickButtonPage.STREAM),
+    RECORD(R.string.quick_record, QuickButtonPage.STREAM),
+    SNAPSHOT(R.string.quick_snapshot, QuickButtonPage.STREAM),
+    REPLAY(R.string.replay, QuickButtonPage.STREAM),
+    INSTANT_REPLAY(R.string.quick_instant_replay, QuickButtonPage.STREAM),
+    WIDGETS(R.string.quick_widgets, QuickButtonPage.SCENE),
+    OBS(R.string.quick_obs, QuickButtonPage.CONNECT),
+    BROWSER(R.string.quick_browser, QuickButtonPage.CONNECT),
+    REMOTE(R.string.quick_remote, QuickButtonPage.CONNECT),
+    BITRATE(R.string.quick_bitrate, QuickButtonPage.STREAM),
+    MIC(R.string.quick_mic, QuickButtonPage.STREAM),
+    STEALTH(R.string.quick_stealth, QuickButtonPage.STREAM),
+    TORCH(R.string.quick_torch, QuickButtonPage.STREAM),
+    PREVIEW_STREAM(R.string.quick_preview_stream, QuickButtonPage.STREAM),
+    FILTERS(R.string.filters, QuickButtonPage.SCENE),
+    DRAW(R.string.quick_draw, QuickButtonPage.SCENE),
+    OVERLAYS(R.string.quick_overlays, QuickButtonPage.SCENE),
+    AUTO_SWITCHER(R.string.quick_auto_switcher, QuickButtonPage.SCENE),
+    MACROS(R.string.macros, QuickButtonPage.SCENE),
 }
 
 @Serializable
@@ -588,6 +594,7 @@ data class AppSettings(
     val replaySpeedPercent: Int = 100,
     val hiddenStatusItems: Set<StatusItem> = emptySet(),
     val hiddenQuickButtons: Set<QuickButtonId> = emptySet(),
+    val quickButtonPages: Map<QuickButtonId, QuickButtonPage> = emptyMap(),
     val fixedLensCameras: Set<String> = emptySet(),
     val bitratePresetsKbps: List<Int> = listOf(1000, 2500, 4000, 6000, 8000, 10000, 15000, 20000),
     val scenes: List<Scene> = emptyList(),
@@ -618,6 +625,8 @@ data class AppSettings(
         get() = streamDecks.firstOrNull { it.id == selectedStreamDeckId }
     fun botPermission(command: BotCommand): BotPermissionSettings =
         chatBotPermissions[command] ?: BotPermissionSettings(moderators = command.moderatorsByDefault)
+
+    fun pageOf(button: QuickButtonId): QuickButtonPage = quickButtonPages[button] ?: button.page
 }
 
 fun isValidBitrateKbps(kbps: Int) = kbps in 50..50_000

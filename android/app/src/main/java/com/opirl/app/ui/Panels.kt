@@ -1,5 +1,11 @@
 package com.opirl.app.ui
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.AnimatedContent
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -11,6 +17,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -24,15 +32,20 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Autorenew
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SegmentedListItem
@@ -54,6 +67,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -72,33 +87,87 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 @Composable
-fun SidePanel(title: String, onHide: () -> Unit, onClose: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
-    Surface(Modifier.fillMaxSize(), color = Color.Black) {
-        Column {
-            Row(
-                Modifier.fillMaxWidth().height(PanelHeaderHeight).padding(start = 16.dp, end = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.weight(1f)) { Text(title, style = PanelTitle) }
-                PanelButtons(hidden = false, onHide, onClose)
+fun PanelSurface(content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        Modifier.fillMaxSize().padding(6.dp),
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) { Column(content = content) }
+}
+
+@Composable
+fun PanelHeader(
+    title: String,
+    onHide: () -> Unit,
+    onClose: () -> Unit,
+    onBack: (() -> Unit)? = null,
+    titleContent: (@Composable () -> Unit)? = null,
+    actions: @Composable RowScope.() -> Unit = {},
+) {
+    Row(
+        Modifier.fillMaxWidth().height(PanelHeaderHeight).padding(start = 4.dp, end = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val back = remember { mutableStateOf(onBack) }
+        if (onBack != null) back.value = onBack
+        Appear(onBack != null, vertical = false) {
+            IconButton({ back.value?.invoke() }, Modifier.size(44.dp)) {
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.navigate_back), Modifier.size(22.dp))
             }
-            Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp).padding(bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                content = content,
-            )
         }
+        val titleStart by animateDpAsState(if (onBack == null) 12.dp else 0.dp, MaterialTheme.motionScheme.defaultSpatialSpec(), label = "title")
+        Box(Modifier.weight(1f).padding(start = titleStart.coerceAtLeast(0.dp)), contentAlignment = Alignment.CenterStart) {
+            if (titleContent != null) {
+                titleContent()
+            } else {
+                val motion = MaterialTheme.motionScheme
+                AnimatedContent(
+                    title,
+                    transitionSpec = { fadeIn(motion.defaultEffectsSpec()) togetherWith fadeOut(motion.fastEffectsSpec()) },
+                    contentAlignment = Alignment.CenterStart,
+                    label = "title",
+                ) { shown -> Text(shown, style = PanelTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            }
+        }
+        actions()
+        Spacer(Modifier.width(8.dp))
+        PanelButtons(hidden = false, onHide, onClose)
     }
 }
 
 @Composable
-fun PanelNote(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = 4.dp),
+fun ColumnScope.PanelBody(content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 10.dp).padding(bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        content = content,
     )
+}
+
+@Composable
+fun SidePanel(title: String, onHide: () -> Unit, onClose: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    PanelSurface {
+        PanelHeader(title, onHide, onClose)
+        PanelBody(content)
+    }
+}
+
+@Composable
+fun PanelNote(text: String, icon: ImageVector? = null, action: String? = null, onAction: () -> Unit = {}) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = if (icon == null) 0.dp else 20.dp),
+        horizontalAlignment = if (icon == null) Alignment.Start else Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        if (icon != null) Icon(icon, null, Modifier.size(32.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = if (icon == null) TextAlign.Start else TextAlign.Center,
+        )
+        if (action != null) FilledTonalButton(onAction) { Text(action) }
+    }
 }
 
 private val FACE_FILTERS = listOf(Filter.BLUR_FACES, Filter.BLUR_TEXT, Filter.PRIVACY)
@@ -256,12 +325,23 @@ fun FiltersPanel(store: SettingsStore, settings: AppSettings, engine: StreamEngi
     }
 }
 
+@Composable
+fun BitratePanel(presetsKbps: List<Int>, currentKbps: Int, onHide: () -> Unit, onClose: () -> Unit, onSelect: (Int) -> Unit) {
+    SidePanel(stringResource(R.string.bitrate), onHide, onClose) {
+        Group {
+            presetsKbps.forEach { kbps ->
+                row { shapes -> PickRow(shapes, "${formatMbps(kbps)} Mbps", kbps == currentKbps) { onSelect(kbps) } }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun SwitcherPanel(store: SettingsStore, settings: AppSettings, onHide: () -> Unit, onClose: () -> Unit) {
     SidePanel(stringResource(R.string.auto_switchers), onHide, onClose) {
         if (settings.autoSwitchers.isEmpty()) {
-            PanelNote(stringResource(R.string.auto_switchers_empty))
+            PanelNote(stringResource(R.string.auto_switchers_empty), Icons.Rounded.Autorenew)
             return@SidePanel
         }
         Group {
@@ -282,7 +362,7 @@ fun MacrosPanel(settings: AppSettings, engine: StreamEngine, onHide: () -> Unit,
     val running by engine.macros.running.collectAsStateWithLifecycle()
     SidePanel(stringResource(R.string.macros), onHide, onClose) {
         if (settings.macros.isEmpty()) {
-            PanelNote(stringResource(R.string.macros_empty))
+            PanelNote(stringResource(R.string.macros_empty), Icons.Rounded.Bolt)
             return@SidePanel
         }
         Group {

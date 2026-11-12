@@ -713,11 +713,21 @@ them, not code style.
 - `ui/MainScreen.kt` lays the screen out the way Moblin does, with Moblin's sizes. Wide screens: the preview
   with rounded corners against the start edge, under a display cutout there (only the end side keeps its
   cutout inset), the status in its top right (OBS, temperature and uptime, recording, bitrate, bonding
-  share, audio meter, in that order), the zoom stops and the scene row in its bottom right, and a control bar at
-  the far end with the opIRL logo and the settings button on top, the quick buttons under them and the Go
-  Live button at the bottom. Quick buttons are 40 dp in 48 dp cells. With no panel the bar takes the width
-  the preview leaves (100 to 250 dp) and shows as many button columns as fit (three on the vivo); with a
-  panel open it is 100 dp with two columns, as in Moblin. Near-square screens (the Flip cover,
+  share, audio meter, in that order, on one rounded scrim), the zoom stops and the scene row in its bottom
+  right, and a control bar at the far end with the opIRL logo and the settings button on top, the quick buttons
+  under them and the 52 dp Go Live button at the bottom. Quick buttons are 40 dp in 48 dp cells. With no panel
+  the bar takes the width the preview leaves (100 to 250 dp) and shows as many button columns as fit (three on
+  the vivo); with a panel open it is 100 dp with two columns, as in Moblin. `QuickButtonHeader` places the
+  logo over the grid's first column and the settings button over its last, with the same spring as the grid.
+  The logo is drawn by `AppLogo` with its dot in the theme's primary colour (the `ic_logo` drawable, used by
+  the logo in mouth filter, keeps the red dot). A quick button list that scrolls fades out at its end
+  (`fadeEnd`), so no button is cut off by an edge.
+- Quick buttons belong to one of three categories (`QuickButtonPage`: Stream, Scene, Connect), by default
+  `QuickButtonId.page`; `AppSettings.quickButtonPages` stores only the buttons the user moved. The wide control
+  bar swipes between the categories that have a visible button (`QuickButtonPages`: a `HorizontalPager` of
+  `QuickButtonGrid`s, each scrolling on its own, with page dots above Go Live), while the logo, the settings
+  button and Go Live stay put. The other layouts show one scrolling row in category order. Settings, Display,
+  Quick buttons lists the buttons by category with their switch; tapping a row picks its category. Near-square screens (the Flip cover,
   `maxWidth / maxHeight < 1.5`): status, logo and settings button in a top band, the preview with zoom
   stops left and scenes right, quick buttons and Go Live in a bottom band.
 - `StreamProfile.portrait` (Streams, a stream, Video, Portrait) swaps the output size (1080p becomes
@@ -771,20 +781,25 @@ them, not code style.
   rest moves over it. The control bar's width and the quick buttons' positions follow one spring
   (`QuickButtonGrid` places each button between its place in the wide and the two column layout), read in
   the layout phase only, while the panel slides out from behind the bar or fades away over the preview.
+- Without a chat account that can send, the chat panel's input is a "Log in to send messages" field that opens
+  Settings, Chat, where the accounts are.
 - The chat panel keeps its draft and whether the stream tools page is open in `MainScreen`, so hiding the
   panel loses neither.
-- Panels (settings, chat, widgets, OBS, browser, filters, auto switcher, macros, remote) sit between the preview and the control bar on wide screens (350 dp, Moblin's
-  `settingsHalfWidth`) and fill the screen on near-square ones. Their header is 44 dp with `PanelButtons`:
-  hide and close, extra small filled icon buttons with the expressive shape morph. They are 32 dp with
-  16 dp between them, so their 48 dp touch targets do not overlap. Hide takes the panel off the screen and
+- Panels (settings, chat, widgets, OBS, browser, filters, auto switcher, macros, remote, bitrate) sit between the preview and the control bar on wide screens (350 dp, Moblin's
+  `settingsHalfWidth`) and fill the screen on near-square ones. Every panel is a `PanelSurface`
+  (`surfaceContainerLow`, 24 dp corners, inset 6 dp) with a `PanelHeader` (`Panels.kt`): 52 dp, a back button
+  when there is something to go back to, the title on the left (or a title slot, such as the browser's address
+  field and the chat status on the cover screen), the panel's own actions, then `PanelButtons`: hide and close,
+  extra small filled icon buttons with the expressive shape morph. They are 32 dp with 16 dp between them, so
+  their 48 dp touch targets do not overlap. An empty panel shows `PanelNote` with an icon. Hide takes the panel off the screen and
   keeps the settings page (`SettingsPages`, reset once the panel has closed) and the chat draft, which
   live in `MainScreen`; the two buttons then float in the preview's top right and the status moves under
   them. Settings pages follow Moblin's categories and drill down with a back stack. Rows are
-  `SegmentedListItem`s built with `Group { row { ... } }` from `SettingsWidgets.kt`, capped at 44 dp (56 dp
-  with a supporting line) times the font scale, with 15 sp titles. The cap is a
+  `SegmentedListItem`s built with `Group { row { ... } }` from `SettingsWidgets.kt`, in `surfaceContainerHigh`,
+  capped at 48 dp (60 dp with a supporting line) times the font scale, with 15 sp titles. The cap is a
   `heightIn(max)`, because the list item's own minimum is 56 dp. A `ChoiceRow`'s connected toggle buttons
   share the row's width equally, or in proportion to their labels when the widest label would not fit an
-  equal share. A `TextRow` is `FilledField`, the wizard's text field drawn in the row's shape with a primary
+  equal share; a choice that cannot be picked keeps a readable label. A `TextRow` is `FilledField`, the wizard's text field drawn in the row's shape with a primary
   outline while focused, so a field is the row and never a box inside one.
 - The microphone is open whenever the preview runs, so the audio meter works before going live: an
   `AudioEncoder` without a sink only reads and meters. It reports the peak level in dB about nine times a
@@ -842,6 +857,8 @@ them, not code style.
   function is chosen on its own page (`Route.ActionPage`) because there are too many for a choice row.
   The Moblink and Remote control status items show while the feature is on: an icon, and its text on wide
   layouts.
+- The Bitrate quick button opens the Bitrate panel, the bitrate presets as a pick list; picking one sets it and
+  closes the panel.
 - The Record quick button asks for a second tap to stop, like the End button. The recording time and size
   are a status item. Recording settings are per stream (Streams, a stream, Recording); the recordings list
   is Settings, Recordings.

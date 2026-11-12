@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -25,13 +24,13 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.text.style.TextOverflow
 import com.opirl.app.chat.managedPlatforms
@@ -42,7 +41,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -147,6 +145,7 @@ fun ChatPanel(
     tools: MutableState<Boolean>,
     onHide: () -> Unit,
     onClose: () -> Unit,
+    onLogin: () -> Unit,
     header: (@Composable () -> Unit)? = null,
 ) {
     val lines by engine.chat.lines.collectAsStateWithLifecycle()
@@ -161,32 +160,20 @@ fun ChatPanel(
     LaunchedEffect(newest) {
         if (!list.isScrollInProgress && list.firstVisibleItemIndex <= 2) list.scrollToItem(0)
     }
-    Surface(Modifier.fillMaxSize(), color = Color.Black) {
+    PanelSurface {
         Column(Modifier.imePadding()) {
-            Row(
-                Modifier.fillMaxWidth().height(PanelHeaderHeight).padding(start = if (showTools) 0.dp else 16.dp, end = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            PanelHeader(
+                stringResource(if (showTools) R.string.stream_tools else R.string.chat),
+                onHide,
+                onClose,
+                onBack = if (showTools) ({ tools.value = false }) else null,
+                titleContent = header.takeIf { !showTools },
             ) {
-                if (showTools) {
-                    IconButton({ tools.value = false }, Modifier.size(44.dp)) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.navigate_back), Modifier.size(20.dp))
-                    }
-                }
-                Box(Modifier.weight(1f)) {
-                    if (showTools) {
-                        Text(stringResource(R.string.stream_tools), style = PanelTitle)
-                    } else if (header != null) {
-                        header()
-                    } else {
-                        Text(stringResource(R.string.chat), style = PanelTitle)
-                    }
-                }
                 if (managed.isNotEmpty() && !showTools) {
                     IconButton({ tools.value = true }, Modifier.size(44.dp)) {
-                        Icon(Icons.Rounded.Tune, stringResource(R.string.stream_tools), Modifier.size(20.dp))
+                        Icon(Icons.Rounded.Tune, stringResource(R.string.stream_tools), Modifier.size(22.dp))
                     }
                 }
-                PanelButtons(hidden = false, onHide, onClose)
             }
             if (showTools) {
                 StreamTools(engine, managed, Modifier.weight(1f))
@@ -231,6 +218,8 @@ fun ChatPanel(
             selected?.takeIf { it.message.platform in managed }?.let { line -> MessageActions(engine, line) { selected = null } }
             if (canSend.isNotEmpty()) {
                 ChatInput(canSend, draft, settings.predefinedMessages) { platform, text, onResult -> engine.chat.send(platform, text, onResult) }
+            } else {
+                LoginField(onLogin)
             }
         }
     }
@@ -266,6 +255,31 @@ private fun MessageActions(engine: StreamEngine, line: ChatLine, onDone: () -> U
                 enabled = !runner.busy,
             ) { Text(stringResource(R.string.ban), color = MaterialTheme.colorScheme.error) }
         }
+    }
+}
+
+@Composable
+private fun LoginField(onLogin: () -> Unit) {
+    Row(
+        Modifier
+            .padding(start = 12.dp, end = 12.dp, bottom = 10.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .clickable(onClick = onLogin)
+            .padding(start = 14.dp, end = 10.dp)
+            .height(40.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            stringResource(R.string.chat_log_in_to_send),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 15.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Text(stringResource(R.string.log_in), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
     }
 }
 
