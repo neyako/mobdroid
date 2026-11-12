@@ -61,6 +61,8 @@ class KickChatClient internal constructor(
 
     @Volatile private var chatroomId = 0L
 
+    @Volatile private var userId: Long? = null
+
     override val canSend: Boolean
         get() = login != null
 
@@ -145,6 +147,7 @@ class KickChatClient internal constructor(
                 throw IOException("Kick channel lookup failed: ${e.message ?: e.javaClass.simpleName}", e)
             }
             if (code in 200..299) {
+                userId = parseKickUserId(body)
                 return parseKickChatroomId(body)
                     ?: throw IOException("Kick channel lookup returned an unexpected response")
             }
@@ -287,6 +290,7 @@ class KickChatClient internal constructor(
                     if (current === this@Run && !finished && !subscribed) {
                         subscribed = true
                         listener.onConnected()
+                        userId?.let { listener.onChannelId(it.toString()) }
                     }
                 }
             }
