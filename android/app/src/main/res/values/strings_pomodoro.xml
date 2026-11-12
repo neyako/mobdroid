@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pomodoro_start">Start</string>
+    <string name="pomodoro_pause">Pause</string>
+    <string name="pomodoro_resume">Resume</string>
+    <string name="pomodoro_minutes">%1$d min</string>
+    <string name="pomodoro_focus_duration">Focus duration</string>
+    <string name="pomodoro_break_duration">Break duration</string>
+    <string name="pomodoro_focus_name">Focus name</string>
+    <string name="pomodoro_break_name">Break name</string>
+    <string name="pomodoro_focus_icon">Focus icon</string>
+    <string name="pomodoro_break_icon">Break icon</string>
+    <string name="pomodoro_background">Background</string>
+    <string name="pomodoro_text_color">Text</string>
+    <string name="pomodoro_focus_color">Focus color</string>
+    <string name="pomodoro_break_color">Break color</string>
+    <string name="pomodoro_icon_sun">Sun</string>
+    <string name="pomodoro_icon_bolt">Bolt</string>
+    <string name="pomodoro_icon_cap">Graduation cap</string>
+    <string name="pomodoro_icon_book">Book</string>
+    <string name="pomodoro_icon_play">Play</string>
+    <string name="pomodoro_icon_brain">Brain</string>
+    <string name="pomodoro_icon_pencil">Pencil</string>
+    <string name="pomodoro_icon_flame">Flame</string>
+    <string name="pomodoro_icon_timer">Timer</string>
+    <string name="pomodoro_icon_target">Target</string>
+    <string name="pomodoro_icon_cup">Cup</string>
+    <string name="pomodoro_icon_dance">Dance</string>
+    <string name="pomodoro_icon_walk">Walk</string>
+    <string name="pomodoro_icon_music">Music</string>
+    <string name="pomodoro_icon_leaf">Leaf</string>
+    <string name="pomodoro_icon_game">Controller</string>
+    <string name="pomodoro_icon_fork">Fork and knife</string>
+</resources>

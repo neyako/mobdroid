@@ -251,7 +251,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
     val sidePanel: @Composable (Side, (@Composable () -> Unit)?) -> Unit = { shown, chatHeader ->
         when (shown) {
             Side.CHAT -> ChatPanel(engine, appSettings, chatDraft, chatTools, onHide = { panelHidden = true }, onClose = closePanel, header = chatHeader)
-            Side.WIDGETS -> WidgetsPanel(settings, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
+            Side.WIDGETS -> WidgetsPanel(settings, engine, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
             Side.OBS -> obsPanel()
             Side.REMOTE -> remotePanel()
             Side.BROWSER -> BrowserPanel(settings, appSettings, browser, onHide = { panelHidden = true }, onClose = closePanel)

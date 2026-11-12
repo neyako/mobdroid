@@ -1,5 +1,6 @@
 package com.opirl.app.engine.chat.kick
 
+import com.opirl.app.engine.alerts.AlertEvent
 import com.opirl.app.engine.chat.ChatListener
 import com.opirl.app.engine.chat.ChatMessage
 import java.util.concurrent.CompletableFuture
@@ -40,6 +41,8 @@ private sealed interface Event {
     data class Deleted(val messageId: String) : Event
 
     data class Banned(val userId: String) : Event
+
+    data class Alert(val event: AlertEvent) : Event
 }
 
 private class Recorder : ChatListener {
@@ -65,6 +68,10 @@ private class Recorder : ChatListener {
         events.add(Event.Banned(userId))
     }
 
+    override fun onAlert(event: AlertEvent) {
+        events.add(Event.Alert(event))
+    }
+
     fun next(): Event = events.poll(10, TimeUnit.SECONDS) ?: error("no listener call within 10 s")
 }
 
@@ -87,7 +94,7 @@ private class PusherStub(
         val channel = channelOf(text) ?: return
         if (confirm) {
             webSocket.send("""{"event":"pusher_internal:subscription_succeeded","data":"{}","channel":"$channel"}""")
-            if (channels.size == 3) {
+            if (channels.size == 4) {
                 afterSubscribed(webSocket)
             }
         }
@@ -203,6 +210,8 @@ class KickChatClientTest {
             it.send(KickFrames.PING)
             it.send(KickFrames.DELETED)
             it.send(KickFrames.BANNED)
+            it.send(KickFrames.SUBSCRIPTION)
+            it.send(KickFrames.KICKS)
         }
         Harness(listOf(stub)).use { harness ->
             val client = harness.client()
@@ -214,6 +223,8 @@ class KickChatClientTest {
                 assertEquals("PixelFox", message.user)
                 assertEquals(Event.Deleted("0c4cdb14-56e5-49fe-94da-fd68ff0cbb2c"), harness.recorder.next())
                 assertEquals(Event.Banned("4821"), harness.recorder.next())
+                assertEquals(Event.Alert(AlertEvent.KickSubscription("PixelFox", 3)), harness.recorder.next())
+                assertEquals(Event.Alert(AlertEvent.KickKicks("ModMoss", "Rage Quit", 100)), harness.recorder.next())
                 assertTrue(waitUntil { PONG in stub.frames })
             } finally {
                 client.stop()
@@ -223,7 +234,7 @@ class KickChatClientTest {
                 """{"event":"pusher:subscribe","data":{"auth":"","channel":"chatrooms.4242.v2"}}""",
                 stub.frames.first(),
             )
-            assertEquals(listOf("chatrooms.4242.v2", "chatroom_4242", "chatrooms.4242"), stub.channels)
+            assertEquals(listOf("chatrooms.4242.v2", "chatroom_4242", "chatrooms.4242", "channel_4243"), stub.channels)
             assertTrue(stub.closed.await(10, TimeUnit.SECONDS))
             assertEquals(0, chatThreads())
         }
@@ -304,7 +315,7 @@ class KickChatClientTest {
                 client.stop()
             }
             assertEquals(listOf("/api/v1/channels/foo", "/pusher", "/pusher"), harness.paths)
-            assertEquals(listOf("chatrooms.4242.v2", "chatroom_4242", "chatrooms.4242"), healthy.channels)
+            assertEquals(listOf("chatrooms.4242.v2", "chatroom_4242", "chatrooms.4242", "channel_4243"), healthy.channels)
         }
     }
 
@@ -373,6 +384,23 @@ class KickChatClientTest {
                 client.stop()
             }
             assertEquals("Kick chat is not connected", client.sendAndWait("after stop"))
+        }
+    }
+
+    @Test
+    fun skipsTheChannelSubscriptionWhenTheLookupHasNoChannelId() {
+        val chatroomOnly = json(200, """{"id":5,"slug":"foo","chatroom":{"id":4242}}""")
+        val stub = PusherStub()
+        Harness(listOf(stub), lookups = listOf(chatroomOnly)).use { harness ->
+            val client = harness.client()
+            client.start()
+            try {
+                assertEquals(Event.Connected, harness.recorder.next())
+                assertTrue(waitUntil { stub.channels.size == 3 })
+            } finally {
+                client.stop()
+            }
+            assertEquals(listOf("chatrooms.4242.v2", "chatroom_4242", "chatrooms.4242"), stub.channels)
         }
     }
 

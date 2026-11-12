@@ -187,6 +187,8 @@ them, not code style.
   Twitch login is the implicit flow in a WebView with Moblin's client id and the scopes in `TWITCH_SCOPES`
   (`TwitchApi.kt`); `TwitchAccount.scopes` is what the token was granted, and an account without all of them
   gets a "Log in again" row. Add a scope there with every Helix call that needs a new one.
+  The login also asks for `TWITCH_ALERT_SCOPES` (followers, redemptions, bits); the Alerts page asks for a new
+  login while one of those is missing (`missingTwitchScopes`).
 - Each platform lives in its own package (`chat/twitch`, `chat/kick`, `chat/youtube`) and ports the
   behavior of Moblin's `Moblin/StreamingPlatforms/`. Parsing is pure functions tested with captured
   payloads; the network goes through the `OkHttpClient` passed in; JSON is read as `JsonElement` trees
@@ -237,6 +239,48 @@ them, not code style.
   for the streamer only until moderators are allowed.
 - Predefined messages (`AppSettings.predefinedMessages`) are sent from the bolt button next to the chat
   input, to the platform the input is set to.
+
+## Alerts
+
+- `engine/alerts/` holds what the Alerts widget reacts to. `AlertEvent` is the one event type: Twitch follows,
+  subscriptions (subscribe, resubscribe, gifts, upgrades), raids, cheers and redemptions, Kick subscriptions,
+  gifted subscriptions, hosts, rewards and kicks, and chat bot commands.
+- `TwitchEventSubClient` is a long lived EventSub WebSocket client written like the chat clients (one scheduler
+  thread, a lock, no blocking in listener calls, every socket and thread closed by `stop()`). After the welcome it
+  creates the subscriptions the token's scopes allow (`subscriptions()` lists type, version, condition and scope: follows
+  v2, `channel.chat.notification` for every subscription kind as Moblin does, redemptions, raids to the channel, cheers); a 403
+  skips that one, a 401 or a revocation stops the client and calls `onUnauthorized`, anything else reconnects with
+  backoff. Keepalives are watched (`keepalive_timeout_seconds` plus 5 s), `session_reconnect` moves to the new URL
+  without subscribing again, and a notification id seen before is dropped. Notices from another channel of a shared
+  chat session are ignored, which is Moblin's default. Parsing is `parseEventSub` over `JsonElement`.
+- Kick events come over the chat client's Pusher connection: it also subscribes to `channel_<channel id>` (the id is
+  `chatroom.channel_id` of the channel lookup) and `parseKickFrame` turns `SubscriptionEvent`, `GiftedSubscriptionsEvent`,
+  `RewardRedeemedEvent`, `StreamHostEvent` and `KicksGifted` into `ChatListener.onAlert`. `ChatController.alerts`
+  is a `SharedFlow` of them.
+- `widgets/alerts/AlertsSource` (created by `StreamEngine`) runs the Twitch client while `WidgetRuntime.active` is true, an
+  Alerts widget exists and a Twitch login is stored, and passes Kick events on while active. It also reads new chat lines
+  (`WidgetRuntime.chat`) for `!opirl alert <name>` (the chat bot's prefix, but read here and not by `chat/ChatBot`), with
+  Moblin's permissions, which are the widget's own: the channel owner always, moderators (on by default), subscribers and
+  everyone (off), and a cooldown that only holds back the last two. A command works once it exists and is enabled,
+  and only the word `alert` is read (no fuzzy matching). An event goes to the Alerts widgets the selected scene shows (nested scenes included), never to a widget that
+  is not on the stream. Moblin never plays its channel point redemption alert (it is behind a debug switch and an
+  `if false`); here one alert plays for every redemption.
+- Each widget has an `AlertSequence` in `runtime.state(widget.id)`: a bounded queue (100), one alert at a time, 3 s
+  after one ends before the next, the settings read when the alert is dequeued, an alert that is disabled or has no
+  matching item skipped. `AlertsWidget.draw` drives it: it dequeues, prepares the alert on the IO dispatcher (GIF frames
+  decoded once with `GifReader`, scaled no larger than they are drawn, at most 48 MiB of frames; sound and speech start
+  when the alert starts), then returns the frame that is due and asks to be drawn at the next frame change, at most every
+  33 ms. A still image shows for 1 s per repeat, a GIF frame for its delay (10 ms or less counts as 100 ms).
+- The look is Moblin's. The image is drawn at its own pixel size, the text under it centered on the image: `user ` in
+  the accent colour, the message in the text colour, a 2 px black outline, wrapped at 1000 px and left aligned inside its
+  block (a long line can reach past the picture, as in Moblin). All sizes scale with `min(width, height) / 1080`, so a
+  1080 px short side gives Moblin's pixels. The box is as wide as the image and as high as image plus text, placed like
+  any widget (default 20% and 5% from the top left, no size). Texts are English and not translated (`resolveAlert`).
+- Settings: `AlertsSettings` holds one `AlertSettings` for each alert, thresholds for cheers and kicks (the first enabled
+  match plays), chat bot commands with their permissions and the widget's own images and sounds. Bundled images and sounds
+  are in `assets/alerts/` and named by id (`BUNDLED_IMAGES`, `BUNDLED_SOUNDS`); a custom one is a copy in `files/widgets/`.
+  Left out compared with Moblin: placing an alert on a face, speech to text alerts, Moblin Cloud tips, AI answers, video
+  alerts, cloud voices, per-language voices (the phone's voice reads), the quick button alert and the remote control.
 
 ## Recording
 
@@ -329,16 +373,67 @@ them, not code style.
   attached the one in use stays in use. A scene that plays videos (see Video scenes) keeps playing them.
 - An image or browser widget can remove its background (see Filters).
 - `AppSettings.widgets` are global; a `SceneWidget` places one in a scene: on or off, a corner, X and Y
-  offsets from that corner in percent of the picture, and a size in percent of its width. Text and Music
-  widgets ignore the size, their text size sets it. `Widget.previewOnly` keeps a widget out of the stream, the
+  offsets from that corner in percent of the picture, and a size in percent of its width. Widgets whose drawer
+  is not `sized` (text, music) ignore the size, their text size sets it. `Widget.previewOnly` keeps a widget out of the stream, the
   recording and snapshots.
-- `widgets/WidgetRenderer` turns the selected scene's widgets into `Overlay`s (a bitmap and a rectangle in
-  picture coordinates, origin top left). Text fills in `{time}` and `{date}` and is redrawn each minute;
-  images are copies in `files/widgets/`, decoded upright (EXIF) and no larger than the picture; chat is
-  the last six lines of `ChatController.lines`. No bitmap is larger than the output picture: long text is
-  cut off and a tall chat keeps its newest lines. A bitmap is
-  reused while its inputs are the same, and the compositor uploads a texture only when the bitmap object
-  changed.
+- Every widget type is a `WidgetDrawer` (`widgets/WidgetKit.kt`) in its own package `widgets/<type>/`, next to
+  its `@Serializable` settings class, which is a field of `Widget` with `@EncodeDefault(NEVER)` so a widget
+  only stores the settings of its own type. `WidgetRegistry.kt` maps `WidgetType` to the drawer. Its settings
+  page is `ui/widgets/<Type>Page.kt`, a composable that takes a `WidgetScope` (the widget, `update { }`, the
+  runtime, `push(page, title)` for sub-pages, which come back as `scope.page`), and its strings are in
+  `res/values/strings_<type>.xml`. Types in `CONTROLLED` also have a `<Type>Controls` composable, shown in
+  the Widgets panel under the switches while the widget is on in the selected scene.
+- `WidgetRenderer` draws the selected scene's widgets on one coroutine: it asks each drawer for a
+  `WidgetFrame` (its size as shares of the picture, and `Layer`s inside that box: a bitmap or a surface
+  source, with a rotation, an alpha and a crop), places it with `overlayRect` and hands the compositor
+  `Overlay`s in picture coordinates, origin top left. It draws again when the scenes, the widgets or the
+  picture size change, when `WidgetRuntime.invalidate()` is called, on a new chat line, track or location
+  (only while a widget that uses them is placed), and at the earliest time a drawer asked for with
+  `WidgetContext.redrawAt`/`redrawIn`. Nothing is drawn on a timer otherwise, and nothing at all while
+  neither the preview nor a stream or recording runs. An unchanged overlay list is not sent again.
+- A drawer keeps its bitmaps with `WidgetContext.cached(slot, key)` (slots start with the widget's id; a
+  slot that a draw did not ask for is dropped), so a redraw with the same inputs allocates nothing and
+  the compositor uploads a texture only when the bitmap object changed. An animation moves layers
+  (rotation, alpha, position) of cached bitmaps instead of drawing new ones. No bitmap is larger than
+  the picture. Text scales with `WidgetContext.textScale` (the picture's short side / 400).
+- `WidgetRuntime` (`StreamEngine.widgets`) is what drawers, pages and controls share: the settings store
+  (`update(id) { }` changes one widget), the app context, a coroutine scope, the `OkHttpClient`, the live
+  inputs (`chat`, `track`, `location`, `faces`, `stats`, `ui`), `active` (true while the preview or a stream or
+  recording runs: a source of its own, a connection or a sensor, runs only then) and `state(key) { }`, objects that live as long as
+  the app (a spinning wheel, a snapshot queue), keyed by the widget's id. Whatever must survive a restart
+  is in the widget's settings instead. `Need.Location` from `WidgetDrawer.needs` turns the location
+  updates on (`widgets/sources/LocationSource`, the platform's fused provider, else GPS and network) while
+  such a widget is in the selected scene and the preview or a stream runs; the stream service then also
+  runs with the location type. `ui/widgets/LocationAccess` asks for the permission on the widget's page.
+  `Need.FaceOf(camera)` asks for the face seen by a camera (null is the scene's own), reported in
+  `WidgetRuntime.faces`.
+- Files a widget owns (images, models, sounds) are copies in `files/widgets/` whose names start with the
+  widget's id (`rememberWidgetFilePicker`); deleting the widget deletes them.
+- A Scene widget shows the widgets of another scene at that scene's placements, a Slideshow shows text
+  and image widgets one after another at its own placement, a Crop widget shows a part of a browser
+  widget's page (the same page, opened once), a Snapshot widget shows each snapshot for its showtime.
+  A widget is drawn once per scene, however often scenes nest it.
+- Images are copies in `files/widgets/`, decoded upright (EXIF) and no larger than the picture; chat is
+  the last six lines of `ChatController.lines`; a tall chat keeps its newest lines.
+- The Text widget (`widgets/text/`) is Moblin's text widget. `Widget.text` is the format string, parsed by
+  `parseTextFormat` (`{time}`, `{speed:km/h}`, `{checkbox}`, `\n` and every other field of
+  `TextFormatStringLoader.swift`; a field with no Android source, such as Apple workout, Tesla, cycling and
+  running sensors, subtitles, the debug overlay, the browser title and the latest follower, still parses and
+  shows what Moblin shows without data). `Widget.textSize` is the font size in `textScale` units and
+  `Widget.textOptions` has the rest: colours, font, alignment, minimum width, corner radius (also in `textScale`
+  units), the delay, and the timers, stopwatches, checkboxes, ratings and lap times, one entry per such field
+  in the text (`synced`). A timer's end, a stopwatch's start and a lap's start are wall clock times in the
+  settings. Every line has its own rounded background, like Moblin. The Rounded design is Nunito
+  (`assets/fonts`), the others are system families; the checkbox, stars and mute symbol are drawn as paths.
+  The widget is drawn again only when a shown field changes (`nextRedraw`: second, minute and midnight
+  boundaries, running timers, stopwatches and laps, g-force each second). Stream stats and mute wake it
+  through `TextSources`, a location fix through the renderer. `runtime.textSources()` (one per runtime) runs
+  while `runtime.active` for the text widgets placed in the selected scene (`textDemand`): the weather from
+  Open-Meteo every 10 minutes (5 seconds until the first answer), the place from `Geocoder` (every 5 minutes,
+  and only after 1000 m), the accelerometer for g-force and the trip (distance, ascent, descent, the splits,
+  slope and average speed, derived from the fixes as `ModelLocation.swift` does and kept in memory, reset by
+  the controls or when going live if the widget says so). With a delay the fields come from the sample taken
+  that many seconds ago.
 - A browser widget is a web page drawn off screen (`widgets/BrowserWidgets`, main thread only): a
   `WebView` in a `Presentation` on a private `VirtualDisplay` whose surface is a `SurfaceTexture` of the
   compositor (`openSurfaceOverlay`). The page keeps its transparency and its animations, and costs no
@@ -364,9 +459,113 @@ them, not code style.
   resends its state does not make the widget redraw. The text size is clamped to the slider's range and the
   bitmap to the picture. "Hide when paused" (on by default) removes the
   widget while nothing plays; "Cover" off leaves the text.
+- The PNGTuber widget (`widgets/pngtuber`) shows a PNGTuber Plus `.save` model that follows a face. The file is one
+  JSON object of numbered images: `imageData` (base64 PNG), `costumeLayers` (a string holding ten 0/1 flags),
+  `showBlink` and `showTalk` (0 always, 1 eyes open or mouth closed, 2 eyes closed or mouth open) and `zindex`.
+  Positions, offsets and parents are ignored, as on iOS: the layers of the costume that fit the pose are drawn in
+  z order, bottom left aligned, into one picture as large as the largest of them, which is fitted into the
+  placement size in percent of both the width and the height of the output (the iOS rule, not the width only).
+  Mirror flips that picture. The face is `WidgetRuntime.faces[cameraKey]` (`Need.FaceOf`, null is the scene's
+  camera): the mouth is open when `mouthOpen * sensitivity > 0.2`, the eyes (the left one, as on iOS) are open
+  when `leftEyeOpen * sensitivity > 0.4`, the sensitivities being 5 to 300 and 5 to 500 percent. Without a face
+  the last pose stays; before the first face it is eyes open, mouth closed. `PngTuberState.ensure`, called by the
+  drawer and by the page, reads the file once on the IO dispatcher (`Json.decodeFromStream` into a tree) and
+  composes one bitmap per distinct set of visible layers (at most four: mouth and eyes), layer by layer, so no
+  decoded layer is kept. Layers are decoded at a half octave scale (`decodeLevel`) that covers the placement and
+  the composites never exceed the output; a changed file, costume, output size or scale level loads again while
+  the old pictures stay on screen, and nothing is drawn before the first load ends. A file whose layers cannot
+  be read is `failed` and the page says so.
+- The Map widget (`widgets/map/`) draws an OpenStreetMap raster map (256 px Web Mercator tiles from
+  `tile.openstreetmap.org`) centred on `WidgetRuntime.location`, with Moblin's marker (a light ring round a blue dot,
+  30 px at 1080p). Its size is a camera distance in metres (500 to 10000) as in Moblin: the map shows `2 tan 15°`
+  times that, plus 150 m for every m/s over 4 m/s. With north up off the map turns to the course and, over 4 m/s,
+  its centre moves ahead so that the marker sits below the middle (at most a quarter of the side). The delay shows
+  the newest fix that is old enough (`FixQueue`, 12 s of history) and asks for a redraw when the next one comes due.
+  The placement size is a percentage of the picture's short side, as in Moblin. Corner radius and border are
+  Moblin's shape effect. `MapGeometry` is the pure maths (tested). `TileStore` loads tiles on two threads into a
+  48 tile LRU, asks only for the tiles the map covers at that moment (never a margin: the tile policy counts
+  pre-emptive fetching as bulk downloading), backs off per failing tile and calls `runtime.invalidate()` per
+  arrival. `OsmTiles` fetches through a client derived from `runtime.http` with a 50 MiB `okhttp3.Cache` in
+  `cacheDir/map-tiles` (server cache headers are honoured, so a tile is fetched once) and the `User-Agent`
+  `opIRL/<version> (Android)`. The drawer never waits for the network: the map is drawn once every tile it covers is
+  cached, until then the previous bitmap stays up (nothing before the first one), like Moblin's snapshotter.
+  "© OpenStreetMap" is drawn in the map's bottom right corner and has to stay; the widget's page tells the streamer
+  to link openstreetmap.org/copyright in the stream description. The tile policy allows blocking apps whose use
+  degrades the service, so an app with many users needs a tile provider it has an agreement with (one URL, in
+  `osmTileStore`). Not ported: privacy regions (the app has none) and the chat bot's temporary zoom out.
 - `VideoCompositor.setOverlays` draws them over the camera with premultiplied alpha blending: all of them
   on the preview, the ones that are not preview only on the encoder and recorder surfaces and in snapshots.
   They are never mirrored.
+- The Wheel of luck follows Moblin's `WheelOfLuckEffect`. The wheel is one bitmap (400 px per 1920 px of picture
+  width, so it has no size setting and is smaller on a portrait picture) turned as a layer; the pointer is a layer
+  of its own, 70% of it over the wheel. A spin lasts 12 s and the angular speed falls linearly from a random 8 to
+  15 rad/s, so `WheelSpin` computes the angle from the time and the widget is drawn every 33 ms only while it
+  turns. Spins queue: the next starts 3 s after the previous one ended. With "Only show when spinning" the wheel
+  appears 1.5 s before a first spin, stays 5 s after it and is then removed. The result is the sector under the
+  pointer when the spin ends; the results (newest first, at most 100) and the queue are in `WheelState`, which
+  lives in `WidgetRuntime.state`, so nothing of a spin is stored in the settings. The simple options editor is one
+  option per line and resets the weights, the advanced one lists options with a weight of 1 to 100, as in Moblin.
+  The caption of Moblin Cloud tips and the actions of options are not ported.
+- The Bingo card follows `BingoCardEffect`: a square whose side is the placement size in percent of the picture's
+  shorter side, with 2, 3, 4 or 5 squares per side for up to 4, 9, 16 or more squares (`bingoSide`; squares past 25
+  are not drawn). Text is 35% of a square, shrunk down to 40% to fit three lines, then cut. The squares and their
+  marks are in the settings, and a mark belongs to its line, not to its text (`squaresFromText`).
+- A Video source widget is picture in picture: a second camera drawn as a layer. Its `Layer` carries a
+  `CameraFeed(camera)` and `StreamEngine.syncFeed` runs one second `CameraController` (or the UVC driver for
+  `USB_CAMERA`) into a surface overlay of the compositor named `camera:<key>`, only while such a widget, or a face
+  widget that names another camera, is in the selected scene and the preview runs. One feed at a time: the first
+  one the overlays ask for. Two built-in cameras run together only when `CameraManager.concurrentCameraIds` lists
+  the pair (the Flip5 lists none, the emulator does); otherwise nothing is drawn. A USB camera that a Video source
+  widget of the selected scene uses (`usbIsFeed`) is no longer the camera of the scenes. `VideoCompositor.setFeedInput`
+  takes the feed's size, sensor orientation, display rotation and mirror, and the feed fills its layer and crops
+  the rest (`fillMatrix`). `feedBox` (pure, tested) turns the settings (crop in percent, rotation in quarter
+  turns, mirror) into the widget's box and the layer inside it. Corner radius and border are percent of the
+  layer's shorter side, drawn by the surface shader as a rounded rectangle, so they cost no bitmap.
+- Layers are drawn by one vertex shader (`PLACE`: rectangle, crop, rotation about the centre) with an alpha
+  and the widget's chroma key (`KEYED`); surface layers also take the corner radius and border. `linkProgram` checks the link status, because a
+  uniform declared with different precisions in the two stages only fails there.
+- Face tracking: `VideoCompositor.setFrameTap` reads the scene's picture, or a feed's, into a 320 px wide
+  buffer at most ten times a second and only when the last frame was consumed (`FrameTap.busy`), and
+  `widgets/sources/FaceTracker` runs ML Kit's bundled face detector (contours and classification) on it off
+  the render thread. `Face` is what widgets get: `mouthOpen` (the inner lip gap over the face height, times 8,
+  0 to 1), eye openness, yaw, pitch and roll in degrees, and the box in shares of the picture. The detector
+  runs only while a drawer in the selected scene returns `Need.FaceOf` and the preview runs. One camera is
+  tracked at a time: the first `FaceOf` (`StreamEngine.faceCamera`).
+- The VTuber widget (`widgets/vtuber`) draws a VRM model (0.x or 1.0) with Filament and gltfio into a surface
+  overlay, a square whose side is the placement size in percent of the picture's shorter side. `VTubers` owns
+  one `HandlerThread`; every Filament call is made on it, each model has its own `Engine`, and a model lives
+  only while its widget is in the selected scene and the preview runs. It draws every 33 ms. The file is read
+  into a direct `ByteBuffer` that the renderer keeps for its lifetime (gltfio reads from it after loading),
+  and `plainSlashes` first rewrites `\/` to `/` in the GLB's JSON chunk, padded with spaces, because UniVRM
+  escapes slashes and gltfio then finds no decoder for `image\/png`. `parseVrm` (pure, tested) reads the
+  humanoid bones (neck, spine, upper arms) and the mouth (`aa`/`a`) and blink morph binds of both versions; a
+  1.0 model faces +Z and is turned around. Bones are set from the rest pose: the wanted rotation in world axes
+  is conjugated by the parent's world rotation, so models whose bones are not axis aligned (1.0) pose the same.
+  `TransformManager.getParent` returns an entity, not an instance. The animator is fetched after
+  `loadResources`. The head follows the face's yaw and roll (0.8 on the neck, a third of that on the spine),
+  the arms hang at `armsAngle` and sway (`armSway`), mouth and blink weights follow the face times the
+  sensitivities. Lighting is one directional light and a constant ambient with a linear tone mapper, over a
+  transparent swap chain. Spring bones, MToon shading, look-at and VRM 1.0 node constraints are not applied
+  (Moblin applies no constraints either), so a model that moves its sleeves with constraints keeps them in
+  the rest pose. Filament's ARM library crashes under the x86 emulator's ARM translation (a SIGSEGV in
+  `FEngine::loop`), so the VTuber widget can only be run on a real phone.
+- The Scoreboard (`widgets/scoreboard/`) is one widget with eleven sports. Generic, Padel, Golf and the Golf full
+  scorecard have their own drawers. Basketball, Generic 2, Generic sets, Hockey, Football, Tennis and
+  Volleyball share the modular drawer, whose templates and actions port Moblin's `ModelScoreboard.swift` and the
+  web remote. All state is in `ScoreboardSettings`; a running clock is `startedAt` (wall clock) plus `seconds`,
+  derived from `context.now` and redrawn once a second only while it changes. The scale is
+  `textScale * size / 50`, so the placement size is a scale, not a share of the width. The full scorecard
+  shows the first Golf widget's round. Moblin's Watch and web remote actions are rows of `ScoreboardControls`.
+- The Pomodoro widget keeps its timer in its settings as wall clock values (`phase`, `endsAt` while running,
+  `secondsLeft` while stopped, null meaning a whole phase). `PomodoroSettings.reading(now)` derives the phase and
+  the seconds, flipping phases by arithmetic, so a phase that ends while the app is closed is right at the next
+  draw and the drawer never writes settings; every change from the controls first moves the stored phase up to
+  now. Like Moblin's one second tick, each value, `00:00` included, shows for a whole second. It redraws only at
+  those seconds and only while running. Its size is a percent of the picture's short side, and the width setting
+  stretches the box. Moblin's sound and chat message on a phase change are not ported.
+- The QR code widget encodes with ZXing core (level M, UTF-8 bytes, one module of quiet zone, black on white like
+  Core Image) and draws whole pixel modules as close as it can to its size (percent of the picture's short side),
+  never larger than the picture. An empty or too long message draws nothing.
 
 ## Filters
 
@@ -687,6 +886,10 @@ go to the cloud backup only when it is end-to-end encrypted, since the settings 
 Settings, About has a Source code row (the LGPL and MIT texts require a way to the source), and Licenses
 lists the bundled software with its licence text from `assets/licenses/`. Add a row and a text there with
 every new bundled library or asset.
+
+`app/proguard-rules.pro` keeps the no-argument constructors of ML Kit's `ComponentRegistrar`s: R8 removes them
+otherwise (they are only called by reflection) and the face detector then fails at runtime in the release build
+only, which no build step or unit test shows. Run the release APK after adding a library that uses reflection.
 
 Engine tests that talk to a real server use the system `ffmpeg`/`ffprobe` as the receiver and are
 skipped when they are missing. The SRTLA end-to-end tests also need `SRTLA_REC` pointing at a built

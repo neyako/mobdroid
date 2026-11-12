@@ -155,6 +155,9 @@ fun linkProgram(vertex: String, fragment: String): Int {
         GLES20.glLinkProgram(it)
         GLES20.glDeleteShader(vs)
         GLES20.glDeleteShader(fs)
+        val ok = IntArray(1)
+        GLES20.glGetProgramiv(it, GLES20.GL_LINK_STATUS, ok, 0)
+        check(ok[0] != 0) { GLES20.glGetProgramInfoLog(it) }
     }
 }
 

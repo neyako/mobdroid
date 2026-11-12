@@ -1,11 +1,10 @@
 package com.opirl.app.scenes
 
 import com.opirl.app.settings.AppSettings
-import com.opirl.app.settings.Corner
 import com.opirl.app.settings.Scene
 import com.opirl.app.settings.SceneWidget
 import com.opirl.app.settings.Widget
-import com.opirl.app.settings.WidgetType
+import com.opirl.app.widgets.drawer
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -44,13 +43,7 @@ fun <T> sceneCamera(
 fun nextScene(ids: List<String>, current: String?): String? =
     if (ids.size < 2) null else ids[(ids.indexOf(current) + 1) % ids.size]
 
-fun defaultPlacement(widget: Widget): SceneWidget = when (widget.type) {
-    WidgetType.TEXT -> SceneWidget(widget.id)
-    WidgetType.IMAGE -> SceneWidget(widget.id, corner = Corner.TOP_RIGHT, size = 15)
-    WidgetType.CHAT -> SceneWidget(widget.id, corner = Corner.BOTTOM_LEFT, size = 35)
-    WidgetType.BROWSER -> SceneWidget(widget.id, x = 0, y = 0, size = 100)
-    WidgetType.MUSIC -> SceneWidget(widget.id, corner = Corner.BOTTOM_LEFT, y = 5)
-}
+fun defaultPlacement(widget: Widget): SceneWidget = widget.type.drawer.placement(widget)
 
 fun Scene.placement(widget: Widget): SceneWidget =
     widgets.firstOrNull { it.widgetId == widget.id } ?: defaultPlacement(widget).copy(enabled = false)

@@ -12,13 +12,17 @@ import okhttp3.Request
 
 const val TWITCH_CLIENT_ID = "qv6bnocuwapqigeqjoamfhif0cv2xn"
 const val TWITCH_REDIRECT_HOST = "localhost"
+val TWITCH_ALERT_SCOPES = listOf("moderator:read:followers", "channel:read:redemptions", "bits:read")
+
+fun missingTwitchScopes(account: TwitchAccount, wanted: List<String> = TWITCH_ALERT_SCOPES): List<String> =
+    wanted.filterNot { it in account.scopes }
 
 fun twitchAuthUrl(state: String): String = Uri.parse("https://id.twitch.tv/oauth2/authorize").buildUpon()
     .appendQueryParameter("client_id", TWITCH_CLIENT_ID)
     .appendQueryParameter("force_verify", "true")
     .appendQueryParameter("redirect_uri", "https://$TWITCH_REDIRECT_HOST")
     .appendQueryParameter("response_type", "token")
-    .appendQueryParameter("scope", TWITCH_SCOPES.joinToString(" "))
+    .appendQueryParameter("scope", (TWITCH_SCOPES + TWITCH_ALERT_SCOPES).joinToString(" "))
     .appendQueryParameter("state", state)
     .build().toString()
 

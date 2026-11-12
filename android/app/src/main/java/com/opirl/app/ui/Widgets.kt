@@ -24,9 +24,15 @@ import com.opirl.app.scenes.placement
 import com.opirl.app.scenes.withPlacement
 import com.opirl.app.settings.AppSettings
 import com.opirl.app.settings.SettingsStore
+import com.opirl.app.settings.WidgetType
+import com.opirl.app.stream.StreamEngine
+import com.opirl.app.ui.widgets.CONTROLLED
+import com.opirl.app.ui.widgets.WidgetControls
+import com.opirl.app.ui.widgets.WidgetScope
+import com.opirl.app.ui.widgets.hasTextControls
 
 @Composable
-fun WidgetsPanel(store: SettingsStore, settings: AppSettings, onHide: () -> Unit, onClose: () -> Unit) {
+fun WidgetsPanel(store: SettingsStore, engine: StreamEngine, settings: AppSettings, onHide: () -> Unit, onClose: () -> Unit) {
     val scene = settings.selectedScene
     Surface(Modifier.fillMaxSize(), color = Color.Black) {
         Column {
@@ -58,6 +64,15 @@ fun WidgetsPanel(store: SettingsStore, settings: AppSettings, onHide: () -> Unit
                                 }
                             }
                         }
+                    }
+                    settings.widgets.filter { it.type in CONTROLLED && scene.placement(it).enabled && (it.type != WidgetType.TEXT || hasTextControls(it)) }.forEach { widget ->
+                        Text(
+                            widget.name,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 4.dp, top = 4.dp),
+                        )
+                        WidgetControls(WidgetScope(store, engine, settings, widget, null, { _, _ -> }, {}))
                     }
                 }
             }

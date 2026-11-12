@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="wheel_options">Options</string>
+    <string name="wheel_options_hint">One option per line</string>
+    <string name="wheel_option_number">Option %1$d</string>
+    <string name="wheel_option_text">Text</string>
+    <string name="wheel_weight">Weight</string>
+    <string name="wheel_add_option">Add option</string>
+    <string name="wheel_advanced">Advanced</string>
+    <string name="wheel_only_when_spinning">Only show when spinning</string>
+    <string name="wheel_spin">Spin</string>
+    <string name="wheel_shuffle">Shuffle</string>
+</resources>

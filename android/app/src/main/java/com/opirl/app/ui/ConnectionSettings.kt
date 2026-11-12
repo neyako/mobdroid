@@ -93,16 +93,6 @@ private fun share(context: Context, text: String) {
     }
 }
 
-@Composable
-private fun Note(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = 4.dp),
-    )
-}
-
 private const val LOCAL_NETWORK = "android.permission.ACCESS_LOCAL_NETWORK"
 
 @Composable

@@ -1,5 +1,6 @@
 package com.opirl.app.engine.chat.kick
 
+import com.opirl.app.engine.alerts.AlertEvent
 import com.opirl.app.engine.chat.ChatMessage
 import com.opirl.app.engine.chat.ChatPlatform
 import com.opirl.app.engine.chat.ChatSegment
@@ -107,6 +108,38 @@ class KickEventsTest {
     }
 
     @Test
+    fun readsTheAlertEvents() {
+        val cases = mapOf(
+            KickFrames.SUBSCRIPTION to AlertEvent.KickSubscription("PixelFox", 3),
+            KickFrames.GIFTED_SUBSCRIPTIONS to AlertEvent.KickGiftedSubscriptions("ModMoss", 3, 12),
+            KickFrames.REWARD to AlertEvent.KickReward("PixelFox", "Hydrate", "drink up"),
+            KickFrames.HOST to AlertEvent.KickHost("ChannelOwner", 57),
+            KickFrames.KICKS to AlertEvent.KickKicks("ModMoss", "Rage Quit", 100),
+        )
+        for ((frame, expected) in cases) {
+            assertEquals(KickEvent.Alert(expected), parseKickFrame(frame, NOW), expected.toString())
+        }
+    }
+
+    @Test
+    fun ignoresAlertEventsMissingTheirFields() {
+        val broken = listOf(
+            "App\\Events\\SubscriptionEvent" to """{"username":"PixelFox"}""",
+            "GiftedSubscriptionsEvent" to """{"gifter_username":"ModMoss","gifter_total":1}""",
+            "RewardRedeemedEvent" to """{"username":"PixelFox"}""",
+            "App\\Events\\StreamHostEvent" to """{"host_username":"ChannelOwner"}""",
+            "KicksGifted" to """{"sender":{"username":"ModMoss"},"gift":{"name":"Rage Quit"}}""",
+        )
+        for ((event, data) in broken) {
+            val frame = buildJsonObject {
+                put("event", event)
+                put("data", data)
+            }.toString()
+            assertNull(parseKickFrame(frame, NOW), event)
+        }
+    }
+
+    @Test
     fun recognizesThePusherControlFrames() {
         assertEquals(KickEvent.ConnectionEstablished, parseKickFrame(KickFrames.ESTABLISHED, NOW))
         assertEquals(KickEvent.Subscribed("chatrooms.100200.v2"), parseKickFrame(KickFrames.SUBSCRIBED, NOW))
@@ -144,6 +177,16 @@ class KickEventsTest {
         )
         for (body in unusable) {
             assertNull(parseKickChatroomId(body), body)
+        }
+    }
+
+    @Test
+    fun readsTheChannelIdOfALookup() {
+        val lookup =
+            """{"id":32807,"slug":"somechannel","chatroom":{"id":32806,"channel_id":32807,"slow_mode":false}}"""
+        assertEquals(32807L, parseKickChannelId(lookup))
+        for (body in listOf("""{"chatroom":{"id":1}}""", """{"chatroom":{"channel_id":0}}""", "<html></html>")) {
+            assertNull(parseKickChannelId(body), body)
         }
     }
 

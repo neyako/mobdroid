@@ -121,14 +121,30 @@ import com.opirl.app.settings.bonded
 import com.opirl.app.settings.transport
 import com.opirl.app.settings.transportOf
 import com.opirl.app.settings.WidgetType
+import com.opirl.app.widgets.Need
 import com.opirl.app.widgets.NowPlaying
+import com.opirl.app.widgets.WidgetRuntime
+import com.opirl.app.widgets.alerts.AlertsSource
+import com.opirl.app.widgets.snapshot.SnapshotWidget
+import com.opirl.app.widgets.videosource.USB_CAMERA
+import com.opirl.app.media.gl.CameraFeed
+import com.opirl.app.media.gl.FeedInput
+import com.opirl.app.media.gl.FrameTap
+import com.opirl.app.media.gl.VTuberSource
+import com.opirl.app.widgets.vtuber.VTubers
+import com.opirl.app.widgets.sources.FaceTracker
+import kotlin.math.abs
+import com.opirl.app.widgets.sources.LocationSource
 import com.opirl.app.uvc.UvcCamera
 import com.opirl.app.uvc.UvcDevices
 import com.opirl.app.uvc.closest
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraManager
 import android.hardware.usb.UsbDevice
+import android.os.Build
+import com.opirl.app.settings.AppSettings
 import android.hardware.usb.UsbManager
 import android.util.Range
 import androidx.core.content.ContextCompat
@@ -185,6 +201,7 @@ data class LiveStats(
     val queuedBytes: Long = 0,
     val droppedFrames: Long = 0,
     val uptimeSeconds: Long = 0,
+    val bytesSent: Long = 0,
     val codec: VideoCodec? = null,
     val links: List<LinkShare> = emptyList(),
     val totalBytes: Long = 0,
@@ -211,6 +228,12 @@ data class UiState(
 
 data class RecordingStats(val seconds: Long = 0, val bytes: Long = 0)
 
+private class Feed(val key: String, val camera: CameraDescriptor, val compositor: VideoCompositor) {
+    var uvc: UvcCamera? = null
+    var width = 0
+    var height = 0
+}
+
 enum class ReplayState { IDLE, PENDING, PLAYING }
 
 private class LiveOutput(val id: String, val name: String, val session: StreamSession, opus: Boolean) {
@@ -230,6 +253,8 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val powerManager = context.getSystemService(PowerManager::class.java)
     private val camera = CameraController(context)
+    private val feedCamera = CameraController(context)
+    private var feed: Feed? = null
     private val links = AndroidNetworkLinks(context)
     private val uvcDevices = UvcDevices(context)
     private var uvcCamera: UvcCamera? = null
@@ -310,6 +335,8 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     @Volatile
     private var compositor: VideoCompositor? = null
     private var overlays = emptyList<Overlay>()
+    @Volatile
+    private var widgetNeeds = emptySet<Need>()
     private var widgetOverlays = emptyList<Overlay>()
     private val drawBoard = DrawBoard()
     val drawnLines: StateFlow<Int> = drawBoard.count
@@ -365,7 +392,6 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             override fun format(text: String) = expandText(text, LocalDateTime.now())
         },
     ) { settings.settings.value.macros }
-    private var widgetRenderer: WidgetRenderer? = null
     private val browsers = BrowserWidgets(context)
     private val mainHandler = Handler(Looper.getMainLooper())
     private var previewSurface: Surface? = null
@@ -402,6 +428,28 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     val recordings = RecordingStore(context)
     private val audioMix = AudioMix()
     val nowPlaying = NowPlaying(context)
+    val location = LocationSource(context)
+    private val faceTracker = FaceTracker()
+    private var faceTap: Pair<VideoCompositor, String?>? = null
+    private val vtubers = VTubers(File(context.filesDir, "widgets"), faceTracker.faces)
+    val widgets = WidgetRuntime(context, scope, settings, http, chat.lines, emoteImages, nowPlaying.track, location.location, faceTracker.faces, stats, ui)
+    private val alertsSource = AlertsSource(widgets, logins.logins, chat.alerts) { showAlert(AlertLevel.ERROR, "Twitch", it) }
+    private val widgetRenderer = WidgetRenderer(
+        widgets,
+        { next ->
+            synchronized(this) {
+                widgetOverlays = next
+                applyOverlays()
+                syncBrowsers()
+                syncVTubers()
+                syncFeed(true)
+            }
+        },
+        { needs ->
+            widgetNeeds = needs
+            syncWidgetSources()
+        },
+    )
     private val _videoPlayer = MutableStateFlow<VideoPlayer?>(null)
     val videoPlayer: StateFlow<VideoPlayer?> = _videoPlayer.asStateFlow()
     private var videoInput: Triple<Int, Int, Int>? = null
@@ -479,10 +527,10 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         }
         scope.launch {
             settings.settings
-                .map { it.selectedScene?.cameraKey to it.selectedScene?.let(::videoKey) }
+                .map { Triple(it.selectedScene?.cameraKey, it.selectedScene?.let(::videoKey), usbIsFeed(it)) }
                 .distinctUntilChanged()
                 .drop(1)
-                .collect { syncScene() }
+                .collect { synchronized(this@StreamEngine) { syncScene() } }
         }
         scope.launch {
             settings.settings.map { it.selectedScene?.let { scene -> scene.videoVolume to scene.micWithVideo } }
@@ -538,7 +586,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         }
         scope.launch {
             settings.settings.map { s -> s.widgets.any { it.type == WidgetType.MUSIC } }.distinctUntilChanged().drop(1).collect {
-                synchronized(this@StreamEngine) { syncNowPlaying() }
+                synchronized(this@StreamEngine) { syncWidgetSources() }
             }
         }
         scope.launch {
@@ -656,11 +704,14 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             val cameras = listCameras()
             synchronized(this@StreamEngine) {
                 val current = _ui.value.camera
-                val next = cameras.firstOrNull { it.id == attachedId } ?: sceneCamera(cameras)
+                val attached = cameras.firstOrNull { it.id == attachedId }.takeUnless { usbIsFeed(settings.settings.value) }
+                val next = attached ?: sceneCamera(cameras)
                 _ui.update { it.copy(cameras = cameras) }
                 if (next != null && next.key != current?.key) {
                     _ui.update { it.copy(camera = next, lens = defaultLens(next), zoom = 1f, torch = false) }
                     if (previewActive) openCamera()
+                } else {
+                    syncFeed(true)
                 }
             }
         }
@@ -750,8 +801,17 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         _ui.value.camera?.key,
         settings.settings.value.selectedScene?.cameraKey,
         { it.key },
-        { it.facing == Facing.EXTERNAL },
+        { it.facing == Facing.EXTERNAL && !usbIsFeed(settings.settings.value) },
     ) ?: defaultCamera(cameras)
+
+    private fun usbIsFeed(settings: AppSettings): Boolean {
+        val scene = settings.selectedScene ?: return false
+        return scene.widgets.any { placement ->
+            placement.enabled && settings.widgets.any {
+                it.id == placement.widgetId && it.type == WidgetType.VIDEO_SOURCE && it.videoSource.camera == USB_CAMERA
+            }
+        }
+    }
 
     fun selectScene(id: String) = settings.update { it.copy(selectedSceneId = id) }
 
@@ -813,7 +873,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                     startChat()
                 }
                 syncObs()
-                syncNowPlaying()
+                syncWidgetSources()
                 syncConnections()
                 syncHorizon()
             }
@@ -914,7 +974,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         syncHorizon()
         stopChat()
         obs.stop()
-        nowPlaying.setEnabled(false)
+        syncWidgetSources()
         audioEncoder?.release()
         audioEncoder = null
         micCatalog.close()
@@ -922,6 +982,9 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         val closing = compositor
         compositor = null
         syncBrowsers()
+        syncVTubers()
+        syncFeed(false)
+        syncFaces()
         closing?.release()
     }
 
@@ -1162,6 +1225,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         if (title != null) {
             service.putExtra(StreamService.EXTRA_USB, uvcCamera != null || relay)
                 .putExtra(StreamService.EXTRA_MEDIA, busy)
+                .putExtra(StreamService.EXTRA_LOCATION, Need.Location in widgetNeeds && location.allowed)
                 .putExtra(StreamService.EXTRA_TITLE, title)
             if (serviceStarted) {
                 runCatching { context.startForegroundService(service) }.onFailure { Log.w(TAG, "Service update failed", it) }
@@ -1262,8 +1326,36 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private fun connectedObs(wanted: ObsSettings): ObsState? =
         obs.state.value.takeIf { it.connected && wanted.enabled && obs.isFor(obsUrl(wanted.url), wanted.password) }
 
-    private fun syncNowPlaying() {
-        nowPlaying.setEnabled((previewActive || busy) && settings.settings.value.widgets.any { it.type == WidgetType.MUSIC })
+    @Synchronized
+    fun syncWidgetSources() {
+        val running = previewActive || busy
+        widgetRenderer.active = running
+        widgets.setActive(running)
+        nowPlaying.setEnabled(running && settings.settings.value.widgets.any { it.type == WidgetType.MUSIC })
+        location.setEnabled(running && Need.Location in widgetNeeds)
+        syncFeed(true)
+        syncFaces()
+    }
+
+    private fun faceCamera(): Need.FaceOf? = widgetNeeds.firstNotNullOfOrNull { it as? Need.FaceOf }
+
+    private fun syncFaces() {
+        val target = compositor
+        val need = if (target != null && previewActive) faceCamera() else null
+        val wanted = need?.let { target!! to it.camera.takeUnless { key -> key == _ui.value.activeCamera?.key || key == _ui.value.camera?.key } }
+        if (wanted == faceTap) return
+        faceTap?.first?.setFrameTap(null)
+        faceTap = wanted
+        if (wanted == null) {
+            faceTracker.stop()
+            return
+        }
+        val camera = need.camera
+        lateinit var tap: FrameTap
+        tap = FrameTap(wanted.second?.let { "camera:$it" }, 100_000_000L) { frame ->
+            faceTracker.process(camera, frame) { tap.busy.set(false) }
+        }
+        wanted.first.setFrameTap(tap)
     }
 
     private fun syncObs() {
@@ -1536,6 +1628,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         val compositor = synchronized(this) { compositor } ?: return
         compositor.takeSnapshot { bitmap ->
             ioScope.launch {
+                if (bitmap != null) SnapshotWidget.add(widgets, bitmap)
                 val saved = bitmap != null && recordings.saveSnapshot(bitmap)
                 bitmap?.recycle()
                 if (saved) {
@@ -1788,6 +1881,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             queuedBytes = stats.queuedBytes,
             droppedFrames = stats.droppedVideoFrames,
             uptimeSeconds = (System.nanoTime() - liveStartedAt) / 1_000_000_000L,
+            bytesSent = stats.bytesSent,
             codec = liveCodec,
             links = shares,
             totalBytes = stats.bytesSent,
@@ -1856,15 +1950,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         drawBoard.setSize(w, h)
         applyOverlays()
         syncBrowsers()
-        if (widgetRenderer == null) {
-            widgetRenderer = WidgetRenderer(File(context.filesDir, "widgets"), scope, settings.settings, chat.lines, nowPlaying.track, emoteImages) { next ->
-                synchronized(this) {
-                    widgetOverlays = next
-                    applyOverlays()
-                    syncBrowsers()
-                }
-            }
-        }
+        syncVTubers()
     }
 
     private fun syncBrowsers() {
@@ -1876,9 +1962,13 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         val pages: Map<String, BrowserPage>
         synchronized(this) {
             target = compositor
-            pages = overlays.mapNotNull { overlay -> overlay.browser?.let { overlay.id to it } }.toMap()
+            pages = overlays.mapNotNull { overlay -> (overlay.source as? BrowserPage)?.let { overlay.surface to it } }.toMap()
         }
         browsers.sync(pages, target)
+    }
+
+    private fun syncVTubers() {
+        vtubers.sync(overlays.mapNotNull { overlay -> (overlay.source as? VTuberSource)?.let { overlay.surface to it } }.toMap(), compositor)
     }
 
     private fun videoKey(scene: Scene) = if (scene.playsVideo) scene.id to scene.videos else null
@@ -1963,6 +2053,121 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     }
 
     private fun openCamera() {
+        syncFeed(false)
+        openSource()
+        syncFeed(true)
+        syncFaces()
+    }
+
+    private fun feedCamera(): Pair<String, CameraDescriptor>? {
+        val wanted = overlays.firstNotNullOfOrNull { it.source as? CameraFeed }?.camera ?: faceCamera()?.camera ?: return null
+        val cameras = _ui.value.cameras
+        val descriptor = if (wanted == USB_CAMERA) {
+            cameras.firstOrNull { it.facing == Facing.EXTERNAL }
+        } else {
+            cameras.firstOrNull { it.key == wanted }
+        } ?: return null
+        val main = _ui.value.activeCamera
+        if (main != null && settings.settings.value.selectedScene?.playsVideo != true) {
+            if (main.id == descriptor.id) return null
+            val both = !main.id.startsWith(UVC_PREFIX) && !descriptor.id.startsWith(UVC_PREFIX)
+            if (both && !camerasRunTogether(main.id, descriptor.id)) return null
+        }
+        return "camera:$wanted" to descriptor
+    }
+
+    private fun camerasRunTogether(first: String, second: String): Boolean = Build.VERSION.SDK_INT >= 30 && runCatching {
+        context.getSystemService(CameraManager::class.java).concurrentCameraIds.any { first in it && second in it }
+    }.getOrDefault(false)
+
+    private fun syncFeed(open: Boolean) {
+        val target = compositor
+        val wanted = if (target != null && previewActive) feedCamera() else null
+        val current = feed
+        if (current != null && (wanted == null || current.key != wanted.first || current.camera.key != wanted.second.key || current.compositor !== target)) {
+            closeFeed()
+        }
+        if (open && feed == null && wanted != null && target != null) openFeed(wanted.first, wanted.second, target)
+    }
+
+    private fun closeFeed() {
+        val current = feed ?: return
+        feed = null
+        feedCamera.close()
+        current.uvc?.let { uvc ->
+            uvc.onError = null
+            uvc.close()
+        }
+        current.compositor.closeSurfaceOverlay(current.key)
+    }
+
+    private fun feedInput(current: Feed) = FeedInput(
+        current.width,
+        current.height,
+        current.camera.sensorOrientation,
+        if (current.camera.facing == Facing.EXTERNAL) usbRotation() else displayRotation,
+        current.camera.facing == Facing.FRONT,
+    )
+
+    private fun openFeed(key: String, descriptor: CameraDescriptor, compositor: VideoCompositor) {
+        val current = Feed(key, descriptor, compositor)
+        feed = current
+        if (!descriptor.id.startsWith(UVC_PREFIX)) {
+            val size = descriptor.chooseSize(1280, 720, 30) ?: descriptor.sizes.firstOrNull()
+            val surface = size?.let { compositor.openSurfaceOverlay(key, it.width, it.height) }
+            if (size == null || surface == null) {
+                feed = null
+                return
+            }
+            current.width = size.width
+            current.height = size.height
+            compositor.setFeedInput(key, feedInput(current))
+            feedCamera.open(descriptor, surface, size, minOf(30, descriptor.maxFps(size)), Stabilization.OFF)
+            return
+        }
+        val device = uvcDevices.list().firstOrNull { UVC_PREFIX + it.deviceName == descriptor.id }
+        if (device == null) {
+            feed = null
+            return
+        }
+        uvcDevices.requestPermission(device) { granted ->
+            if (!granted) return@requestPermission
+            ioScope.launch {
+                val uvc = try {
+                    UvcCamera.open(context, device)
+                } catch (e: Exception) {
+                    Log.e(TAG, "USB camera feed open failed", e)
+                    return@launch
+                }
+                val format = uvc.formats.closest(1280, 720, 30) ?: uvc.formats.closest(1920, 1080, 30)
+                    ?: uvc.formats.minByOrNull { abs(it.width * it.height - 1280 * 720) }
+                val surface = synchronized(this@StreamEngine) {
+                    val surface = if (feed === current && format != null) compositor.openSurfaceOverlay(key, format.width, format.height) else null
+                    if (surface == null || format == null) {
+                        uvc.close()
+                        return@launch
+                    }
+                    current.uvc = uvc
+                    current.width = format.width
+                    current.height = format.height
+                    compositor.setFeedInput(key, feedInput(current))
+                    uvc.onError = { message ->
+                        Log.w(TAG, "USB camera feed: $message")
+                        synchronized(this@StreamEngine) { if (feed === current) closeFeed() }
+                    }
+                    surface
+                }
+                try {
+                    uvc.start(format!!, surface)
+                } catch (e: Exception) {
+                    Log.e(TAG, "USB camera feed start failed", e)
+                    synchronized(this@StreamEngine) { if (feed === current) closeFeed() }
+                }
+            }
+        }
+    }
+
+    private fun openSource() {
         val compositor = compositor ?: return
         val replay = replayPlaying
         if (replay != null) {
@@ -2081,6 +2286,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     }
 
     private fun applyInputTransform() {
+        feed?.let { current -> if (current.width > 0) current.compositor.setFeedInput(current.key, feedInput(current)) }
         if (_videoPlayer.value != null) {
             videoInput?.let { (width, height, rotation) -> compositor?.setInput(width, height, rotation, 0, false, false, false) }
             return

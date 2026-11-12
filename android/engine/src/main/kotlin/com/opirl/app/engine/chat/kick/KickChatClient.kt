@@ -61,6 +61,7 @@ class KickChatClient internal constructor(
 
     @Volatile private var chatroomId = 0L
 
+    @Volatile private var channelId = 0L
     @Volatile private var userId: Long? = null
 
     override val canSend: Boolean
@@ -138,7 +139,7 @@ class KickChatClient internal constructor(
         return call.execute().use { it.code to it.body.string() }
     }
 
-    private fun lookup(run: Run): Long {
+    private fun lookup(run: Run): Pair<Long, Long> {
         for (slug in slugs) {
             val url = base.newBuilder().addPathSegments("api/v1/channels").addPathSegment(slug).build()
             val (code, body) = try {
@@ -147,9 +148,10 @@ class KickChatClient internal constructor(
                 throw IOException("Kick channel lookup failed: ${e.message ?: e.javaClass.simpleName}", e)
             }
             if (code in 200..299) {
-                userId = parseKickUserId(body)
-                return parseKickChatroomId(body)
+                val chatroom = parseKickChatroomId(body)
                     ?: throw IOException("Kick channel lookup returned an unexpected response")
+                userId = parseKickUserId(body)
+                return chatroom to (parseKickChannelId(body) ?: 0L)
             }
             if (code != 404) {
                 throw IOException("Kick channel lookup failed (HTTP $code)")
@@ -203,12 +205,16 @@ class KickChatClient internal constructor(
         }
 
         private fun attempt(): Outcome {
-            val id = chatroomId.takeIf { it != 0L } ?: try {
-                lookup(this).also { chatroomId = it }
-            } catch (e: IOException) {
-                return Outcome(e.message ?: "Kick channel lookup failed", false)
+            if (chatroomId == 0L) {
+                try {
+                    val (chatroom, channel) = lookup(this)
+                    channelId = channel
+                    chatroomId = chatroom
+                } catch (e: IOException) {
+                    return Outcome(e.message ?: "Kick channel lookup failed", false)
+                }
             }
-            val connection = Connection(id)
+            val connection = Connection(chatroomId, channelId)
             val socket = sockets.newWebSocket(Request.Builder().url(pusherUrl).build(), connection)
             this.socket = socket
             if (stopped) {
@@ -230,7 +236,7 @@ class KickChatClient internal constructor(
             }
         }
 
-        private inner class Connection(private val id: Long) : WebSocketListener() {
+        private inner class Connection(private val id: Long, private val channel: Long) : WebSocketListener() {
             private val ended = CompletableFuture<String>()
             private var subscribed = false
 
@@ -259,6 +265,7 @@ class KickChatClient internal constructor(
                     is KickEvent.Message -> deliver(this) { onMessage(event.message) }
                     is KickEvent.MessageDeleted -> deliver(this) { onMessageDeleted(event.messageId) }
                     is KickEvent.UserBanned -> deliver(this) { onUserMessagesDeleted(event.userId) }
+                    is KickEvent.Alert -> deliver(this) { onAlert(event.event) }
                     is KickEvent.Subscribed -> onSubscribed()
                     KickEvent.ConnectionEstablished -> subscribeAll(webSocket)
                     KickEvent.Ping -> webSocket.send(PONG_FRAME)
@@ -280,8 +287,10 @@ class KickChatClient internal constructor(
             }
 
             private fun subscribeAll(webSocket: WebSocket) {
-                for (channel in listOf("chatrooms.$id.v2", "chatroom_$id", "chatrooms.$id")) {
-                    webSocket.send("""{"event":"pusher:subscribe","data":{"auth":"","channel":"$channel"}}""")
+                val channels = listOf("chatrooms.$id.v2", "chatroom_$id", "chatrooms.$id") +
+                    if (channel == 0L) emptyList() else listOf("channel_$channel")
+                for (name in channels) {
+                    webSocket.send("""{"event":"pusher:subscribe","data":{"auth":"","channel":"$name"}}""")
                 }
             }
 

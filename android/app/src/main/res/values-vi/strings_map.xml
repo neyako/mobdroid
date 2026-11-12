@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="map_north_up">Hướng bắc lên trên</string>
+    <string name="map_north_up_note">Khi tắt, bản đồ xoay để hướng bạn di chuyển luôn ở phía trên.</string>
+    <string name="map_delay">Độ trễ</string>
+    <string name="map_delay_note">Làm trễ bản đồ để khớp với camera có độ trễ cao.</string>
+    <string name="map_corner_radius">Bo góc</string>
+    <string name="map_border_width">Độ dày viền</string>
+    <string name="map_border_color">Màu viền</string>
+    <string name="map_credit_note">Dữ liệu bản đồ © OpenStreetMap contributors, openstreetmap.org/copyright. Hãy thêm liên kết này vào phần mô tả luồng phát của bạn.</string>
+</resources>

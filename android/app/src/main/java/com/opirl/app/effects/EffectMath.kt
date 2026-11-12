@@ -52,7 +52,7 @@ fun textMask(texts: FloatArray, width: Int, height: Int, out: FloatArray): Int {
     return min(texts.size / 4, slots)
 }
 
-class ChromaKey(val red: Float, val green: Float, val blue: Float, val threshold: Float)
+data class ChromaKey(val red: Float, val green: Float, val blue: Float, val threshold: Float)
 
 private fun saturated(hue: Float): FloatArray {
     val sector = hue * 6

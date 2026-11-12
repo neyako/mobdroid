@@ -64,6 +64,18 @@ class SettingsStoreTest {
     }
 
     @Test
+    fun `a widget stores no settings of other widget types`() {
+        store.update { it.copy(widgets = listOf(Widget(id = "w", type = WidgetType.IMAGE))) }
+        val widget = store.exportJson().substringAfter("\"widgets\":[").substringBefore("]")
+        assertEquals(
+            """{"id":"w","name":"Widget","type":"IMAGE","text":"","textSize":15,"image":null,"url":"","browserWidth":1280,""" +
+                """"browserHeight":720,"previewOnly":false,"cover":true,"hideWhenPaused":true,"removeBackground":false,"keyFrom":90,""" +
+                """"keyTo":150}""",
+            widget,
+        )
+    }
+
+    @Test
     fun `the old microphone choice becomes a mic key`() {
         assertEquals("USB", store.decode("""{"mic":"USB"}""").micKey)
         assertEquals("PHONE", store.decode("""{"mic":"BUILT_IN"}""").micKey)

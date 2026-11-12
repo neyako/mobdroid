@@ -1,5 +1,6 @@
 package com.opirl.app.chat
 
+import com.opirl.app.engine.alerts.AlertEvent
 import com.opirl.app.engine.chat.ChatClient
 import com.opirl.app.engine.chat.ChatListener
 import com.opirl.app.engine.chat.ChatMessage
@@ -9,7 +10,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -54,6 +58,8 @@ class ChatController(
     val connected: StateFlow<Map<ChatPlatform, Boolean>> = _connected.asStateFlow()
     private val _canSend = MutableStateFlow<List<ChatPlatform>>(emptyList())
     val canSend: StateFlow<List<ChatPlatform>> = _canSend.asStateFlow()
+    private val _alerts = MutableSharedFlow<AlertEvent>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    val alerts: SharedFlow<AlertEvent> = _alerts
     private val pending = ConcurrentLinkedQueue<ChatEvent>()
     private val wake = Channel<Unit>(Channel.CONFLATED)
     private var clients = emptyList<Pair<ChatPlatform, ChatClient>>()
@@ -98,6 +104,10 @@ class ChatController(
                     if (current != generation) return
                     pending += ChatEvent.UserDeleted(platform, userId)
                     wake.trySend(Unit)
+                }
+
+                override fun onAlert(event: AlertEvent) {
+                    if (current == generation) _alerts.tryEmit(event)
                 }
 
                 override fun onChannelId(id: String) {
