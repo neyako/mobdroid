@@ -17,7 +17,10 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -39,7 +42,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoFixHigh
+import androidx.compose.material.icons.rounded.Autorenew
 import androidx.compose.material.icons.rounded.BatteryAlert
+import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.Brush
+import androidx.compose.material.icons.rounded.Dashboard
+import androidx.compose.material.icons.rounded.CastConnected
+import androidx.compose.material.icons.rounded.Replay
+import androidx.compose.material.icons.rounded.SlowMotionVideo
 import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Visibility
@@ -125,16 +136,21 @@ import com.opirl.app.media.VideoPlayer
 import com.opirl.app.settings.QuickButtonId
 import com.opirl.app.settings.Scene
 import com.opirl.app.settings.StatusItem
+import com.opirl.app.moblink.MoblinkStatus
+import com.opirl.app.remote.RemoteControlStatus
+import androidx.compose.material.icons.rounded.Hub
+import androidx.compose.material.icons.rounded.SettingsRemote
 import com.opirl.app.stream.LiveState
 import com.opirl.app.stream.LiveStats
 import com.opirl.app.stream.RecordingStats
+import com.opirl.app.stream.ReplayState
 import com.opirl.app.stream.formatBytes
 import com.opirl.app.stream.StreamEngine
 import com.opirl.app.stream.UiState
 import com.opirl.app.stream.key
 import kotlinx.coroutines.flow.StateFlow
 
-private val statusStyle = TextStyle(
+internal val statusStyle = TextStyle(
     color = Color.White,
     fontSize = 13.sp,
     fontWeight = FontWeight.Medium,
@@ -142,8 +158,8 @@ private val statusStyle = TextStyle(
     shadow = Shadow(Color.Black, blurRadius = 6f),
 )
 
-private val Warning = Color(0xFFFF9500)
-private val Pending = Color(0xFFFFCC00)
+internal val Warning = Color(0xFFFF9500)
+internal val Pending = Color(0xFFFFCC00)
 
 class QuickButton(
     @StringRes val label: Int,
@@ -162,9 +178,28 @@ fun quickButtons(
     widgetsOpen: Boolean,
     obsOpen: Boolean,
     browserOpen: Boolean,
+    replay: ReplayState?,
+    replayOpen: Boolean,
+    monitoring: Boolean?,
+    onReplay: () -> Unit,
+    onInstantReplay: () -> Unit,
+    onMonitor: () -> Unit,
+    remote: Boolean,
+    remoteOpen: Boolean,
+    filters: Boolean,
+    drawing: Boolean,
+    overlaysHidden: Boolean,
+    switcher: Boolean,
+    macros: Boolean,
+    onFilters: () -> Unit,
+    onDraw: () -> Unit,
+    onOverlays: () -> Unit,
+    onSwitcher: () -> Unit,
+    onMacros: () -> Unit,
     onWidgets: () -> Unit,
     onObs: () -> Unit,
     onBrowser: () -> Unit,
+    onRemote: () -> Unit,
     onChat: () -> Unit,
     onRecord: () -> Unit,
     onSnapshot: () -> Unit,
@@ -183,9 +218,20 @@ fun quickButtons(
             onRecord,
         )
         QuickButtonId.SNAPSHOT -> QuickButton(id.label, Icons.Rounded.PhotoCamera, false, onClick = onSnapshot)
+        QuickButtonId.REPLAY -> replay?.let { QuickButton(id.label, Icons.Rounded.SlowMotionVideo, replayOpen, onClick = onReplay) }
+        QuickButtonId.INSTANT_REPLAY -> replay?.let {
+            QuickButton(
+                if (it == ReplayState.PLAYING) R.string.stop else id.label,
+                if (it == ReplayState.PLAYING) Icons.Rounded.Stop else Icons.Rounded.Replay,
+                it != ReplayState.IDLE,
+                onClick = onInstantReplay,
+            )
+        }
+        QuickButtonId.PREVIEW_STREAM -> monitoring?.let { QuickButton(id.label, Icons.Rounded.CastConnected, it, onClick = onMonitor) }
         QuickButtonId.WIDGETS -> QuickButton(id.label, Icons.Rounded.Widgets, widgetsOpen, onClick = onWidgets)
         QuickButtonId.OBS -> QuickButton(id.label, ObsLogo, obsOpen, onClick = onObs)
         QuickButtonId.BROWSER -> QuickButton(id.label, Icons.Rounded.Language, browserOpen, onClick = onBrowser)
+        QuickButtonId.REMOTE -> if (remote) QuickButton(id.label, Icons.Rounded.SettingsRemote, remoteOpen, onClick = onRemote) else null
         QuickButtonId.BITRATE -> QuickButton(id.label, Icons.Rounded.Speed, false, onClick = onBitrate)
         QuickButtonId.MIC -> QuickButton(
             id.label,
@@ -204,12 +250,17 @@ fun quickButtons(
         } else {
             null
         }
+        QuickButtonId.FILTERS -> QuickButton(id.label, Icons.Rounded.AutoFixHigh, filters, onClick = onFilters)
+        QuickButtonId.DRAW -> QuickButton(id.label, Icons.Rounded.Brush, drawing, onClick = onDraw)
+        QuickButtonId.OVERLAYS -> QuickButton(id.label, Icons.Rounded.Dashboard, overlaysHidden, onClick = onOverlays)
+        QuickButtonId.AUTO_SWITCHER -> QuickButton(id.label, Icons.Rounded.Autorenew, switcher, onClick = onSwitcher)
+        QuickButtonId.MACROS -> QuickButton(id.label, Icons.Rounded.Bolt, macros, onClick = onMacros)
     }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun BarButton(icon: ImageVector, label: String, checked: Boolean, size: Dp, color: Color? = null, onClick: () -> Unit) {
+internal fun BarButton(icon: ImageVector, label: String, checked: Boolean, size: Dp, color: Color? = null, onClick: () -> Unit) {
     val through = fadeThrough()
     IconToggleButton(
         checked = checked,
@@ -357,7 +408,7 @@ fun BitratePresets(presetsKbps: List<Int>, currentKbps: Int, onSelect: (Int) -> 
 fun formatMbps(kbps: Int): String = "%.2f".format(Locale.ROOT, kbps / 1000f).trimEnd('0').trimEnd('.')
 
 @Composable
-fun Preview(engine: StreamEngine, ui: UiState, corner: Dp, access: Access, flash: () -> Float) {
+fun Preview(engine: StreamEngine, ui: UiState, corner: Dp, access: Access, draw: DrawTool?, flash: () -> Float) {
     if (!access.ready) {
         AccessPrompt(access, corner)
         return
@@ -377,18 +428,32 @@ fun Preview(engine: StreamEngine, ui: UiState, corner: Dp, access: Access, flash
                 })
             }
         },
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(ui.camera) {
-                detectTapGestures { offset ->
-                    engine.tapToFocus(offset.x / viewSize.first, offset.y / viewSize.second)
+        modifier = if (draw != null) {
+            Modifier.fillMaxSize().pointerInput(draw) {
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    engine.drawBegin(down.position.x / size.width, down.position.y / size.height, draw.color, draw.width.dp.toPx() / size.width)
+                    drag(down.id) { change ->
+                        engine.drawExtend(change.position.x / size.width, change.position.y / size.height)
+                        change.consume()
+                    }
+                    engine.drawEnd()
                 }
             }
-            .pointerInput(ui.camera) {
-                detectTransformGestures { _, _, zoom, _ ->
-                    if (zoom != 1f) engine.setZoom(engine.ui.value.zoom * zoom, switchLens = false)
+        } else {
+            Modifier
+                .fillMaxSize()
+                .pointerInput(ui.camera) {
+                    detectTapGestures { offset ->
+                        engine.tapToFocus(offset.x / viewSize.first, offset.y / viewSize.second)
+                    }
                 }
-            },
+                .pointerInput(ui.camera) {
+                    detectTransformGestures { _, _, zoom, _ ->
+                        if (zoom != 1f) engine.setZoom(engine.ui.value.zoom * zoom, switchLens = false)
+                    }
+                }
+        },
     )
     Spacer(
         Modifier.fillMaxSize().drawWithCache {
@@ -413,6 +478,8 @@ fun Status(
     stats: LiveStats,
     recording: RecordingStats?,
     obs: ObsState?,
+    moblink: MoblinkStatus?,
+    remoteControl: RemoteControlStatus?,
     audioLevel: StateFlow<Float>,
     hidden: Set<StatusItem>,
     onDismissError: () -> Unit,
@@ -475,6 +542,33 @@ fun Status(
             }
         }
     }
+    val lastMoblink = remember { mutableStateOf(MoblinkStatus("", true)) }
+    if (moblink != null) lastMoblink.value = moblink
+    val lastRemoteControl = remember { mutableStateOf(RemoteControlStatus("", true)) }
+    if (remoteControl != null) lastRemoteControl.value = remoteControl
+    val connections: @Composable () -> Unit = {
+        Appear(moblink != null && StatusItem.MOBLINK !in hidden, !compact) {
+            val status = lastMoblink.value
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.Hub, stringResource(R.string.moblink), tint = if (status.ok) Color.White else Warning, modifier = Modifier.size(14.dp))
+                if (!compact && status.text.isNotEmpty()) {
+                    Text(status.text, style = statusStyle, maxLines = 1, softWrap = false, modifier = Modifier.padding(start = 4.dp))
+                }
+            }
+        }
+        Appear(remoteControl != null && StatusItem.REMOTE_CONTROL !in hidden, !compact) {
+            val status = lastRemoteControl.value
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Rounded.SettingsRemote,
+                    stringResource(R.string.remote_control),
+                    tint = if (status.ok) Color.White else Warning,
+                    modifier = Modifier.size(14.dp),
+                )
+                if (!compact) Text(status.text, style = statusStyle, maxLines = 1, softWrap = false, modifier = Modifier.padding(start = 4.dp))
+            }
+        }
+    }
     val bitrate: @Composable () -> Unit = {
         Appear(live && StatusItem.BITRATE !in hidden, !compact) {
             Text(
@@ -514,6 +608,7 @@ fun Status(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 recorded()
                 remote()
+                connections()
                 if (error != null) {
                     errorText()
                 } else {
@@ -525,6 +620,7 @@ fun Status(
     } else {
         Column(modifier, horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
             remote()
+            connections()
             uptime()
             recorded()
             bitrate()
@@ -563,9 +659,21 @@ private fun AudioMeter(level: StateFlow<Float>, muted: Boolean) {
 }
 
 @Composable
-fun CameraControls(ui: UiState, scenes: List<Scene>, scene: Scene?, video: VideoPlayer?, engine: StreamEngine, modifier: Modifier) {
+fun CameraControls(
+    ui: UiState,
+    scenes: List<Scene>,
+    scene: Scene?,
+    video: VideoPlayer?,
+    engine: StreamEngine,
+    draw: DrawTool?,
+    modifier: Modifier,
+) {
     val through = fadeThrough()
     Column(modifier, horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (draw != null) {
+            DrawStrip(draw, engine, Modifier)
+            return@Column
+        }
         AnimatedContent(video, transitionSpec = { through }, contentAlignment = Alignment.CenterEnd, label = "source") { player ->
             if (player != null) VideoStrip(player, Modifier.fillMaxWidth()) else ZoomStops(ui, engine::setZoom)
         }
@@ -615,7 +723,16 @@ fun VideoStrip(video: VideoPlayer, modifier: Modifier) {
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun <T> Segments(values: List<T>, selected: T?, modifier: Modifier, label: (T) -> String, onSelect: (T) -> Unit) {
+internal fun <T> Segments(
+    values: List<T>,
+    selected: T?,
+    modifier: Modifier,
+    label: (T) -> String,
+    fill: Boolean = false,
+    container: Color = Color.Black.copy(alpha = 0.55f),
+    small: Boolean = false,
+    onSelect: (T) -> Unit,
+) {
     val haptics = LocalHapticFeedback.current
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)) {
         values.forEachIndexed { index, value ->
@@ -630,16 +747,18 @@ private fun <T> Segments(values: List<T>, selected: T?, modifier: Modifier, labe
                     values.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
                     else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
                 },
-                colors = ToggleButtonDefaults.colors(
-                    containerColor = Color.Black.copy(alpha = 0.55f),
-                    contentColor = Color.White,
-                ),
-                contentPadding = PaddingValues(horizontal = 12.dp),
-                modifier = Modifier.height(36.dp).widthIn(min = 46.dp, max = 132.dp),
+                colors = ToggleButtonDefaults.colors(containerColor = container, contentColor = Color.White),
+                contentPadding = PaddingValues(horizontal = if (fill) 4.dp else if (small) 8.dp else 12.dp),
+                modifier = when {
+                    fill -> Modifier.height(36.dp).weight(1f)
+                    small -> Modifier.height(28.dp).widthIn(min = 36.dp)
+                    else -> Modifier.height(36.dp).widthIn(min = 46.dp, max = 132.dp)
+                },
             ) {
                 Text(
                     label(value),
-                    style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
+                    style = (if (small) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge)
+                        .copy(fontFeatureSettings = "tnum"),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -653,13 +772,13 @@ fun ZoomStops(ui: UiState, onZoom: (Float) -> Unit) {
     val stops = ui.camera?.lensZoomStops.orEmpty()
     if (stops.size < 2) return
     val selected = ui.lens?.ratio ?: stops.lastOrNull { ui.zoom >= it - 0.01f }
-    Segments(stops, selected, Modifier, { if (it == selected && ui.zoom != it) formatZoom(ui.zoom) else formatZoom(it) }, onZoom)
+    Segments(stops, selected, Modifier, { if (it == selected && ui.zoom != it) formatZoom(ui.zoom) else formatZoom(it) }, onSelect = onZoom)
 }
 
 @Composable
 fun SceneSwitch(scenes: List<Scene>, scene: Scene?, onSelect: (String) -> Unit, modifier: Modifier) {
     if (scenes.size < 2) return
-    Segments(scenes, scene, modifier.horizontalScroll(rememberScrollState()), { it.name }) {
+    Segments(scenes, scene, modifier.horizontalScroll(rememberScrollState()), label = { it.name }) {
         if (it.id != scene?.id) onSelect(it.id)
     }
 }

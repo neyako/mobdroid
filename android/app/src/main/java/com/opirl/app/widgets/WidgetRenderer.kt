@@ -1,5 +1,6 @@
 package com.opirl.app.widgets
 
+import com.opirl.app.effects.chromaKey
 import com.opirl.app.media.gl.Overlay
 import com.opirl.app.scenes.overlayRect
 import com.opirl.app.settings.AppSettings
@@ -109,6 +110,8 @@ class WidgetRenderer(
             needs += widget.type.drawer.needs(widget, settings)
             val frame = context.draw(widget, placement) ?: continue
             val rect = overlayRect(placement, frame.width, frame.height)
+            val keyed = widget.removeBackground && (widget.type == WidgetType.IMAGE || widget.type == WidgetType.BROWSER)
+            val key = if (keyed) chromaKey(widget.keyFrom, widget.keyTo) else null
             frame.layers.forEachIndexed { index, layer ->
                 val id = if (index == 0) widget.id else "${widget.id}#$index"
                 overlays += Overlay(
@@ -130,6 +133,7 @@ class WidgetRenderer(
                     cornerRadius = layer.cornerRadius,
                     borderWidth = layer.borderWidth,
                     borderColor = layer.borderColor,
+                    key = key,
                 )
             }
         }

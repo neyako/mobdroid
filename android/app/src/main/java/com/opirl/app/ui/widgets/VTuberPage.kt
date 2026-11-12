@@ -70,7 +70,7 @@ internal fun VTuberPage(scope: WidgetScope) {
         }
     }
     Group {
-        if (tuber.model != null) row { ValueRow(it, stringResource(R.string.model), tuber.modelName) }
+        if (tuber.model != null) row { ValueRow(it, stringResource(R.string.vtuber_model), tuber.modelName) }
         row { shapes ->
             ActionRow(shapes, stringResource(if (tuber.model == null) R.string.choose_model else R.string.change_model), Icons.Rounded.Add) {
                 pick.launch(arrayOf("*/*"))

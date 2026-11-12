@@ -69,6 +69,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.Share
+import com.opirl.app.settings.createDeepLink
+import androidx.compose.material.icons.rounded.Hub
+import androidx.compose.material.icons.rounded.Keyboard
+import androidx.compose.material.icons.rounded.SettingsRemote
+import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
@@ -120,7 +127,18 @@ import com.opirl.app.media.label
 import com.opirl.app.settings.AppSettings
 import com.opirl.app.settings.BONDING_NETWORKS
 import com.opirl.app.settings.ChatTextSize
-import com.opirl.app.settings.MicSource
+import com.opirl.app.media.Mic
+import com.opirl.app.media.MicKind
+import com.opirl.app.media.findMic
+import com.opirl.app.media.micLabel
+import com.opirl.app.settings.Destination
+import com.opirl.app.settings.PREVIEW_RESOLUTIONS
+import com.opirl.app.settings.REPLAY_SECONDS
+import com.opirl.app.settings.Transport
+import com.opirl.app.settings.bonded
+import com.opirl.app.settings.transport
+import com.opirl.app.settings.transportOf
+import com.opirl.app.stream.LiveState
 import com.opirl.app.settings.Platform
 import com.opirl.app.settings.QuickButtonId
 import com.opirl.app.settings.Resolution
@@ -173,6 +191,14 @@ internal sealed interface Route {
 
     data class StreamObs(val id: String) : Route
 
+    data class StreamDestinations(val id: String) : Route
+
+    data class StreamDestination(val id: String, val destinationId: String) : Route
+
+    data class StreamReplay(val id: String) : Route
+
+    data class StreamPreview(val id: String) : Route
+
     data object Recordings : Route
 
     data object Scenes : Route
@@ -186,6 +212,16 @@ internal sealed interface Route {
     data class WidgetPage(val id: String, val page: String? = null, val title: String? = null) : Route
 
     data object NewWidget : Route
+
+    data class SwitcherPage(val id: String) : Route
+
+    data class SwitcherScenePage(val switcherId: String, val id: String) : Route
+
+    data class MacroPage(val id: String) : Route
+
+    data class MacroActionPage(val macroId: String, val id: String) : Route
+
+    data class MacroFunctionPage(val macroId: String, val id: String) : Route
 
     data object Chat : Route
 
@@ -226,14 +262,50 @@ internal sealed interface Route {
     data class License(val name: String) : Route
 
     data object ImportExport : Route
+
+    data object ShareStreams : Route
+
+    data object RemoteControl : Route
+
+    data object RemoteStreamer : Route
+
+    data object RemoteAssistant : Route
+
+    data object RemoteWeb : Route
+
+    data object Moblink : Route
+
+    data object MoblinkStreamer : Route
+
+    data object MoblinkRelay : Route
+
+    data object Gamepad : Route
+
+    data object Keyboard : Route
+
+    data class KeyboardKeyPage(val id: String) : Route
+
+    data object StreamDecks : Route
+
+    data class StreamDeckPage(val id: String) : Route
+
+    data class StreamDeckKeyPage(val layoutId: String, val index: Int) : Route
+
+    data class ActionPage(val target: ActionTarget) : Route
 }
 
 private fun AppSettings.profile(id: String) = profiles.firstOrNull { it.id == id }
 
-private fun transportName(profile: StreamProfile) = when {
-    profile.url.startsWith("srtla") -> "SRTLA"
-    profile.url.startsWith("srt") -> "SRT"
-    else -> "RTMP"
+private fun transportName(profile: StreamProfile) = (profile.transport ?: Transport.RTMP).label
+
+@Composable
+private fun micLabel(mic: Mic): String = micLabel(mic, stringResource(mic.kind.label))
+
+@Composable
+private fun micLabel(mics: List<Mic>, key: String?): String = when {
+    key == null -> stringResource(R.string.mic_auto)
+    else -> findMic(mics, key)?.let { micLabel(it) }
+        ?: MicKind.entries.firstOrNull { key.startsWith(it.name) }?.let { stringResource(it.label) }.orEmpty()
 }
 
 @Composable
@@ -248,6 +320,11 @@ private fun title(route: Route, settings: AppSettings) = when (route) {
     is Route.StreamChat -> stringResource(R.string.chat)
     is Route.StreamRecording -> stringResource(R.string.recording)
     is Route.StreamObs -> stringResource(R.string.obs_remote)
+    is Route.StreamDestinations -> stringResource(R.string.destinations)
+    is Route.StreamDestination ->
+        settings.profile(route.id)?.destinations?.firstOrNull { it.id == route.destinationId }?.name.orEmpty()
+    is Route.StreamReplay -> stringResource(R.string.replay)
+    is Route.StreamPreview -> stringResource(R.string.preview_stream)
     Route.Recordings -> stringResource(R.string.recordings)
     Route.Scenes -> stringResource(R.string.scenes)
     is Route.ScenePage -> settings.scenes.firstOrNull { it.id == route.id }?.name.orEmpty()
@@ -259,6 +336,12 @@ private fun title(route: Route, settings: AppSettings) = when (route) {
     )
     is Route.WidgetPage -> route.title ?: settings.widgets.firstOrNull { it.id == route.id }?.name.orEmpty()
     Route.NewWidget -> stringResource(R.string.create_widget)
+    is Route.SwitcherPage -> settings.autoSwitchers.firstOrNull { it.id == route.id }?.name.orEmpty()
+    is Route.SwitcherScenePage -> stringResource(R.string.scene)
+    is Route.MacroPage -> settings.macros.firstOrNull { it.id == route.id }?.name.orEmpty()
+    is Route.MacroActionPage -> settings.macros.firstOrNull { it.id == route.macroId }?.actions?.firstOrNull { it.id == route.id }
+        ?.let { stringResource(it.function.label) }.orEmpty()
+    is Route.MacroFunctionPage -> stringResource(R.string.macro_function)
     Route.Chat -> stringResource(R.string.chat)
     Route.TwitchAccount -> stringResource(R.string.twitch_account)
     Route.KickAccount -> stringResource(R.string.kick_account)
@@ -279,6 +362,25 @@ private fun title(route: Route, settings: AppSettings) = when (route) {
     Route.Licenses -> stringResource(R.string.licenses)
     is Route.License -> route.name
     Route.ImportExport -> stringResource(R.string.import_export)
+    Route.ShareStreams -> stringResource(R.string.share_streams)
+    Route.RemoteControl -> stringResource(R.string.remote_control)
+    Route.RemoteStreamer -> stringResource(R.string.remote_streamer)
+    Route.RemoteAssistant -> stringResource(R.string.remote_assistant)
+    Route.RemoteWeb -> stringResource(R.string.remote_web)
+    Route.Moblink -> stringResource(R.string.moblink)
+    Route.MoblinkStreamer -> stringResource(R.string.remote_streamer)
+    Route.MoblinkRelay -> stringResource(R.string.moblink_relay)
+    Route.Gamepad -> stringResource(R.string.game_controller)
+    Route.Keyboard -> stringResource(R.string.keyboard)
+    is Route.KeyboardKeyPage -> stringResource(R.string.key)
+    Route.StreamDecks -> "Stream Deck"
+    is Route.StreamDeckPage -> settings.streamDecks.firstOrNull { it.id == route.id }?.name.orEmpty()
+    is Route.StreamDeckKeyPage -> stringResource(
+        R.string.key_position,
+        route.index / (settings.streamDecks.firstOrNull { it.id == route.layoutId }?.model?.columns ?: 5) + 1,
+        route.index % (settings.streamDecks.firstOrNull { it.id == route.layoutId }?.model?.columns ?: 5) + 1,
+    )
+    is Route.ActionPage -> stringResource(R.string.function)
 }
 
 private const val SOURCE_URL = "https://github.com/neyako/mobdroid"
@@ -356,7 +458,7 @@ fun SettingsPanel(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     when (route) {
-                        Route.Home -> Home(settings, push)
+                        Route.Home -> Home(settings, engine, push)
                         Route.Streams -> Streams(store, settings, live, push)
                         is Route.Stream -> settings.profile(route.id)?.let { StreamPage(store, settings, it, live, push, pop) }
                         is Route.StreamUrl -> settings.profile(route.id)?.let { StreamUrl(store, it, editable(settings, it, live)) }
@@ -387,7 +489,17 @@ fun SettingsPanel(
                         is Route.StreamRecording -> settings.profile(route.id)?.let {
                             StreamRecording(store, it, editable(settings, it, live))
                         }
-                        is Route.StreamObs -> settings.profile(route.id)?.let { StreamObs(store, it) }
+                        is Route.StreamObs -> settings.profile(route.id)?.let { StreamObs(store, engine, it) }
+                        is Route.StreamDestinations -> settings.profile(route.id)?.let {
+                            StreamDestinations(store, it, engine, editable(settings, it, live), push)
+                        }
+                        is Route.StreamDestination -> settings.profile(route.id)?.let { profile ->
+                            profile.destinations.firstOrNull { it.id == route.destinationId }?.let {
+                                StreamDestination(store, profile, it, editable(settings, profile, live), pop)
+                            }
+                        }
+                        is Route.StreamReplay -> settings.profile(route.id)?.let { StreamReplay(store, it, editable(settings, it, live)) }
+                        is Route.StreamPreview -> settings.profile(route.id)?.let { StreamPreview(store, it, editable(settings, it, live)) }
                         Route.Recordings -> RecordingsPage(engine)
                         Route.Scenes -> ScenesPage(store, settings, engine, push)
                         is Route.ScenePage -> settings.scenes.firstOrNull { it.id == route.id }?.let {
@@ -405,6 +517,21 @@ fun SettingsPanel(
                         Route.NewWidget -> NewWidgetPage(store) { widget ->
                             pop()
                             push(Route.WidgetPage(widget.id))
+                        }
+                        is Route.SwitcherPage -> settings.autoSwitchers.firstOrNull { it.id == route.id }?.let {
+                            SwitcherPage(store, settings, it, push, pop)
+                        }
+                        is Route.SwitcherScenePage -> settings.autoSwitchers.firstOrNull { it.id == route.switcherId }?.let { switcher ->
+                            switcher.scenes.firstOrNull { it.id == route.id }?.let { SwitcherScenePage(store, settings, switcher, it) }
+                        }
+                        is Route.MacroPage -> settings.macros.firstOrNull { it.id == route.id }?.let {
+                            MacroPage(store, settings, it, push, pop)
+                        }
+                        is Route.MacroActionPage -> settings.macros.firstOrNull { it.id == route.macroId }?.let { macro ->
+                            macro.actions.firstOrNull { it.id == route.id }?.let { MacroActionPage(store, settings, macro, it, push) }
+                        }
+                        is Route.MacroFunctionPage -> settings.macros.firstOrNull { it.id == route.macroId }?.let { macro ->
+                            macro.actions.firstOrNull { it.id == route.id }?.let { MacroFunctionPage(store, macro, it, pop) }
                         }
                         Route.TwitchAccount -> TwitchAccountPage(engine)
                         Route.KickAccount -> KickAccountPage(engine)
@@ -436,20 +563,7 @@ fun SettingsPanel(
                             }
                         }
                         Route.Camera -> Camera(store, settings)
-                        Route.Audio -> Group {
-                            row { shapes ->
-                                ChoiceRow(
-                                    shapes,
-                                    stringResource(R.string.microphone),
-                                    MicSource.entries,
-                                    settings.mic,
-                                    { stringResource(it.label) },
-                                    enabled = !live,
-                                ) { mic ->
-                                    store.update { it.copy(mic = mic) }
-                                }
-                            }
-                        }
+                        Route.Audio -> Microphones(store, settings, engine)
                         Route.BitratePresets -> BitratePresetsPage(store, settings)
                         Route.About -> Group {
                             row { ValueRow(it, stringResource(R.string.version), BuildConfig.VERSION_NAME) }
@@ -466,7 +580,31 @@ fun SettingsPanel(
                             LICENSES.forEach { item -> row { NavRow(it, item.name, item.license) { push(Route.License(item.name)) } } }
                         }
                         is Route.License -> LICENSES.firstOrNull { it.name == route.name }?.let { LicenseText(it.file) }
-                        Route.ImportExport -> ImportExport(store, live)
+                        Route.ImportExport -> ImportExport(store, engine, live, push)
+                        Route.ShareStreams -> ShareStreamsPage(settings)
+                        Route.RemoteControl -> RemoteControlPage(store, settings, engine, push)
+                        Route.RemoteStreamer -> RemoteStreamerPage(store, settings.remoteControl)
+                        Route.RemoteAssistant -> RemoteAssistantPage(store, settings.remoteControl)
+                        Route.RemoteWeb -> RemoteWebPage(store, settings.remoteControl)
+                        Route.Moblink -> MoblinkPage(store, settings, engine, push)
+                        Route.MoblinkStreamer -> {
+                            val relays by engine.moblink.relays.collectAsStateWithLifecycle()
+                            MoblinkStreamerPage(store, settings.moblink, relays)
+                        }
+                        Route.MoblinkRelay -> MoblinkRelayPage(store, settings.moblink)
+                        Route.Gamepad -> GamepadPage(settings, engine, push)
+                        Route.Keyboard -> KeyboardPage(store, settings, push)
+                        is Route.KeyboardKeyPage -> settings.keyboard.firstOrNull { it.id == route.id }?.let {
+                            KeyboardKeyPage(store, settings, it, push, pop)
+                        }
+                        Route.StreamDecks -> StreamDecksPage(store, settings, engine, push)
+                        is Route.StreamDeckPage -> settings.streamDecks.firstOrNull { it.id == route.id }?.let {
+                            StreamDeckPage(store, settings, it, push, pop)
+                        }
+                        is Route.StreamDeckKeyPage -> settings.streamDecks.firstOrNull { it.id == route.layoutId }?.let {
+                            StreamDeckKeyPage(store, settings, it, route.index, push)
+                        }
+                        is Route.ActionPage -> ActionPage(store, settings, route.target)
                     }
                 }
             }
@@ -481,7 +619,8 @@ private fun editable(settings: AppSettings, profile: StreamProfile, live: Boolea
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun Home(settings: AppSettings, push: (Route) -> Unit) {
+private fun Home(settings: AppSettings, engine: StreamEngine, push: (Route) -> Unit) {
+    val mics by engine.mics.collectAsStateWithLifecycle()
     Group {
         row {
             NavRow(
@@ -518,7 +657,7 @@ private fun Home(settings: AppSettings, push: (Route) -> Unit) {
             NavRow(
                 it,
                 stringResource(R.string.audio),
-                stringResource(settings.mic.label),
+                micLabel(mics, settings.micKey),
                 Badge(Icons.Rounded.GraphicEq, Color(0xFFFFC46B), MaterialShapes.Sunny),
             ) {
                 push(Route.Audio)
@@ -539,6 +678,40 @@ private fun Home(settings: AppSettings, push: (Route) -> Unit) {
             ) {
                 push(Route.BitratePresets)
             }
+        }
+    }
+    Group {
+        row {
+            NavRow(
+                it,
+                stringResource(R.string.remote_control),
+                badge = Badge(Icons.Rounded.SettingsRemote, Color(0xFF8FD3FF), MaterialShapes.Diamond),
+            ) { push(Route.RemoteControl) }
+        }
+        row {
+            NavRow(it, stringResource(R.string.moblink), badge = Badge(Icons.Rounded.Hub, Color(0xFFB5E48C), MaterialShapes.Flower)) {
+                push(Route.Moblink)
+            }
+        }
+        row {
+            NavRow(
+                it,
+                stringResource(R.string.game_controller),
+                badge = Badge(Icons.Rounded.SportsEsports, Color(0xFFFFA8A8), MaterialShapes.Ghostish),
+            ) { push(Route.Gamepad) }
+        }
+        row {
+            NavRow(it, stringResource(R.string.keyboard), badge = Badge(Icons.Rounded.Keyboard, Color(0xFFE0C3FC), MaterialShapes.Bun)) {
+                push(Route.Keyboard)
+            }
+        }
+        row {
+            NavRow(
+                it,
+                "Stream Deck",
+                settings.selectedStreamDeck?.name,
+                Badge(Icons.Rounded.Apps, Color(0xFFFFD6A5), MaterialShapes.ClamShell),
+            ) { push(Route.StreamDecks) }
         }
     }
     Group {
@@ -645,6 +818,40 @@ private fun StreamPage(
     }
     Group {
         row { shapes ->
+            val on = profile.destinations.count { it.enabled }
+            NavRow(
+                shapes,
+                stringResource(R.string.destinations),
+                if (on == 0) stringResource(R.string.off) else stringResource(R.string.channels_on, on),
+            ) { push(Route.StreamDestinations(profile.id)) }
+        }
+        row { shapes ->
+            NavRow(shapes, stringResource(R.string.replay), stringResource(if (profile.replay.enabled) R.string.on else R.string.off)) {
+                push(Route.StreamReplay(profile.id))
+            }
+        }
+        row { shapes ->
+            val host = profile.previewStream.url.substringAfter("://", "").substringBefore('/')
+            NavRow(shapes, stringResource(R.string.preview_stream), host.ifEmpty { stringResource(R.string.off) }) {
+                push(Route.StreamPreview(profile.id))
+            }
+        }
+    }
+    Group {
+        row { shapes ->
+            val context = LocalContext.current
+            ActionRow(shapes, stringResource(R.string.share_link), Icons.Rounded.Share) {
+                runCatching {
+                    context.startActivity(
+                        Intent.createChooser(
+                            Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, createDeepLink(listOf(profile))),
+                            null,
+                        ),
+                    )
+                }
+            }
+        }
+        row { shapes ->
             val name = stringResource(R.string.copy_name, profile.name)
             ActionRow(shapes, stringResource(R.string.duplicate), Icons.Rounded.ContentCopy) {
                 val copy = profile.copy(id = UUID.randomUUID().toString(), name = name)
@@ -690,13 +897,13 @@ private fun StreamUrl(store: SettingsStore, profile: StreamProfile, editable: Bo
             }
         }
         row { shapes ->
-            TextRow(shapes, "URL", profile.url, "rtmps://, srt://, srtla://", editable, KeyboardType.Uri) {
+            TextRow(shapes, "URL", profile.url, "rtmps://, srt://, srtla://, rist://, whip://", editable, KeyboardType.Uri) {
                 update(profile.copy(url = it.trim()))
             }
         }
-        if (profile.url.startsWith("rtmp")) {
+        keyLabel(profile.url)?.let { label ->
             row { shapes ->
-                TextRow(shapes, stringResource(R.string.stream_key), profile.streamKey, enabled = editable, keyboard = KeyboardType.Password) {
+                TextRow(shapes, stringResource(label), profile.streamKey, enabled = editable, keyboard = KeyboardType.Password) {
                     update(profile.copy(streamKey = it.trim()))
                 }
             }
@@ -811,6 +1018,7 @@ private fun ScenesPage(store: SettingsStore, settings: AppSettings, engine: Stre
         }
         row { shapes -> ActionRow(shapes, stringResource(R.string.create_widget), Icons.Rounded.Add) { push(Route.NewWidget) } }
     }
+    AutomationGroups(store, settings, push)
 }
 
 @Composable
@@ -915,9 +1123,11 @@ private class LicenseItem(val name: String, val license: String, val file: Strin
 
 private val LICENSES = listOf(
     LicenseItem("Moblin", "MIT", "moblin.txt"),
+    LicenseItem("SolidJS, Tailwind CSS, tailwind-merge", "MIT", "web-remote.txt"),
     LicenseItem("libusb", "LGPL 2.1", "libusb.txt"),
     LicenseItem("libuvc", "BSD", "libuvc.txt"),
     LicenseItem("libjpeg-turbo", "BSD, IJG, zlib", "libjpeg-turbo.txt"),
+    LicenseItem("Bouncy Castle", "MIT", "bouncycastle.txt"),
     LicenseItem("OkHttp", "Apache 2.0", "apache-2.0.txt"),
     LicenseItem("Okio", "Apache 2.0", "apache-2.0.txt"),
     LicenseItem("Coil", "Apache 2.0", "apache-2.0.txt"),
@@ -927,11 +1137,11 @@ private val LICENSES = listOf(
     LicenseItem("Guava", "Apache 2.0", "apache-2.0.txt"),
     LicenseItem("JSpecify", "Apache 2.0", "apache-2.0.txt"),
     LicenseItem("ZXing", "Apache 2.0", "apache-2.0.txt"),
+    LicenseItem("ML Kit", "ML Kit terms", "mlkit.txt"),
     LicenseItem("Google Play services", "Android SDK License", "android-sdk.txt"),
     LicenseItem("OBS logo", "GPL 2.0", "gpl-2.0.txt"),
     LicenseItem("Nunito", "OFL 1.1", "ofl-nunito.txt"),
     LicenseItem("Filament", "Apache 2.0", "apache-2.0.txt"),
-    LicenseItem("ML Kit", "ML Kit Terms", "ml-kit.txt"),
 )
 
 @Composable
@@ -1047,6 +1257,27 @@ private fun WidgetPage(
         row { ValueRow(it, stringResource(R.string.type), stringResource(widget.type.label)) }
     }
     WidgetSettings(scope)
+    if (widget.type == WidgetType.IMAGE || widget.type == WidgetType.BROWSER) {
+        Group {
+            row { shapes ->
+                SwitchRow(shapes, stringResource(R.string.remove_background), widget.removeBackground) { on ->
+                    scope.update { it.copy(removeBackground = on) }
+                }
+            }
+            if (widget.removeBackground) {
+                row { shapes ->
+                    SliderRow(shapes, stringResource(R.string.hue_from), widget.keyFrom, 0..359, "${widget.keyFrom}°") { hue ->
+                        scope.update { it.copy(keyFrom = hue) }
+                    }
+                }
+                row { shapes ->
+                    SliderRow(shapes, stringResource(R.string.hue_to), widget.keyTo, 0..359, "${widget.keyTo}°") { hue ->
+                        scope.update { it.copy(keyTo = hue) }
+                    }
+                }
+            }
+        }
+    }
     Group {
         row { shapes ->
             ChoiceRow(
@@ -1132,9 +1363,10 @@ private fun StreamRecording(store: SettingsStore, profile: StreamProfile, editab
 }
 
 @Composable
-private fun StreamObs(store: SettingsStore, profile: StreamProfile) {
+private fun StreamObs(store: SettingsStore, engine: StreamEngine, profile: StreamProfile) {
     val obs = profile.obs
     val update = { changed: ObsSettings -> store.updateProfile(profile.copy(obs = changed)) }
+    LocalNetworkAccess(engine)
     Group {
         row { SwitchRow(it, stringResource(R.string.enabled), obs.enabled) { on -> update(obs.copy(enabled = on)) } }
     }
@@ -1248,7 +1480,7 @@ private fun StreamTransport(store: SettingsStore, profile: StreamProfile, editab
             }
         }
     }
-    if (profile.url.startsWith("srt")) {
+    if (profile.transport == Transport.SRT || profile.transport == Transport.SRTLA) {
         Group {
             row { shapes ->
                 ChoiceRow(
@@ -1262,7 +1494,16 @@ private fun StreamTransport(store: SettingsStore, profile: StreamProfile, editab
             }
         }
     }
-    if (profile.url.startsWith("srtla")) {
+    if (profile.transport == Transport.RIST) {
+        Group {
+            row { shapes ->
+                SwitchRow(shapes, stringResource(R.string.status_bonding), profile.ristBonding, editable) { on ->
+                    update(profile.copy(ristBonding = on))
+                }
+            }
+        }
+    }
+    if (profile.bonded) {
         Group {
             val networks = listOf(
                 LinkType.WIFI to R.string.network_wifi,
@@ -1347,6 +1588,9 @@ private fun Camera(store: SettingsStore, settings: AppSettings) {
                 store.update { it.copy(usbCameraRotation = value) }
             }
         }
+        row { shapes ->
+            SwitchRow(shapes, stringResource(R.string.fixed_horizon), settings.fixedHorizon) { on -> store.update { it.copy(fixedHorizon = on) } }
+        }
     }
 }
 
@@ -1383,7 +1627,7 @@ private fun BitratePresetsPage(store: SettingsStore, settings: AppSettings) {
 }
 
 @Composable
-private fun ImportExport(store: SettingsStore, live: Boolean) {
+private fun ImportExport(store: SettingsStore, engine: StreamEngine, live: Boolean, push: (Route) -> Unit) {
     val context = LocalContext.current
     var message by remember { mutableStateOf<Int?>(null) }
     var confirmReset by remember { mutableStateOf(false) }
@@ -1415,6 +1659,10 @@ private fun ImportExport(store: SettingsStore, live: Boolean) {
         }
     }
     Group {
+        row { NavRow(it, stringResource(R.string.share_streams)) { push(Route.ShareStreams) } }
+        row { ImportLinkRow(it, engine, !live) }
+    }
+    Group {
         row { shapes ->
             ActionRow(shapes, stringResource(R.string.reset_settings), Icons.Rounded.RestartAlt, MaterialTheme.colorScheme.error, !live) {
                 confirmReset = true
@@ -1438,5 +1686,192 @@ private fun ImportExport(store: SettingsStore, live: Boolean) {
             },
             dismissButton = { TextButton({ confirmReset = false }) { Text(stringResource(R.string.cancel)) } },
         )
+    }
+}
+
+private fun keyLabel(url: String): Int? = when (transportOf(url)) {
+    Transport.RTMP -> R.string.stream_key
+    Transport.WHIP -> R.string.token
+    else -> null
+}
+
+@Composable
+private fun Microphones(store: SettingsStore, settings: AppSettings, engine: StreamEngine) {
+    val mics by engine.mics.collectAsStateWithLifecycle()
+    val selected = findMic(mics, settings.micKey)
+    Group {
+        row { shapes ->
+            NavRow(
+                shapes,
+                stringResource(R.string.mic_auto),
+                leading = { RadioButton(settings.micKey == null, { store.update { it.copy(micKey = null) } }) },
+            ) { store.update { it.copy(micKey = null) } }
+        }
+        mics.forEach { mic ->
+            row { shapes ->
+                NavRow(
+                    shapes,
+                    micLabel(mic),
+                    leading = { RadioButton(mic == selected, { store.update { it.copy(micKey = mic.key) } }) },
+                ) { store.update { it.copy(micKey = mic.key) } }
+            }
+        }
+        if (settings.micKey != null && selected == null) {
+            row { shapes ->
+                NavRow(
+                    shapes,
+                    micLabel(mics, settings.micKey),
+                    leading = { RadioButton(true, {}) },
+                    supporting = stringResource(R.string.mic_not_connected),
+                ) {}
+            }
+        }
+    }
+}
+
+@Composable
+private fun StreamDestinations(
+    store: SettingsStore,
+    profile: StreamProfile,
+    engine: StreamEngine,
+    editable: Boolean,
+    push: (Route) -> Unit,
+) {
+    val states by engine.destinations.collectAsStateWithLifecycle()
+    if (profile.destinations.isNotEmpty()) {
+        Group {
+            profile.destinations.forEach { destination ->
+                row { shapes ->
+                    val state = states[destination.id]
+                    if (state != null) {
+                        ValueRow(shapes, destination.name, stringResource(liveStateLabel(state)))
+                    } else {
+                        SwitchNavRow(
+                            shapes,
+                            destination.name,
+                            destination.enabled,
+                            { on ->
+                                if (editable) {
+                                    store.updateProfile(
+                                        profile.copy(
+                                            destinations = profile.destinations.map {
+                                                if (it.id == destination.id) it.copy(enabled = on) else it
+                                            },
+                                        ),
+                                    )
+                                }
+                            },
+                        ) { push(Route.StreamDestination(profile.id, destination.id)) }
+                    }
+                }
+            }
+        }
+    }
+    Group {
+        row { shapes ->
+            val name = stringResource(R.string.destination_default_name, profile.destinations.size + 1)
+            ActionRow(shapes, stringResource(R.string.add_destination), Icons.Rounded.Add, enabled = editable) {
+                val destination = Destination(name = name)
+                store.updateProfile(profile.copy(destinations = profile.destinations + destination))
+                push(Route.StreamDestination(profile.id, destination.id))
+            }
+        }
+    }
+}
+
+private fun liveStateLabel(state: LiveState) = when (state) {
+    LiveState.LIVE -> R.string.notification_live
+    LiveState.OFFLINE -> R.string.off
+    LiveState.CONNECTING -> R.string.connecting
+    LiveState.RECONNECTING -> R.string.reconnecting
+}
+
+@Composable
+private fun StreamDestination(
+    store: SettingsStore,
+    profile: StreamProfile,
+    destination: Destination,
+    editable: Boolean,
+    pop: () -> Unit,
+) {
+    val update = { changed: Destination ->
+        store.updateProfile(profile.copy(destinations = profile.destinations.map { if (it.id == changed.id) changed else it }))
+    }
+    Group {
+        row { TextRow(it, stringResource(R.string.name), destination.name) { name -> update(destination.copy(name = name)) } }
+    }
+    Group {
+        row { shapes ->
+            TextRow(shapes, "URL", destination.url, "rtmps://", editable, KeyboardType.Uri) { update(destination.copy(url = it.trim())) }
+        }
+        keyLabel(destination.url)?.let { label ->
+            row { shapes ->
+                TextRow(shapes, stringResource(label), destination.streamKey, enabled = editable, keyboard = KeyboardType.Password) {
+                    update(destination.copy(streamKey = it.trim()))
+                }
+            }
+        }
+    }
+    Group {
+        row { shapes ->
+            ActionRow(shapes, stringResource(R.string.delete), Icons.Rounded.Delete, MaterialTheme.colorScheme.error, editable) {
+                pop()
+                store.updateProfile(profile.copy(destinations = profile.destinations.filterNot { it.id == destination.id }))
+            }
+        }
+    }
+}
+
+@Composable
+private fun StreamReplay(store: SettingsStore, profile: StreamProfile, editable: Boolean) {
+    val replay = profile.replay
+    val update = { changed: com.opirl.app.settings.ReplaySettings -> store.updateProfile(profile.copy(replay = changed)) }
+    Group {
+        row { SwitchRow(it, stringResource(R.string.enabled), replay.enabled, editable) { on -> update(replay.copy(enabled = on)) } }
+    }
+    Group {
+        row { shapes ->
+            ChoiceRow(shapes, stringResource(R.string.replay_length), REPLAY_SECONDS, replay.seconds, { "$it s" }) {
+                update(replay.copy(seconds = it))
+            }
+        }
+        row { shapes ->
+            ChoiceRow(shapes, stringResource(R.string.replay_delay), listOf(0, 1, 2, 3, 5), replay.delaySeconds, { "$it s" }) {
+                update(replay.copy(delaySeconds = it))
+            }
+        }
+    }
+}
+
+@Composable
+private fun StreamPreview(store: SettingsStore, profile: StreamProfile, editable: Boolean) {
+    val preview = profile.previewStream
+    val update = { changed: com.opirl.app.settings.PreviewStreamSettings -> store.updateProfile(profile.copy(previewStream = changed)) }
+    Group {
+        row { shapes ->
+            TextRow(shapes, "URL", preview.url, "whip://", editable, KeyboardType.Uri) { update(preview.copy(url = it.trim())) }
+        }
+        row { shapes ->
+            TextRow(shapes, stringResource(R.string.token), preview.token, enabled = editable, keyboard = KeyboardType.Password) {
+                update(preview.copy(token = it.trim()))
+            }
+        }
+    }
+    Group {
+        row { shapes ->
+            ChoiceRow(shapes, stringResource(R.string.resolution), PREVIEW_RESOLUTIONS, preview.resolution, { it.label }, enabled = editable) {
+                update(preview.copy(resolution = it))
+            }
+        }
+        row { shapes ->
+            ChoiceRow(
+                shapes,
+                "Bitrate (kbps)",
+                listOf(250, 500, 1000, 1500, 2500),
+                preview.bitrateKbps,
+                { "$it" },
+                enabled = editable,
+            ) { update(preview.copy(bitrateKbps = it)) }
+        }
     }
 }

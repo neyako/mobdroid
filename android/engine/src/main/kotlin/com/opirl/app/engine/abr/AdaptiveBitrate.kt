@@ -18,6 +18,7 @@ data class StreamStats(
     val mbpsSendRate: Double? = null,
     val relaxed: Boolean = false,
     val queuedBytes: Long = 0,
+    val lostPercent: Double = 0.0,
 ) {
     fun limitByTransportBitrate(bitrate: Long): Long {
         val transport = transportBitrate ?: return bitrate
@@ -38,6 +39,7 @@ fun PublisherStats.toStreamStats(
     mbpsSendRate = sendBitrateBps / 1_000_000.0,
     relaxed = relaxed,
     queuedBytes = queuedBytes,
+    lostPercent = lostPercent,
 )
 
 class TransportBitrateMeter(initialBitrate: Long) {

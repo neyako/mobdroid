@@ -5,6 +5,7 @@ import com.opirl.app.settings.Corner
 import com.opirl.app.settings.Scene
 import com.opirl.app.settings.SceneWidget
 import com.opirl.app.settings.Widget
+import java.time.LocalDateTime
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -29,6 +30,11 @@ class ScenesTest {
         assertEquals("usb1", camera("back", "front", "back", "front", "usb1", "usb2"))
         assertEquals("usb2", camera("usb2", "front", "back", "front", "usb1", "usb2"))
         assertEquals(null, camera("back", "gone", "back", "front"))
+    }
+
+    @Test
+    fun timeAndDateAreFilledIn() {
+        assertEquals("IRL 07:05 on 2026-11-10", expandText("IRL {time} on {date}", LocalDateTime.of(2026, 11, 10, 7, 5, 59)))
     }
 
     @Test

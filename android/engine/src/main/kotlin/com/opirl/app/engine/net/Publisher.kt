@@ -10,7 +10,14 @@ data class PublisherStats(
     val packetsInFlight: Int = 0,
     val retransmittedPackets: Long = 0,
     val droppedVideoFrames: Long = 0,
+    val lostPercent: Double = 0.0,
 )
+
+data class LinkUsage(val id: String, val name: String, val type: LinkType, val bytesSent: Long, val rttMs: Int)
+
+interface BondedPublisher {
+    fun linkUsage(): List<LinkUsage>
+}
 
 interface PublisherListener {
     fun onConnected()

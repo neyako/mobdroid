@@ -1,6 +1,7 @@
 package com.opirl.app.media.gl
 
 import android.graphics.Bitmap
+import android.graphics.Movie
 import android.graphics.SurfaceTexture
 import android.opengl.EGL14
 import android.opengl.EGLSurface
@@ -13,6 +14,10 @@ import android.os.HandlerThread
 import android.os.Process
 import android.os.SystemClock
 import android.view.Surface
+import com.opirl.app.effects.ChromaKey
+import com.opirl.app.effects.horizonScale
+import com.opirl.app.effects.horizonStep
+import com.opirl.app.settings.Reaction
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.CountDownLatch
@@ -55,15 +60,18 @@ class Overlay(
     val cornerRadius: Float = 0f,
     val borderWidth: Float = 0f,
     val borderColor: Int = 0,
+    val key: ChromaKey? = null,
+    val version: Int = 0,
 ) {
     fun same(other: Overlay): Boolean = id == other.id && bitmap === other.bitmap && x == other.x && y == other.y &&
         width == other.width && height == other.height && previewOnly == other.previewOnly && source == other.source &&
         surface == other.surface && rotation == other.rotation && alpha == other.alpha && cropX == other.cropX &&
         cropY == other.cropY && cropWidth == other.cropWidth && cropHeight == other.cropHeight &&
-        cornerRadius == other.cornerRadius && borderWidth == other.borderWidth && borderColor == other.borderColor
+        cornerRadius == other.cornerRadius && borderWidth == other.borderWidth && borderColor == other.borderColor &&
+        key == other.key && version == other.version
 }
 
-private class OverlayTexture(val id: Int, var bitmap: Bitmap?)
+private class OverlayTexture(val id: Int, var bitmap: Bitmap?, var version: Int)
 
 private class SurfaceOverlay(val texture: Int, val surfaceTexture: SurfaceTexture, val surface: Surface) {
     @Volatile
@@ -100,6 +108,10 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
     private val sourceMatrix = FloatArray(16)
     private val drawMatrix = FloatArray(16)
     private val previewMatrix = FloatArray(16)
+    private val streamScene = FloatArray(16)
+    private val previewScene = FloatArray(16)
+    private val horizonMatrix = FloatArray(16)
+    private var horizonAngle = 0f
     private val scratch = FloatArray(16)
     private val point = FloatArray(8)
     private var previewWidth = 0
@@ -121,13 +133,18 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
     private var previewSurface: EGLSurface? = null
     private var encoderSurface: EGLSurface? = null
     private var recorderSurface: EGLSurface? = null
+    private var monitorSurface: EGLSurface? = null
     private var snapshot: ((Bitmap?) -> Unit)? = null
+    private var thumbnail: ((Bitmap?) -> Unit)? = null
+    private var thumbnailWidth = 0
     private var overlayProgram = 0
     private var overlayPos = 0
     private var overlayRect = 0
     private var overlayCrop = 0
     private var overlayTurn = 0
     private var overlayAlpha = 0
+    private var overlayKey = 0
+    private var overlayThreshold = 0
     private var overlays = emptyList<Overlay>()
     private val overlayTextures = HashMap<String, OverlayTexture>()
     private var surfaceProgram = 0
@@ -140,6 +157,9 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
     private var surfaceShape = 0
     private var surfaceBorder = 0
     private var surfaceSt = 0
+    private var surfaceKey = 0
+    private var surfaceThreshold = 0
+    private lateinit var effects: EffectRenderer
     private val surfaceOverlays = HashMap<String, SurfaceOverlay>()
     private val surfaceOverlayList = ArrayList<SurfaceOverlay>()
     private var tap: FrameTap? = null
@@ -150,6 +170,7 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
     private val tapMatrix = FloatArray(16)
     private var frameIntervalNs = 1_000_000_000L / 30
     private var nextEncodeNs = 0L
+    private var lastStamp = -1L
     private var released = false
 
     @Volatile
@@ -159,6 +180,9 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
     @Volatile
     var measuredFps = 0f
         private set
+
+    @Volatile
+    var horizonTilt: Float? = null
     private var fpsWindowStart = 0L
     private var fpsWindowFrames = 0
 
@@ -167,6 +191,7 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         handler.post {
             egl = EglCore()
             setupGl()
+            effects = EffectRenderer(quad)
             surfaceTexture = SurfaceTexture(texture).apply {
                 setDefaultBufferSize(inputWidth, inputHeight)
                 setOnFrameAvailableListener({ render() }, handler)
@@ -180,7 +205,11 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
 
     fun newInputSurface(): Surface = Surface(surfaceTexture)
 
-    fun repeatFrame() = handler.post { render(System.nanoTime()) }
+    private val repeat = Runnable { render(System.nanoTime()) }
+
+    fun repeatFrame() {
+        if (!handler.hasCallbacks(repeat)) handler.post(repeat)
+    }
 
     fun setInput(
         width: Int,
@@ -242,6 +271,25 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         nextEncodeNs = 0
     }
 
+    fun setMonitor(surface: Surface?) = runBlockingOnThread {
+        monitorSurface?.let { egl.makeNothingCurrent(); egl.releaseSurface(it) }
+        monitorSurface = surface?.let { egl.createWindowSurface(it) }
+        nextEncodeNs = 0
+    }
+
+    fun setEffects(settings: EffectSettings) = handler.post {
+        if (released) return@post
+        egl.makeNothingCurrent()
+        effects.setSettings(settings)
+    }
+
+    @Suppress("DEPRECATION")
+    fun playProp(reaction: Reaction, movie: Movie) = handler.post {
+        if (released) return@post
+        egl.makeNothingCurrent()
+        effects.play(reaction, movie)
+    }
+
     fun setOverlays(next: List<Overlay>) = handler.post {
         if (released) return@post
         egl.makeNothingCurrent()
@@ -259,12 +307,13 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
                 GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
                 GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
                 GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
-                OverlayTexture(ids[0], null)
+                OverlayTexture(ids[0], null, 0)
             }
-            if (texture.bitmap !== bitmap) {
+            if (texture.bitmap !== bitmap || texture.version != overlay.version) {
                 GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture.id)
                 GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
                 texture.bitmap = bitmap
+                texture.version = overlay.version
             }
         }
         overlays = next
@@ -320,14 +369,28 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         if (released) onResult(null) else snapshot = onResult
     }
 
+    fun takeThumbnail(width: Int, onResult: (Bitmap?) -> Unit) = handler.post {
+        if (released) {
+            onResult(null)
+        } else {
+            thumbnail?.invoke(null)
+            thumbnail = onResult
+            thumbnailWidth = width
+        }
+    }
+
     fun release() {
         runBlockingOnThread {
             released = true
             snapshot?.invoke(null)
             snapshot = null
+            thumbnail?.invoke(null)
+            thumbnail = null
             previewSurface?.let { egl.releaseSurface(it) }
             encoderSurface?.let { egl.releaseSurface(it) }
             recorderSurface?.let { egl.releaseSurface(it) }
+            monitorSurface?.let { egl.releaseSurface(it) }
+            monitorSurface = null
             previewSurface = null
             encoderSurface = null
             recorderSurface = null
@@ -339,6 +402,7 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
             overlayTextures.values.forEach { GLES20.glDeleteTextures(1, intArrayOf(it.id), 0) }
             overlayTextures.clear()
             surfaceOverlays.keys.toList().forEach(::closeSurface)
+            effects.release()
             GLES20.glDeleteProgram(surfaceProgram)
             GLES20.glDeleteTextures(1, intArrayOf(texture), 0)
             egl.release()
@@ -376,7 +440,10 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
                 overlay.surfaceTexture.getTransformMatrix(overlay.matrix)
             }
         }
-        val ts = if (repeatNs != 0L) repeatNs else toMonotonic(surfaceTexture.timestamp)
+        val stamp = surfaceTexture.timestamp
+        if (repeatNs == 0L && stamp == lastStamp) return
+        lastStamp = stamp
+        val ts = if (repeatNs != 0L) repeatNs else toMonotonic(stamp)
         lastFrameNanos = SystemClock.elapsedRealtimeNanos()
         countFps()
         Matrix.multiplyMM(drawMatrix, 0, stMatrix, 0, sourceMatrix, 0)
@@ -386,14 +453,41 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
             Matrix.scaleM(scratch, 0, -1f, 1f, 1f)
             Matrix.multiplyMM(previewMatrix, 0, drawMatrix, 0, scratch, 0)
         }
-        val streamMatrix = if (mirror && mirrorStream) previewMatrix else drawMatrix
-        if ((encoderSurface != null || recorderSurface != null) && shouldEncode(ts)) {
-            encoderSurface?.let { encode(it, streamMatrix, ts) }
-            recorderSurface?.let { encode(it, streamMatrix, ts) }
+        val mirroredStream = mirror && mirrorStream
+        val tilt = horizonTilt
+        if (tilt == null) {
+            horizonAngle = 0f
+            System.arraycopy(if (mirroredStream) previewMatrix else drawMatrix, 0, streamScene, 0, 16)
+            System.arraycopy(if (mirror) previewMatrix else drawMatrix, 0, previewScene, 0, 16)
+        } else {
+            horizonAngle = horizonStep(horizonAngle, tilt)
+            setHorizon(if (mirror && !mirrorStream) horizonAngle else -horizonAngle)
+            Matrix.multiplyMM(streamScene, 0, if (mirroredStream) previewMatrix else drawMatrix, 0, horizonMatrix, 0)
+            setHorizon(-horizonAngle)
+            Matrix.multiplyMM(previewScene, 0, if (mirror) previewMatrix else drawMatrix, 0, horizonMatrix, 0)
+        }
+        val processed = effects.active
+        if (processed) {
+            effects.begin(outputWidth, outputHeight)
+            draw(streamScene)
+            effects.process()
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        } else {
+            effects.idle()
+        }
+        if ((encoderSurface != null || recorderSurface != null || monitorSurface != null) && shouldEncode(ts)) {
+            encoderSurface?.let { encode(it, processed, ts, outputWidth, outputHeight) }
+            recorderSurface?.let { encode(it, processed, ts, outputWidth, outputHeight) }
+            monitorSurface?.let { encode(it, processed, ts, egl.surfaceWidth(it), egl.surfaceHeight(it)) }
         }
         snapshot?.let {
             snapshot = null
-            it(runCatching { capture(streamMatrix) }.getOrNull())
+            it(runCatching { capture(processed, outputWidth, outputHeight) }.getOrNull())
+        }
+        thumbnail?.let {
+            thumbnail = null
+            val width = minOf(thumbnailWidth, outputWidth)
+            it(runCatching { capture(processed, width, maxOf(width * outputHeight / outputWidth, 1)) }.getOrNull())
         }
         tap?.let { current ->
             val now = System.nanoTime()
@@ -406,23 +500,34 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         previewSurface?.let { surface ->
             if (egl.makeCurrent(surface)) {
                 fitViewport(egl.surfaceWidth(surface), egl.surfaceHeight(surface))
-                draw(if (mirror) previewMatrix else drawMatrix)
+                if (processed) effects.blit(mirror && !mirrorStream) else draw(previewScene)
                 drawOverlays(preview = true)
                 egl.swap(surface)
             }
         }
     }
 
-    private fun encode(surface: EGLSurface, matrix: FloatArray, ts: Long) {
+    private fun setHorizon(angle: Float) {
+        val aspect = outputWidth.toFloat() / outputHeight
+        val scale = 1 / horizonScale(outputWidth.toFloat(), outputHeight.toFloat(), angle)
+        Matrix.setIdentityM(horizonMatrix, 0)
+        Matrix.translateM(horizonMatrix, 0, 0.5f, 0.5f, 0f)
+        Matrix.scaleM(horizonMatrix, 0, scale / aspect, scale, 1f)
+        Matrix.rotateM(horizonMatrix, 0, Math.toDegrees(angle.toDouble()).toFloat(), 0f, 0f, 1f)
+        Matrix.scaleM(horizonMatrix, 0, aspect, 1f, 1f)
+        Matrix.translateM(horizonMatrix, 0, -0.5f, -0.5f, 0f)
+    }
+
+    private fun encode(surface: EGLSurface, processed: Boolean, ts: Long, width: Int, height: Int) {
         if (!egl.makeCurrent(surface)) return
-        GLES20.glViewport(0, 0, outputWidth, outputHeight)
-        draw(matrix)
+        GLES20.glViewport(0, 0, width, height)
+        if (processed) effects.blit(false) else draw(streamScene)
         drawOverlays(preview = false)
         egl.setPresentationTime(surface, ts)
         egl.swap(surface)
     }
 
-    private fun capture(matrix: FloatArray): Bitmap {
+    private fun capture(processed: Boolean, width: Int, height: Int): Bitmap {
         egl.makeNothingCurrent()
         val ids = IntArray(2)
         GLES20.glGenTextures(1, ids, 0)
@@ -430,20 +535,20 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         try {
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, ids[0])
             GLES20.glTexImage2D(
-                GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, outputWidth, outputHeight, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null,
+                GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, width, height, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null,
             )
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, ids[1])
             GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, ids[0], 0)
             check(GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER) == GLES20.GL_FRAMEBUFFER_COMPLETE)
-            GLES20.glViewport(0, 0, outputWidth, outputHeight)
-            draw(matrix)
+            GLES20.glViewport(0, 0, width, height)
+            if (processed) effects.blit(false) else draw(streamScene)
             drawOverlays(preview = false)
-            val pixels = ByteBuffer.allocateDirect(outputWidth * outputHeight * 4).order(ByteOrder.nativeOrder())
-            GLES20.glReadPixels(0, 0, outputWidth, outputHeight, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixels)
-            val upsideDown = Bitmap.createBitmap(outputWidth, outputHeight, Bitmap.Config.ARGB_8888)
+            val pixels = ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.nativeOrder())
+            GLES20.glReadPixels(0, 0, width, height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixels)
+            val upsideDown = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             upsideDown.copyPixelsFromBuffer(pixels)
             val flip = android.graphics.Matrix().apply { preScale(1f, -1f) }
-            return Bitmap.createBitmap(upsideDown, 0, 0, outputWidth, outputHeight, flip, false).also { upsideDown.recycle() }
+            return Bitmap.createBitmap(upsideDown, 0, 0, width, height, flip, false).also { upsideDown.recycle() }
         } finally {
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
             GLES20.glDeleteFramebuffers(1, ids, 1)
@@ -618,6 +723,7 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
                 GLES20.glUniform4f(overlayCrop, overlay.cropX, overlay.cropY, overlay.cropWidth, overlay.cropHeight)
                 GLES20.glUniform3f(overlayTurn, cos, sin, aspect)
                 GLES20.glUniform1f(overlayAlpha, overlay.alpha)
+                setKey(overlayKey, overlayThreshold, overlay.key)
             } else {
                 val surface = surfaceOverlays[overlay.surface]
                 if (surface == null || !surface.ready) continue
@@ -645,10 +751,20 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
                 )
                 Matrix.multiplyMM(scratch, 0, surface.matrix, 0, surface.fill, 0)
                 GLES20.glUniformMatrix4fv(surfaceSt, 1, false, scratch, 0)
+                setKey(surfaceKey, surfaceThreshold, overlay.key)
             }
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
         }
         GLES20.glDisable(GLES20.GL_BLEND)
+    }
+
+    private fun setKey(color: Int, threshold: Int, key: ChromaKey?) {
+        if (key == null) {
+            GLES20.glUniform1f(threshold, -1f)
+        } else {
+            GLES20.glUniform3f(color, key.red, key.green, key.blue)
+            GLES20.glUniform1f(threshold, key.threshold)
+        }
     }
 
     private fun setupGl() {
@@ -658,6 +774,8 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         overlayCrop = GLES20.glGetUniformLocation(overlayProgram, "uCrop")
         overlayTurn = GLES20.glGetUniformLocation(overlayProgram, "uTurn")
         overlayAlpha = GLES20.glGetUniformLocation(overlayProgram, "uAlpha")
+        overlayKey = GLES20.glGetUniformLocation(overlayProgram, "uKey")
+        overlayThreshold = GLES20.glGetUniformLocation(overlayProgram, "uThreshold")
         surfaceProgram = linkProgram(SURFACE_VERTEX, SURFACE_FRAGMENT)
         surfacePos = GLES20.glGetAttribLocation(surfaceProgram, "aUnit")
         surfaceRect = GLES20.glGetUniformLocation(surfaceProgram, "uRect")
@@ -668,6 +786,8 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         surfaceShape = GLES20.glGetUniformLocation(surfaceProgram, "uShape")
         surfaceBorder = GLES20.glGetUniformLocation(surfaceProgram, "uBorder")
         surfaceSt = GLES20.glGetUniformLocation(surfaceProgram, "uSt")
+        surfaceKey = GLES20.glGetUniformLocation(surfaceProgram, "uKey")
+        surfaceThreshold = GLES20.glGetUniformLocation(surfaceProgram, "uThreshold")
         program = linkProgram(VERTEX, FRAGMENT)
         aPos = GLES20.glGetAttribLocation(program, "aPos")
         aTex = GLES20.glGetAttribLocation(program, "aTex")
@@ -680,28 +800,6 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
-    }
-
-    private fun linkProgram(vertex: String, fragment: String): Int {
-        fun compile(type: Int, source: String) = GLES20.glCreateShader(type).also {
-            GLES20.glShaderSource(it, source)
-            GLES20.glCompileShader(it)
-            val ok = IntArray(1)
-            GLES20.glGetShaderiv(it, GLES20.GL_COMPILE_STATUS, ok, 0)
-            check(ok[0] != 0) { GLES20.glGetShaderInfoLog(it) }
-        }
-        val vs = compile(GLES20.GL_VERTEX_SHADER, vertex)
-        val fs = compile(GLES20.GL_FRAGMENT_SHADER, fragment)
-        return GLES20.glCreateProgram().also {
-            GLES20.glAttachShader(it, vs)
-            GLES20.glAttachShader(it, fs)
-            GLES20.glLinkProgram(it)
-            GLES20.glDeleteShader(vs)
-            GLES20.glDeleteShader(fs)
-            val ok = IntArray(1)
-            GLES20.glGetProgramiv(it, GLES20.GL_LINK_STATUS, ok, 0)
-            check(ok[0] != 0) { GLES20.glGetProgramInfoLog(it) }
-        }
     }
 
     private companion object {
@@ -738,13 +836,28 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
                 vTex = place();
             }
         """
+        const val KEYED = """
+            uniform vec3 uKey;
+            uniform float uThreshold;
+            vec2 chroma(vec3 c) {
+                float luma = 0.2989 * c.r + 0.5866 * c.g + 0.1145 * c.b;
+                return vec2(0.7132 * (c.r - luma), 0.5647 * (c.b - luma));
+            }
+            vec4 keyed(vec4 c) {
+                if (uThreshold >= 0.0 && c.a > 0.0) {
+                    c *= smoothstep(uThreshold, uThreshold + 0.1, distance(chroma(c.rgb / c.a), chroma(uKey)));
+                }
+                return c;
+            }
+        """
         const val OVERLAY_FRAGMENT = """
             precision mediump float;
             varying vec2 vTex;
             uniform sampler2D sTex;
             uniform float uAlpha;
+        """ + KEYED + """
             void main() {
-                gl_FragColor = texture2D(sTex, vTex) * uAlpha;
+                gl_FragColor = keyed(texture2D(sTex, vTex)) * uAlpha;
             }
         """
         const val SURFACE_VERTEX = PLACE + """
@@ -768,8 +881,9 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
             uniform vec2 uSize;
             uniform vec2 uShape;
             uniform vec4 uBorder;
+        """ + KEYED + """
             void main() {
-                vec4 color = texture2D(sTex, vTex);
+                vec4 color = keyed(texture2D(sTex, vTex));
                 if (uShape.x > 0.0 || uShape.y > 0.0) {
                     vec2 corner = abs(vBox) - (uSize * 0.5 - uShape.x);
                     float edge = length(max(corner, 0.0)) + min(max(corner.x, corner.y), 0.0) - uShape.x;

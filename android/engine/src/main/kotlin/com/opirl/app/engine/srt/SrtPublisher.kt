@@ -4,6 +4,8 @@ import com.opirl.app.engine.media.AudioFormat
 import com.opirl.app.engine.media.EncodedFrame
 import com.opirl.app.engine.media.MediaSink
 import com.opirl.app.engine.media.VideoFormat
+import com.opirl.app.engine.net.BondedPublisher
+import com.opirl.app.engine.net.LinkUsage
 import com.opirl.app.engine.net.NetworkLinkProvider
 import com.opirl.app.engine.net.Publisher
 import com.opirl.app.engine.net.PublisherListener
@@ -51,13 +53,15 @@ class SrtPublisher internal constructor(
     private val links: NetworkLinkProvider?,
     private val options: SrtOptions,
     private val environment: SrtEnvironment,
-) : Publisher, SrtSessionListener {
+    private val onServer: ((InetSocketAddress) -> Unit)? = null,
+) : Publisher, BondedPublisher, SrtSessionListener {
     constructor(
         url: String,
         listener: PublisherListener,
         links: NetworkLinkProvider? = null,
         options: SrtOptions = SrtOptions(),
-    ) : this(url, listener, links, options, SrtEnvironment())
+        onServer: ((InetSocketAddress) -> Unit)? = null,
+    ) : this(url, listener, links, options, SrtEnvironment(), onServer)
 
     private val queue = FrameQueue(environment.maximumQueuedBytes)
     private val engine = SrtEngine("srt-publisher") { failure ->
@@ -125,6 +129,8 @@ class SrtPublisher internal constructor(
 
     fun linkStats(): List<SrtlaLinkStats> =
         (session?.transport as? SrtlaClient)?.linkStats() ?: emptyList()
+
+    override fun linkUsage(): List<LinkUsage> = linkStats().map { LinkUsage(it.id, it.name, it.type, it.bytesSent, it.rttMs) }
 
     fun setLinkPriorities(newPriorities: SrtlaPriorities) {
         priorities = newPriorities
@@ -197,6 +203,9 @@ class SrtPublisher internal constructor(
         }
         if (terminated.get()) {
             return
+        }
+        if (target.bonded) {
+            onServer?.invoke(address)
         }
         val transport = environment.transportFactory?.invoke(engine, address, target)
             ?: if (target.bonded) {

@@ -24,6 +24,7 @@ class StreamService : Service() {
         val stop = intent?.action == ACTION_STOP
         if (!stop || !foreground) {
             enterForeground(
+                intent?.getBooleanExtra(EXTRA_MEDIA, true) != false,
                 intent?.getBooleanExtra(EXTRA_USB, false) == true,
                 intent?.getBooleanExtra(EXTRA_LOCATION, false) == true,
                 intent?.getStringExtra(EXTRA_TITLE) ?: getString(R.string.notification_live),
@@ -48,7 +49,7 @@ class StreamService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun enterForeground(usb: Boolean, location: Boolean, title: String) {
+    private fun enterForeground(media: Boolean, device: Boolean, location: Boolean, title: String) {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL, getString(R.string.notification_channel), NotificationManager.IMPORTANCE_LOW),
@@ -69,8 +70,8 @@ class StreamService : Service() {
         startForeground(
             1,
             notification,
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-                (if (usb) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0) or
+            (if (media) ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0) or
+                (if (device || !media) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0) or
                 (if (location) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0),
         )
     }
@@ -86,6 +87,7 @@ class StreamService : Service() {
     companion object {
         const val EXTRA_USB = "usb"
         const val EXTRA_LOCATION = "location"
+        const val EXTRA_MEDIA = "media"
         const val EXTRA_TITLE = "title"
         const val ACTION_STOP = "com.opirl.app.STOP"
         private const val CHANNEL = "live"

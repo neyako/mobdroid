@@ -91,6 +91,8 @@ class BrowserWidgets(private val context: Context) {
         }
     }
 
+    fun reload() = running.values.forEach { it.webView.reload() }
+
     private fun close(id: String) {
         val widget = running.remove(id) ?: return
         handler.removeCallbacks(widget.load)

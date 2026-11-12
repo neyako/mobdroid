@@ -10,7 +10,9 @@ them, not code style.
   muxers, transports, adaptive bitrate, chat clients, the OBS remote.
   - `media/` — `VideoFormat`, `AudioFormat`, `EncodedFrame`, `MediaSink`.
   - `net/` — `Publisher` (one-shot ingest connection), `NetworkLink`/`NetworkLinkProvider` (sockets
-    pinned to an interface, used by SRTLA bonding).
+    pinned to an interface, used by SRTLA bonding), `WebServer` (HTTP and WebSocket server).
+  - `moblink/` — Moblink streamer and relay. `remote/` — remote control protocol, streamer, assistant,
+    web remote and relay bridge. `json/` — helpers for JSON trees.
   - `flv/`, `rtmp/` — FLV tags and the RTMP/RTMPS publisher. HEVC and AV1 use Enhanced RTMP.
   - `ts/` — MPEG-TS muxer (H264, HEVC, AV1, AAC).
   - `mp4/` — the recorder: a crash-safe MP4 writer and the function that finishes or recovers a file.
@@ -18,6 +20,11 @@ them, not code style.
   - `audio/` — PCM helpers for the video player: the resampler and the timed ring buffer.
   - `srt/` — SRT caller, a port of Moblin's own `SrtSender.swift`. `srtla/` — SRTLA bonding client,
     a port of `Moblin/Media/Srtla/Client`. `abr/` — adaptive bitrate (Belabox port).
+  - `rist/` — RIST sender (Simple and Main profile, bonding). Moblin uses librist; this is the protocol
+    written in Kotlin.
+  - `whip/` — WHIP publisher: a send-only WebRTC stack (ICE, DTLS-SRTP, RTP and RTCP). Moblin uses
+    libdatachannel. DTLS comes from BouncyCastle's lightweight API, the only dependency it adds.
+  - `replay/` — the replay buffer.
 - `app/` — the Android app: camera sources, GL compositor, MediaCodec encoders, the foreground
   streaming service and the Compose UI. `src/main/cpp/` holds the native UVC driver
   (libusb + libuvc + libjpeg-turbo).
@@ -49,16 +56,49 @@ them, not code style.
   (bonded over `links`). No encryption: a passphrase is rejected. Frames before `onConnected` are
   dropped, so the session requests a key frame on connect. `NetworkLink.createDatagramSocket()` must
   return an unconnected socket.
-- Both: `stop()` never calls `onDisconnected`; any other end calls it exactly once, on an internal
+- `RistPublisher(url, listener, links)`: `rist://host:port` with librist's `profile` (`main`, the default
+  and what ffmpeg and OBS listen with, or `simple`, which needs an even port and uses port+1 for RTCP),
+  `buffer` (ms, 1000), `cname`, `virt-dst-port` or `stream-id` (1968), `session-timeout` (ms, 2000) and
+  `bandwidth` (kbps). Encryption, authentication and compression are refused. MPEG-TS in RTP payload type
+  33, seven TS packets per datagram. Main profile is GRE over UDP with keepalives; the sender starts with
+  GRE version 1 and moves to 2 when the receiver uses it. Retransmission answers both NACK forms out of a buffer of
+  `buffer` plus a margin, at most 20 times a packet and never above `bandwidth`, with the SSRC's low bit
+  set as librist does. `onConnected` at the first RTCP from a peer; `onDisconnected` when no peer has
+  answered within 5 s ("RIST handshake timed out") or every peer has been silent for the session timeout
+  ("RIST receiver stopped answering"). With `links` there is one peer per `NetworkLink`, following the
+  flow; media is shared out by weight (librist's weighted load balancing) and each weight follows the
+  peer's round trip time through `RistAdaptiveBitrate`, Moblin's `updateConnectionsWeights`. A peer that
+  has been silent for 300 ms gets no media while another one answers. `stats()`: `rttMs` is the best
+  peer's, `lostPercent` the larger of the receiver's reports and retransmit requests per packet sent.
+- `WhipPublisher(url, headers, listener, http, requestKeyFrame)`: `whip://` is HTTP and `whips://` HTTPS
+  (Moblin's rule), plain `http(s)://` works too. The app sends the stream's token as
+  `Authorization: Bearer`. It waits up to 2 s for `setVideoFormat` so the offer names H.264 or HEVC (AV1
+  fails), gathers host candidates on one UDP socket, POSTs the offer (non-trickle, `actpass`) and takes
+  the answer and the `Location` header as the session, which `stop()` deletes. Then ICE as the
+  controlling agent (works with ICE-lite and with full agents, no TURN and no STUN server), DTLS 1.2 in
+  whichever role the answer picks with the answer's fingerprint checked, and SRTP (AES-CM-HMAC-SHA1-80
+  or AES-GCM). Video is packetized per RFC 6184 or 7798 with the parameter sets on every key frame; audio
+  must be Opus (`AudioFormat.codec`), anything else is not sent. One clock gives both tracks their RTP
+  times. It answers NACKs out of a history (8192 video packets, 512 audio; RTX when the answer has it),
+  turns PLI and FIR into `requestKeyFrame` at most every 500 ms, and reads the round trip time and loss
+  from the receiver reports into `stats()`. `onConnected` once media can flow (it asks for a key frame);
+  everything else ends in one `onDisconnected`: an HTTP status, "WHIP connection timed out" after 10 s,
+  "Consent lost" when the server stops answering ICE checks for 10 s, a DTLS alert, an RTCP BYE. The send
+  queue holds one second or 4 MiB and drops video up to the next key frame.
+- All of them: `stop()` never calls `onDisconnected`; any other end calls it exactly once, on an internal
   thread. `stop()` blocks up to about 2 s.
 - AV1 is offered only over RTMP. FFmpeg 7.1 cannot decode AV1 in MPEG-TS, so `StreamProfile.allowedCodecs`
-  drops it for `srt`/`srtla` URLs. Codec choice is `CodecCatalog.choose`: the profile's codec if the
+  drops it for `srt`/`srtla`/`rist` URLs, and for `whip` because the publisher does not packetize it.
+  `transportOf(url)` is the one place that reads the scheme. Codec choice is `CodecCatalog.choose`: the profile's codec if the
   phone has a hardware encoder for it, else the first hardware codec in the platform's priority list
   (Twitch, Kick, Facebook: H.264 only; YouTube and Custom: AV1, HEVC, H.264). Software encoders are
   never used.
-- ABR: `BelaboxAdaptiveBitrate` for SRT, `QueueAdaptiveBitrate` for RTMP, ticked every
+- ABR: `BelaboxAdaptiveBitrate` for SRT, `QueueAdaptiveBitrate` for RTMP, `RistAdaptiveBitrate` for RIST
+  (Moblin's RIST experiment: the best peer's round trip time with a constant ten packets in flight) and
+  `LossAdaptiveBitrate` for WHIP (Moblin has none there: down by half the reported loss once a second
+  above 10% loss, up 5% a second under 2% once it has been quiet for 4 s), ticked every
   `ADAPTIVE_BITRATE_UPDATE_INTERVAL_MS` (20 ms) with the transport bitrate measured once a second.
-  Both cap the target near the measured transport bitrate, as Moblin does. `TransportBitrateMeter` is
+  All of them cap the target near the measured transport bitrate, as Moblin does. `TransportBitrateMeter` is
   new for each session and pauses while reconnecting, so time offline does not pull the cap down.
 
 ## Cameras
@@ -271,15 +311,57 @@ them, not code style.
   `recover()` runs once at start, finishes every pending recording an earlier run of the app left behind
   (older than this process, so never the one being written) and deletes the ones with nothing in them.
   Snapshots go to `Pictures/opIRL`.
-- `StreamEngine` runs the encoders while it is live or recording (`busy`). `MediaTee` takes the output of
-  the stream video encoder and the audio encoder to the stream session and the recorder, and replays the
-  formats to a sink attached later. `RecordingSettings.separate` adds a second video encoder
+- `StreamEngine` runs the encoders while it is live, recording or sending the preview stream (`busy`).
+  `MediaTee` takes the output of the stream video encoder and the audio encoder to its stream sinks (the
+  main session, every destination and the replay buffer, `setStreams`) and to the recorder, and replays
+  the formats to a sink attached later. `RecordingSettings.separate` adds a second video encoder
   (`VideoCompositor.setRecorder`) with its own codec and bitrate at the stream's resolution and frame rate;
   otherwise the recorder gets the stream's frames, at the profile's bitrate while not live. `syncEncoders`
   is the one place that creates and releases encoders for the current state. `fail` clears the recording
   and the session before it reconciles, so a teardown never tries to create an encoder. The stream profile cannot
   change while busy. Recording stops with an alert when free storage falls under 300 MiB.
-- The foreground service runs while live or recording; its notification title says which.
+- The foreground service runs while live, recording or sending the preview stream; its notification
+  title says which.
+
+## Outputs
+
+- `StreamEngine.syncSinks` is the one place that decides which sink gets what, and `syncEncoders` calls it
+  first. A `LiveOutput` is a `StreamSession` with its sinks: a WHIP output takes its video through a
+  `VideoOnlySink` and its sound through an `AudioOnlySink` on `opusTee`, since WebRTC carries Opus and
+  everything else AAC. `AudioEncoder.opusSink` is set while any output wants Opus; the encoder thread then
+  runs an Opus `MediaCodec` beside the AAC one on the same PCM.
+- Multi-streaming: `StreamProfile.destinations` (name, URL, key or token, on or off). Going live starts one
+  `StreamSession` per enabled destination next to the main one. They all get the stream encoder's frames, so
+  a destination must accept the stream's codec; adaptive bitrate follows the main session only, and a slow
+  destination drops frames in its own publisher. Each destination reconnects by itself, reports "Live at"
+  and "failed" alerts, and its state is in `StreamEngine.destinations` (shown on the Destinations page
+  while live). The profile, its destinations included, cannot change while busy.
+- Replay (`StreamProfile.replay`): while live with replay on, `engine/replay/ReplayBuffer` keeps the last
+  60 seconds plus the delay of what the stream encoder made (whole groups of pictures, at most 96 MiB, the
+  oldest dropped first; a new codec config starts over). It holds the frames the encoders already
+  allocated, nothing is copied. `saveReplay` waits the delay, takes a `ReplayClip` of the wanted length
+  starting at a key frame, writes it with `Mp4Recorder` into `Movies/opIRL` as "opIRL Replay ..." and
+  publishes it. `instantReplay` does the same and then plays the file over the stream: `replayPlaying`
+  takes the place of the scene's source in `openCamera`, a `VideoPlayer` that plays once (`loop = false`)
+  at the replay speed (`AppSettings.replaySpeedPercent`, global so it can change on air) and reopens the
+  scene's source when it ends. Sound plays only at normal speed. `playReplay(uri, startMs)` plays a saved
+  replay the same way from a start point, live or not; `VideoPlayer.startMs` seeks the file before the
+  first frame is decoded (a decoder flushed right after it starts gives no picture). The Instant quick
+  button stops a running replay. The buffer is fed only while the stream encoder runs, so not while
+  recording with a separate encoder off air. Saved replays are the recordings whose name starts with
+  "Replay" (`Recording.isReplay`).
+- Preview stream (`StreamProfile.previewStream`, Moblin's name; `monitor` in the code because preview is
+  the on-screen picture here): a WHIP session of its own with a small H.264 encoder on the compositor's
+  third surface (`VideoCompositor.setMonitor`, drawn at the surface's size) and Opus sound. The Preview
+  quick button turns it on and off, on air or not, and it keeps the foreground service running.
+- Microphones: `media/MicCatalog` lists the connected inputs (phone, USB, wired headset, Bluetooth) from
+  `AudioManager` and follows `AudioDeviceCallback`. `AppSettings.micKey` is null for the system's choice,
+  a `Mic.key`, or a bare kind (`USB`) from settings saved before there was a list. `MicCatalog.open`
+  turns it into a `MicInput`; a Bluetooth one makes the headset's output the communication device (SCO;
+  `setCommunicationDevice` only takes an output from `availableCommunicationDevices`) and records
+  with `VOICE_COMMUNICATION`, everything else with `CAMCORDER`. A mic that is not connected falls back to
+  the system's choice and is taken again when it connects. `AudioEncoder.input` can change at any time: the
+  encoder thread reopens its `AudioRecord` and keeps the codecs, so the mic switches on air.
 
 ## Scenes and widgets
 
@@ -289,6 +371,7 @@ them, not code style.
   row did. An external camera (USB) is not a
   scene: while one is attached it replaces the camera of every scene (`sceneCamera`), and with several
   attached the one in use stays in use. A scene that plays videos (see Video scenes) keeps playing them.
+- An image or browser widget can remove its background (see Filters).
 - `AppSettings.widgets` are global; a `SceneWidget` places one in a scene: on or off, a corner, X and Y
   offsets from that corner in percent of the picture, and a size in percent of its width. Widgets whose drawer
   is not `sized` (text, music) ignore the size, their text size sets it. `Widget.previewOnly` keeps a widget out of the stream, the
@@ -438,8 +521,8 @@ them, not code style.
   the rest (`fillMatrix`). `feedBox` (pure, tested) turns the settings (crop in percent, rotation in quarter
   turns, mirror) into the widget's box and the layer inside it. Corner radius and border are percent of the
   layer's shorter side, drawn by the surface shader as a rounded rectangle, so they cost no bitmap.
-- Layers are drawn by one vertex shader (`PLACE`: rectangle, crop, rotation about the centre) with an alpha;
-  surface layers also take the corner radius and border. `linkProgram` checks the link status, because a
+- Layers are drawn by one vertex shader (`PLACE`: rectangle, crop, rotation about the centre) with an alpha
+  and the widget's chroma key (`KEYED`); surface layers also take the corner radius and border. `linkProgram` checks the link status, because a
   uniform declared with different precisions in the two stages only fails there.
 - Face tracking: `VideoCompositor.setFrameTap` reads the scene's picture, or a feed's, into a 320 px wide
   buffer at most ten times a second and only when the last frame was consumed (`FrameTap.busy`), and
@@ -483,6 +566,76 @@ them, not code style.
 - The QR code widget encodes with ZXing core (level M, UTF-8 bytes, one module of quiet zone, black on white like
   Core Image) and draws whole pixel modules as close as it can to its size (percent of the picture's short side),
   never larger than the picture. An empty or too long message draws nothing.
+
+## Filters
+
+- `AppSettings.effects` holds the filters that are on (`Filter`), their strengths and the LUTs. They are global,
+  not per scene, as Moblin's filter quick buttons are. The Filters quick button opens `ui/Panels.kt`'s
+  `FiltersPanel`: one switch per filter, with the sliders of a filter under it while it is on. The button is
+  lit while any filter or LUT is on.
+- `effects/EffectLoader` turns the settings into `EffectSettings` off the main thread (it decodes the LUTs,
+  the face image and the logo) and `StreamEngine` hands them to `VideoCompositor.setEffects`.
+- `media/gl/EffectRenderer` runs on the compositor thread. With no filter on, the compositor draws the camera
+  straight to each surface as before and holds no framebuffer. With one on, the camera is drawn once into a
+  texture of the output size (in stream orientation), the passes run between two textures, and the result is
+  copied to the encoder, the recorder, snapshots and the preview (flipped for a mirrored front camera).
+  Widgets and the drawing are drawn after the filters, so they are never filtered.
+- Pass order: LUTs, glasses and sparkle, blur faces, text and background, logo in mouth, beauty, whirlpool,
+  pinch, 4:3, black and white, sepia, triple, twin, pixellate, CRT. Everything that needs a face runs before
+  the passes that move the picture, so detections line up (Moblin runs beauty later). Shaders are GLSL ES
+  3.00; programs compile at first use.
+- LUTs are 3D textures of at most 64 entries a side. `effects/LutCube.kt` reads a `.cube` file or a square
+  image of tiles (one blue slice per tile, as Moblin's PNG LUTs). The bundled LUT is `assets/luts/<id>.png`;
+  imported ones are copies in `files/effects/`, like the face image. A LUT that cannot be read raises an
+  alert once and is skipped.
+- Faces and text come from ML Kit (`effects/Detector`, its own thread; bundled models, nothing is downloaded
+  and no picture leaves the phone). While a filter needs them, the renderer copies the unfiltered picture
+  into a small texture (640 px on the long side, 1280 px when text is due), reads it through a pixel buffer
+  object one frame later and hands it to the detector, one detection at a time: faces at most every 80 ms,
+  text every 400 ms. Results stay until the next detection replaces them; faces are kept for 400 ms after a
+  detection that finds none, so a blur does not flicker off. Contours (the lips, for the logo in the mouth)
+  are only requested while that filter is on, and ML Kit then gives them for the most prominent face only.
+  The detector is released when no filter needs it.
+- Blur faces, blur text and blur background share one pass and one "hide with" mode (`PrivacyMode`): a
+  Gaussian blur made at a quarter of the size, pixels, an image scaled to fill, or the logo over each face.
+  Blur background hides everything but the faces, and then faces are never hidden.
+- Glasses and sparkle (`Reaction`) are the GIFs in `assets/props/`, decoded with `android.graphics.Movie`
+  and drawn on every face for one run (glasses loop three times). The clock starts at the first detection,
+  and a prop gives up after 10 seconds without a face.
+- Remove background is per widget (image and browser): a chroma key between two hues (`chromaKey`) in the
+  overlay shaders, as Moblin's MetalPetal path.
+- Fixed horizon (Settings, Camera) is not a pass: `StreamEngine` listens to the gravity sensor ten times a
+  second while the preview runs and sets `VideoCompositor.horizonTilt`, the roll beyond the display rotation
+  (`horizonTilt`, null while the phone lies flat, which keeps the last tilt). The compositor eases towards it
+  each frame (`horizonStep`) and folds the rotation and the zoom that keeps the frame covered into the
+  camera's texture matrix, with the opposite sign on the stream of a mirrored preview. Built-in cameras only.
+- `VideoCompositor.repeatFrame` posts at most one pending repeat, so frames that take longer than 50 ms
+  cannot pile up behind a playing video.
+- The release build needs `-keep class * implements ...ComponentRegistrar { <init>(); }`
+  (`app/proguard-rules.pro`): R8 otherwise removes the constructors ML Kit creates by reflection and every
+  detection fails. Check a filter that needs detection on a release build after changing ML Kit or R8.
+
+## Auto scene switcher, macros and drawing
+
+- `AppSettings.autoSwitchers` are lists of scenes with a time each; `autoSwitcherId` is the one running, kept
+  across restarts. `scenes/AutoSceneSwitcher` gives the next entry: in order, or shuffled a round at a time
+  without showing the same scene twice in a row, skipping entries whose scene is gone. `StreamEngine` runs it
+  while the preview is active. The Switcher quick button opens the list to pick one or Off.
+- `AppSettings.macros` are lists of actions (`MacroFunction`): scene, zoom, filters (the set replaces the
+  filters that are on), reaction, record, snapshot, mute, torch, auto switcher, chat message, notification
+  (an alert titled with the macro's name), delay, wait for event, if, run macro. `macros/MacroRunner` runs
+  each started macro as a coroutine. If compares two texts after `{time}` and `{date}` are filled in, as
+  numbers when both start with one, and skips the next `runCount` actions when false. Wait for event takes
+  events from a queue of 100 that fills while the macro runs: stream started and stopped, recording started
+  and stopped, scene switched (optionally to one scene). A macro never runs a macro that is already on its
+  stack. A repeated macro waits a second between runs that had no delay. "Run when the app starts" starts it
+  at the first preview. Moblin's Twitch and Kick events, scene enabling, DJI and gimbal actions are not ported.
+- The Macros quick button lists the macros with run and stop; it is lit while one runs.
+- Draw (`widgets/DrawBoard`): while the quick button is on, drags on the preview draw lines, and a strip over
+  the preview has wipe, undo, six colours and the width. The lines are one overlay over the whole picture, on
+  the stream as well, drawn into a bitmap no wider than 1280 px that is uploaded at most 30 times a second.
+  They stay after leaving draw mode until wiped, and are not saved.
+- The Overlays quick button hides the status items and the chat over the preview until it is pressed again.
 
 ## Video scenes
 
@@ -620,7 +773,7 @@ them, not code style.
   the layout phase only, while the panel slides out from behind the bar or fades away over the preview.
 - The chat panel keeps its draft and whether the stream tools page is open in `MainScreen`, so hiding the
   panel loses neither.
-- Panels (settings, chat, widgets, OBS, browser) sit between the preview and the control bar on wide screens (350 dp, Moblin's
+- Panels (settings, chat, widgets, OBS, browser, filters, auto switcher, macros, remote) sit between the preview and the control bar on wide screens (350 dp, Moblin's
   `settingsHalfWidth`) and fill the screen on near-square ones. Their header is 44 dp with `PanelButtons`:
   hide and close, extra small filled icon buttons with the expressive shape morph. They are 32 dp with
   16 dp between them, so their 48 dp touch targets do not overlap. Hide takes the panel off the screen and
@@ -638,20 +791,30 @@ them, not code style.
   second to `StreamEngine.audioLevel`, which the meter reads in its draw phase only.
 - The status temperature is the battery temperature from `ACTION_BATTERY_CHANGED`, coloured by the thermal
   status.
-- `LiveStats.links` is each SRTLA link's share of the bytes sent in the last second (`linkShares`).
+- `LiveStats.links` is each bonded link's share of the bytes sent in the last second (`linkShares`), from
+  `BondedPublisher.linkUsage` (SRTLA and RIST).
 - `AppSettings` stores the status items and quick buttons the user hid, not the ones shown, so an item
   added later is shown by default.
 - `streamUrl` adds the profile's SRT latency to an `srt`/`srtla` URL that does not name one.
-  `StreamProfile.bondingNetworks` limits which networks SRTLA requests.
+  `StreamProfile.bondingNetworks` limits which networks bonding requests: for `srtla://` always, for
+  `rist://` when the stream's Bonding switch (`ristBonding`) is on.
 - `mirrorFrontCameraOnStream` makes the encoder draw the same mirrored picture as the preview.
-- The Widgets quick button opens a panel that turns the selected scene's widgets on and off. Scenes and
-  widgets are edited under Settings, Scenes: a scene page has the source (a camera or Video), the video list when the source is
+- The Widgets quick button opens a panel that turns the selected scene's widgets on and off. Scenes,
+  widgets, auto scene switchers and macros are edited under Settings, Scenes (`ui/Automation.kt` has the
+  last two): a scene page has the source (a camera or Video), the video list when the source is
   Video, and every widget with a switch; tapping a widget opens its placement in that scene.
 - The OBS quick button (OBS's own logo, `ObsLogo`) opens the OBS panel: the program picture with the
   stream and record buttons beside it, the scenes as toggle buttons, the audio inputs with their mute
   state. Stopping an output takes a second tap within 3 seconds. A stream without OBS set up gets the URL
   and password fields in the panel; an unreachable OBS shows why and a link to Streams, the stream, OBS
   remote. The OBS status item (scene, live, rec, or offline) shows while OBS is enabled for the stream.
+- The Remote quick button shows while the remote control assistant is on and opens the Remote panel
+  (`ui/Remote.kt`): the streamer's picture with its uptime, bitrate, bonding shares and battery (coloured
+  by the streamer's flame) over it and its zoom presets in the bottom right, then Go Live or End, record,
+  mute, torch and stealth, then the scenes and the bitrate presets. End and stopping a recording take a
+  second tap within 3 seconds. The status texts are the streamer's own (`uptime`, `srtla`), so they read
+  the same for a Moblin streamer. Until a streamer connects the panel shows why, the `ws://` addresses to
+  enter on the streamer, and a link to Remote control, Assistant.
 - The Browser quick button opens a web browser in the panel slot (`ui/Browser.kt`). `BrowserState` in
   `MainScreen` owns the one `WebView`, created at the first load: it lives while the browser is the
   selected panel, shown or hidden, so a hidden page keeps running, and is destroyed when the panel is closed
@@ -665,6 +828,20 @@ them, not code style.
   The system back button goes back in the page's history before it closes the panel. Bookmarks
   (`AppSettings.bookmarks`) are listed where the page would be until one is loaded, and on their own page
   with "Add this page"; the page's sound plays on the phone and is not in the stream.
+- The Replay quick button (shown while replay is on for the stream) opens `ui/Replay.kt`'s overlay in
+  the lower right of the picture, Moblin's layout, in place of the zoom stops and the scene row: the
+  selected replay's picture with its delete button, a row with the start slider, the speed, play or stop
+  and save, and the saved replays as thumbnails, newest first. The slider is the start point counted back
+  from the end of the clip (`ReplayPanel.fromEndMs`, kept in `MainScreen` while the app runs, at least a
+  second plays), and the picture and the selected thumbnail show the frame there. The newest replay is
+  selected when the overlay opens and whenever one is saved. Delete takes a second tap within 3 seconds.
+  A picture lower than 260 dp (the cover screen, a preview beside an open panel) gets the compact form:
+  the thumbnails with the delete button, then the row, no large picture. In the near-square layout the
+  overlay is as wide as the picture, or 300 dp for a narrow portrait picture.
+- Settings, Remote control, Moblink, Game controller, Keyboard and Stream Deck follow Moblin's pages. A
+  function is chosen on its own page (`Route.ActionPage`) because there are too many for a choice row.
+  The Moblink and Remote control status items show while the feature is on: an icon, and its text on wide
+  layouts.
 - The Record quick button asks for a second tap to stop, like the End button. The recording time and size
   are a status item. Recording settings are per stream (Streams, a stream, Recording); the recordings list
   is Settings, Recordings.
@@ -716,7 +893,113 @@ only, which no build step or unit test shows. Run the release APK after adding a
 
 Engine tests that talk to a real server use the system `ffmpeg`/`ffprobe` as the receiver and are
 skipped when they are missing. The SRTLA end-to-end tests also need `SRTLA_REC` pointing at a built
-`srtla_rec` from https://github.com/BELABOX/srtla.
+`srtla_rec` from https://github.com/BELABOX/srtla. The WHIP end-to-end tests need `MEDIAMTX` pointing at
+a MediaMTX binary (https://github.com/bluenviron/mediamtx/releases): they publish to it and read the
+stream back over RTSP. The RIST tests use ffmpeg's `rist` protocol (librist) as the receiver, with
+`-rw_timeout` so it ends by itself: once media stops, ffmpeg's librist input ignores a single SIGTERM,
+and a second one makes it exit without flushing its output.
+
+## Connections
+
+Moblink, remote control and the web remote speak Moblin's protocols, so opIRL and Moblin work with each
+other. Messages are Swift's Codable JSON: an enum case is an object with one key (`{"setLive":{"on":true}}`,
+`{"ok":{}}`), and an optional that is nil is left out. The password proof is `hashPassword` (the same
+formula as OBS). Codecs read and write `JsonElement` trees; a test pins each side against literal Moblin
+JSON.
+
+- `net/WebServer(port, handler)`: blocking sockets, one reader and one writer thread per connection, at most
+  32 connections. A request with `Upgrade: websocket` becomes a `WebSocketConnection`, anything else goes to
+  `onHttp` and the connection closes. `send` queues (128 frames) and never blocks; a full queue ends the
+  connection. `close()` sends what is queued first; a second `close()` or `stop()` cuts it. Handler calls
+  come from the connection's reader thread. A stopped server never binds again: `start()` after `stop()`
+  does nothing, so a bind that is still running when its owner stops cannot leave a listener behind.
+  The Moblink streamer, the Moblink relay (its streamers come from mDNS, so they are not chosen by the
+  user) and the remote control assistant handle each message on their executor before the connection
+  reads the next one (`deliver`), which bounds what a connection can queue.
+- Use `String(bytes, charset)` in the engine, never `ByteArrayOutputStream.toString(Charset)`: that one is
+  API 33 and the engine is not covered by Android lint.
+- Everything in `StreamEngine.syncConnections` (Moblink streamer, remote control, web remote, Stream Deck)
+  runs while the preview runs or the app is live or recording, like the OBS client, and is rebuilt when its
+  settings change (500 ms debounce). The Moblink relay is the exception: once started it runs until it is
+  turned off, with the foreground service holding it (`connectedDevice` type only, title "Moblink relay").
+- On Android 17 an app that targets API 37 needs the runtime permission `ACCESS_LOCAL_NETWORK` for any
+  traffic on the local network. The Remote control, Moblink and OBS pages show an Allow row while it is
+  missing (`LocalNetworkAccess`); granting it calls `StreamEngine.restartConnections`.
+
+### Moblink
+
+- Streamer (`MoblinkStreamer`, `moblink/MoblinkController`): a WebSocket server on the Moblink port,
+  advertised with `NsdManager` as `_moblink._tcp`, service name the device's id, TXT `name` the device name.
+  Each relay gets `hello`, answers `identify`, and is asked for its status every 5 s; a relay that does not
+  answer a ping is dropped. While live over SRTLA, `SrtPublisher`'s `onServer` hands the resolved server
+  address to `startTunnels`; each relay answers with a UDP port, and that tunnel becomes a `NetworkLink`
+  with `destination` set to the relay's address. `SrtlaLink` connects to `destination` when a link has one,
+  to the server otherwise. `StreamEngine.streamLinks` is the phone's own links plus the tunnels. The tunnel
+  socket is bound to the network the relay's connection came in on, and left unbound when that is no
+  Android network (the phone's own hotspot).
+- Relay (`MoblinkRelay`): one per streamer URL and per cellular or Ethernet network of this phone. The
+  WebSocket and the socket facing the streamer go over Wi-Fi, the socket facing the server over the mobile
+  network, and the server name is resolved on that network too. Streamers come from mDNS discovery, or from
+  the one URL in manual mode. Two threads forward packets with one reused buffer each. The relay's id and
+  name are generated once (`AppSettings.withIdentity`) and kept.
+- The status item shows each relay's name, battery and a flame when it is hot, then the relay state.
+
+### Remote control
+
+- `RemoteControlTarget` is the phone as seen by a controller: `status()`, `settings()`, `state()` and
+  `handle(request)`. `StreamEngine.remoteTarget` implements it with the pure functions in
+  `remote/RemoteModel.kt`. A request the remote control does not handle (filters and macros, which are not
+  wired to it yet, gimbal, scoreboard, SRT priorities) is `RemoteRequest.Unknown` and answered
+  `unknownRequest`; a known one that cannot be done now
+  (another stream while live, an unknown scene) is answered `error`.
+- Ids on the wire are UUIDs. Scenes and streams have one; a bitrate preset's and a zoom stop's are derived
+  from its value (`bitratePresetId`, `zoomPresetId`), a mic's is its `Mic.key`, or `AUTO` for the system's choice.
+- `RemoteControlStreamer` connects out to the assistant's URL (direct, or a relay's `/streamer/<bridge id>`),
+  retries every 5 s, pings every 30 s and reconnects without a pong. `RemoteControlWeb` serves the pages
+  built from `WebRemoteControlFrontend/` (copied into the APK's assets at build time by `copyWebRemote`, so
+  never committed twice) on its port and WebSockets on that port and the next one, which is the one
+  `/js/config.mjs` names, as in Moblin. The web remote has no password, as in Moblin. Ports under 1024
+  cannot be bound on Android, so the default is 8080.
+- State goes out as changes only (`RemoteState.changesFrom`). The preview is a 640 px JPEG once a second
+  from `VideoCompositor.takeThumbnail`, rendered at that size, and only while a controller asked for it.
+- `RemoteControlAssistant` is the other side: a server the streamer connects to, with `state` (the
+  streamer's state, settings and status) and `preview` as `StateFlow`s and `request()` for commands.
+  `RemoteControlBridge` connects it to a relay server so a streamer can reach it from anywhere. Its state
+  changes only from the streamer's events, never optimistically. `setActive(true)` asks for the preview
+  and polls the status every second; the Remote panel turns it on only while it is on screen and the
+  activity is started.
+- Stealth mode is `UiState.stealth`, so a controller can set it.
+
+### Deep links
+
+- `settings/DeepLink.kt`: `moblin://?<URL encoded JSON>`, Moblin's `MoblinSettingsUrl` format.
+  `parseDeepLink` throws `DeepLinkException` with a fixed English message (mapped in `ui/Messages.kt`).
+  Streams, the quick buttons opIRL has, and remote control are applied; the rest is ignored. A resolution or
+  frame rate opIRL does not have is refused. A plus sign is kept as it is, stream keys contain them.
+- The activity takes `moblin://` VIEW intents; `StreamEngine.pendingLink` holds the link until
+  `DeepLinkDialog` has asked. A stream whose name exists is replaced or added beside the old one, the user
+  chooses. Nothing is imported while live or recording.
+- `createDeepLink` writes the same format (Share link on a stream, Share streams under Import and export).
+  An RTMP stream key goes into the URL's last path segment, where Moblin keeps it. AV1 is left out because
+  Moblin refuses a codec it does not know.
+
+### Controllers
+
+- `ControllerAction` (a `ControllerFunction` plus the scene, widget or layout it names) is what a keyboard
+  key, a game controller button and a Stream Deck key are bound to; `StreamEngine.perform(action, pressed)`
+  runs it. Everything acts on release, except zoom in and out, which ramp while held.
+- `control/Controls`: game controller keys are taken in `dispatchKeyEvent`, before Compose can use the D-pad
+  for focus, and only when the button is bound. Triggers and the D-pad also arrive as axes
+  (`dispatchGenericMotionEvent`); a button is down while its key or its axis says so. Keyboard keys are
+  taken in `onKeyDown`/`onKeyUp`, so a focused text field gets them first; a key is its typed character,
+  and Ctrl or Meta combinations are left alone. One mapping serves every controller.
+- `control/StreamDecks`: a userspace HID driver over `UsbManager` for Elgato Stream Decks (vendor 0x0fd9):
+  Mini (6 keys, 80 px BMP), the 15 key models from the second hardware revision on, and XL (72 and 96 px
+  JPEG). The first 15 key model (product 0x0060) speaks an older protocol and is not supported.
+  `StreamDeckProtocol.kt` builds the reports and is unit tested; it follows python-elgato-streamdeck. No
+  Stream Deck has been plugged into it yet, so treat the driver as untested on hardware. Key pictures are
+  the key's text on its colour, sent only when they change. The read loop wakes every 2 s on a timeout;
+  unplugging is noticed through the USB detach broadcast.
 
 ## Stream service
 

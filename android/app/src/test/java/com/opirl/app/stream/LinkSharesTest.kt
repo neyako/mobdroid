@@ -1,14 +1,13 @@
 package com.opirl.app.stream
 
 import com.opirl.app.engine.net.LinkType
-import com.opirl.app.engine.srtla.SrtlaLinkState
-import com.opirl.app.engine.srtla.SrtlaLinkStats
+import com.opirl.app.engine.net.LinkUsage
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class LinkSharesTest {
     private fun link(id: String, type: LinkType, bytesSent: Long) =
-        SrtlaLinkStats(id, id, type, SrtlaLinkState.Registered, true, 1f, bytesSent, 0, 0, 0f)
+        LinkUsage(id, id, type, bytesSent, 0)
 
     @Test
     fun `shares are the bytes each link sent since the last sample`() {

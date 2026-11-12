@@ -5,6 +5,8 @@ import com.opirl.app.settings.Scene
 import com.opirl.app.settings.SceneWidget
 import com.opirl.app.settings.Widget
 import com.opirl.app.widgets.drawer
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 class OverlayRect(val x: Float, val y: Float, val width: Float, val height: Float)
 
@@ -19,6 +21,12 @@ fun overlayRect(placement: SceneWidget, width: Float, height: Float): OverlayRec
     )
 }
 
+private val time = DateTimeFormatter.ofPattern("HH:mm")
+private val date = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+
+fun expandText(text: String, now: LocalDateTime): String =
+    text.replace("{time}", now.format(time)).replace("{date}", now.format(date))
+
 fun defaultScenes(cameras: List<Pair<String, String>>): List<Scene> =
     cameras.map { (key, label) -> Scene(name = label, cameraKey = key) }
 
@@ -31,6 +39,9 @@ fun <T> sceneCamera(
 ): T? = cameras.firstOrNull { external(it) && key(it) == currentKey }
     ?: cameras.firstOrNull(external)
     ?: cameras.firstOrNull { key(it) == sceneKey }
+
+fun nextScene(ids: List<String>, current: String?): String? =
+    if (ids.size < 2) null else ids[(ids.indexOf(current) + 1) % ids.size]
 
 fun defaultPlacement(widget: Widget): SceneWidget = widget.type.drawer.placement(widget)
 

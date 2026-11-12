@@ -6,8 +6,11 @@ import androidx.annotation.StringRes
 import android.Manifest
 import android.content.Context
 import android.content.Intent
-import android.media.AudioDeviceInfo
-import android.media.AudioManager
+import android.graphics.Movie
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.BatteryManager
 import android.net.Uri
 import android.os.Handler
@@ -28,6 +31,22 @@ import com.opirl.app.chat.Platforms
 import com.opirl.app.chat.RemoteVoice
 import com.opirl.app.chat.YouTubeAuth
 import com.opirl.app.chat.createChatClients
+import com.opirl.app.effects.EffectLoader
+import com.opirl.app.effects.horizonTilt
+import com.opirl.app.macros.MacroEvent
+import com.opirl.app.macros.MacroHost
+import com.opirl.app.macros.MacroRunner
+import com.opirl.app.media.gl.EffectSettings
+import com.opirl.app.scenes.AutoSceneSwitcher
+import com.opirl.app.scenes.expandText
+import com.opirl.app.settings.Filter
+import com.opirl.app.settings.MacroEventType
+import com.opirl.app.settings.Reaction
+import com.opirl.app.widgets.DrawBoard
+import java.time.LocalDateTime
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.withContext
 import com.opirl.app.chat.spokenText
 import com.opirl.app.chat.voiceService
 import com.opirl.app.engine.chat.emotes.EmoteProvider
@@ -45,20 +64,33 @@ import com.opirl.app.camera.Stabilization
 import com.opirl.app.engine.abr.ADAPTIVE_BITRATE_UPDATE_INTERVAL_MS
 import com.opirl.app.engine.abr.AdaptiveBitrate
 import com.opirl.app.engine.abr.BelaboxAdaptiveBitrate
+import com.opirl.app.engine.abr.LossAdaptiveBitrate
 import com.opirl.app.engine.abr.QueueAdaptiveBitrate
+import com.opirl.app.engine.abr.RistAdaptiveBitrate
 import com.opirl.app.engine.abr.TransportBitrateMeter
 import com.opirl.app.engine.abr.toStreamStats
+import com.opirl.app.engine.rist.RistPublisher
 import com.opirl.app.engine.rtmp.RtmpPublisher
 import com.opirl.app.engine.srt.SrtPublisher
+import com.opirl.app.engine.whip.WhipPublisher
 import com.opirl.app.settings.allowedCodecs
 import com.opirl.app.engine.media.VideoCodec
 import com.opirl.app.engine.mp4.Mp4Recorder
 import com.opirl.app.engine.mp4.Mp4Summary
+import com.opirl.app.engine.replay.ReplayBuffer
+import com.opirl.app.engine.replay.ReplayClip
+import com.opirl.app.engine.media.MediaSink
+import com.opirl.app.engine.net.BondedPublisher
 import com.opirl.app.engine.net.Publisher
 import com.opirl.app.engine.net.PublisherListener
 import com.opirl.app.media.AUDIO_LEVEL_FLOOR_DB
 import com.opirl.app.media.AudioEncoder
 import com.opirl.app.media.AudioMix
+import com.opirl.app.media.Mic
+import com.opirl.app.media.MicCatalog
+import com.opirl.app.media.MicInput
+import com.opirl.app.media.findMic
+import com.opirl.app.media.micLabel
 import com.opirl.app.media.CodecCatalog
 import com.opirl.app.media.VideoEncoder
 import com.opirl.app.media.VideoFile
@@ -71,11 +103,11 @@ import com.opirl.app.scenes.sceneCamera
 import com.opirl.app.widgets.BrowserWidgets
 import com.opirl.app.widgets.WidgetRenderer
 import com.opirl.app.settings.LoginStore
-import com.opirl.app.settings.MicSource
 import com.opirl.app.settings.Scene
 import com.opirl.app.settings.SceneVideo
 import com.opirl.app.settings.ObsSettings
 import com.opirl.app.settings.RECORDING_CODECS
+import com.opirl.app.settings.REPLAY_SECONDS
 import com.opirl.app.settings.RecordingSettings
 import com.opirl.app.recording.RecordingFile
 import com.opirl.app.recording.RecordingStore
@@ -84,6 +116,10 @@ import com.opirl.app.settings.SettingsStore
 import com.opirl.app.settings.streamUrl
 import com.opirl.app.settings.StabilizationSetting
 import com.opirl.app.settings.StreamProfile
+import com.opirl.app.settings.Transport
+import com.opirl.app.settings.bonded
+import com.opirl.app.settings.transport
+import com.opirl.app.settings.transportOf
 import com.opirl.app.settings.WidgetType
 import com.opirl.app.widgets.Need
 import com.opirl.app.widgets.NowPlaying
@@ -122,6 +158,33 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
+import com.opirl.app.control.Controls
+import com.opirl.app.control.StreamDecks
+import com.opirl.app.engine.net.NetworkLink
+import com.opirl.app.engine.net.NetworkLinkProvider
+import com.opirl.app.engine.remote.RemoteControlTarget
+import com.opirl.app.engine.remote.RemoteRequest
+import com.opirl.app.engine.remote.RemoteSettings
+import com.opirl.app.engine.remote.RemoteState
+import com.opirl.app.engine.remote.RemoteStatus
+import com.opirl.app.engine.remote.RemoteStatusItem
+import com.opirl.app.media.label
+import com.opirl.app.moblink.MoblinkController
+import com.opirl.app.remote.REMOTE_MIC_AUTO
+import com.opirl.app.remote.RemoteControlController
+import com.opirl.app.remote.RemoteStatusInput
+import com.opirl.app.remote.bitratePresetId
+import com.opirl.app.remote.remoteSettings
+import com.opirl.app.remote.remoteState
+import com.opirl.app.remote.remoteStatus
+import com.opirl.app.remote.zoomPresetId
+import com.opirl.app.scenes.nextScene
+import com.opirl.app.scenes.placement
+import com.opirl.app.scenes.withPlacement
+import com.opirl.app.settings.ControllerAction
+import com.opirl.app.settings.ControllerFunction
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -141,6 +204,7 @@ data class LiveStats(
     val bytesSent: Long = 0,
     val codec: VideoCodec? = null,
     val links: List<LinkShare> = emptyList(),
+    val totalBytes: Long = 0,
 )
 
 data class UiState(
@@ -156,6 +220,8 @@ data class UiState(
     val thermal: Int = PowerManager.THERMAL_STATUS_NONE,
     val battery: Int = 100,
     val temperature: Int = 0,
+    val charging: Boolean = false,
+    val stealth: Boolean = false,
 ) {
     val activeCamera: CameraDescriptor? get() = lens?.camera ?: camera
 }
@@ -166,6 +232,13 @@ private class Feed(val key: String, val camera: CameraDescriptor, val compositor
     var uvc: UvcCamera? = null
     var width = 0
     var height = 0
+}
+
+enum class ReplayState { IDLE, PENDING, PLAYING }
+
+private class LiveOutput(val id: String, val name: String, val session: StreamSession, opus: Boolean) {
+    val sink: MediaSink = if (opus) VideoOnlySink(session) else session
+    val opusSink: MediaSink? = if (opus) AudioOnlySink(session) else null
 }
 
 private class ActiveRecording(
@@ -214,6 +287,36 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         },
     )
     val obs = ObsClient(http, { showAlert(AlertLevel.ERROR, "OBS", it) })
+    val moblink = MoblinkController(context, scope, http, { _ui.value.battery }, { _ui.value.thermal })
+    private val streamLinks = object : NetworkLinkProvider {
+        override val links: StateFlow<List<NetworkLink>> =
+            combine(this@StreamEngine.links.links, moblink.links) { own, borrowed -> own + borrowed }
+                .stateIn(scope, SharingStarted.Eagerly, emptyList())
+    }
+    val controls = Controls(context, { settings.settings.value }, ::perform) { connected, number ->
+        showAlert(AlertLevel.INFO, text(if (connected) R.string.gamepad_connected else R.string.gamepad_disconnected, number))
+    }
+    val streamDecks = StreamDecks(context, { settings.settings.value.selectedStreamDeck }, ::perform)
+    private val remoteTarget = object : RemoteControlTarget {
+        override fun status(): RemoteStatus = remoteStatus()
+
+        override fun settings(): RemoteSettings =
+            remoteSettings(settings.settings.value, _ui.value.cameras, text(R.string.mic_auto), mics.value.map { it.key to micLabel(it) })
+
+        override fun state(): RemoteState = remoteState(settings.settings.value, _ui.value, _recording.value != null)
+
+        override fun handle(request: RemoteRequest): Boolean = handleRemote(request)
+    }
+    val remote = RemoteControlController(
+        context,
+        scope,
+        http,
+        remoteTarget,
+        { width, onResult -> synchronized(this) { compositor }?.takeThumbnail(width, onResult) ?: onResult(null) },
+        { showAlert(AlertLevel.ERROR, text(R.string.remote_control), it) },
+    )
+    private var zoomRamp: Job? = null
+    val pendingLink = MutableStateFlow<String?>(null)
 
     internal fun text(@StringRes id: Int, vararg args: Any): String = context.getString(id, *args)
     private val _alert = MutableStateFlow<Alert?>(null)
@@ -224,23 +327,99 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private var lowBitrate = LowBitrateWatch()
     private val _audioLevel = MutableStateFlow(AUDIO_LEVEL_FLOOR_DB)
     val audioLevel: StateFlow<Float> = _audioLevel.asStateFlow()
-    private val audioManager = context.getSystemService(AudioManager::class.java)
+    private val micCatalog = MicCatalog(context)
+    val mics: StateFlow<List<Mic>> = micCatalog.mics
+    private var micInput = MicInput(null)
     private var linkBytes = emptyMap<String, Long>()
 
+    @Volatile
     private var compositor: VideoCompositor? = null
     private var overlays = emptyList<Overlay>()
     @Volatile
     private var widgetNeeds = emptySet<Need>()
+    private var widgetOverlays = emptyList<Overlay>()
+    private val drawBoard = DrawBoard()
+    val drawnLines: StateFlow<Int> = drawBoard.count
+    private var drawPending = false
+    private var effectSettings = EffectSettings()
+    private val effectLoader = EffectLoader(context) { name, message ->
+        showAlert(AlertLevel.ERROR, text(R.string.alert_lut_failed), "$name: $message")
+    }
+    private val sensors = context.getSystemService(SensorManager::class.java)
+    private var horizonOn = false
+    private var macrosStarted = false
+    private val gravityListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            val target = compositor ?: return
+            val descriptor = _ui.value.activeCamera
+            if (_videoPlayer.value != null || descriptor == null || descriptor.facing == Facing.EXTERNAL) {
+                target.horizonTilt = null
+            } else {
+                horizonTilt(event.values[0], event.values[1], displayRotation)?.let { target.horizonTilt = it }
+            }
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) = Unit
+    }
+    val macros = MacroRunner(
+        scope,
+        object : MacroHost {
+            override fun selectScene(id: String) {
+                this@StreamEngine.selectScene(id)
+                syncScene()
+            }
+
+            override fun setZoom(ratio: Float) = this@StreamEngine.setZoom(ratio)
+
+            override fun setFilters(filters: Set<Filter>) = settings.update { it.copy(effects = it.effects.copy(filters = filters)) }
+
+            override fun react(reaction: Reaction) = this@StreamEngine.react(reaction)
+
+            override fun setRecording(on: Boolean) = if (on) startRecording() else stopRecording()
+
+            override fun snapshot() = takeSnapshot()
+
+            override fun setMuted(muted: Boolean) = this@StreamEngine.setMuted(muted)
+
+            override fun setTorch(on: Boolean) = this@StreamEngine.setTorch(on)
+
+            override fun setAutoSwitcher(id: String?) = settings.update { it.copy(autoSwitcherId = id) }
+
+            override fun sendChat(text: String) = chat.canSend.value.forEach { platform -> chat.send(platform, text) {} }
+
+            override fun notify(title: String, text: String) = showAlert(AlertLevel.INFO, title, text)
+
+            override fun format(text: String) = expandText(text, LocalDateTime.now())
+        },
+    ) { settings.settings.value.macros }
     private val browsers = BrowserWidgets(context)
     private val mainHandler = Handler(Looper.getMainLooper())
     private var previewSurface: Surface? = null
+
+    @Volatile
     private var displayRotation = 0
     private var videoEncoder: VideoEncoder? = null
     private var recordEncoder: VideoEncoder? = null
     private var audioEncoder: AudioEncoder? = null
     private var audioLive = false
     private val tee = MediaTee()
+    private val opusTee = MediaTee()
     private var session: StreamSession? = null
+    private var mainOutput: LiveOutput? = null
+    private var extraOutputs = emptyList<LiveOutput>()
+    private var monitorOutput: LiveOutput? = null
+    private var monitorEncoder: VideoEncoder? = null
+    private var monitorJob: Job? = null
+    private val _monitoring = MutableStateFlow(false)
+    val monitoring: StateFlow<Boolean> = _monitoring.asStateFlow()
+    private val _destinations = MutableStateFlow<Map<String, LiveState>>(emptyMap())
+    val destinations: StateFlow<Map<String, LiveState>> = _destinations.asStateFlow()
+    private var replayBuffer: ReplayBuffer? = null
+    private var replayJob: Job? = null
+    private var replayPlaying: SceneVideo? = null
+    private var replayStartMs = 0L
+    private val _replay = MutableStateFlow(ReplayState.IDLE)
+    val replay: StateFlow<ReplayState> = _replay.asStateFlow()
     private var activeRecording: ActiveRecording? = null
     private var liveProfile: StreamProfile? = null
     private var liveCodec: VideoCodec? = null
@@ -259,8 +438,8 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         widgets,
         { next ->
             synchronized(this) {
-                overlays = next
-                compositor?.setOverlays(next)
+                widgetOverlays = next
+                applyOverlays()
                 syncBrowsers()
                 syncVTubers()
                 syncFeed(true)
@@ -299,9 +478,47 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                         if (busy || !previewActive) return@collect
                         val (w, h) = outputSize(settings.settings.value.selectedProfile)
                         compositor?.setOutputSize(w, h)
+                        drawBoard.setSize(w, h)
+                        applyOverlays()
                         openCamera()
                     }
                 }
+        }
+        scope.launch {
+            settings.settings.map { it.effects to outputSize(it.selectedProfile) }.distinctUntilChanged().conflate().collect { (effects, size) ->
+                val loaded = withContext(Dispatchers.IO) { effectLoader.load(effects, size.first, size.second) }
+                synchronized(this@StreamEngine) {
+                    effectSettings = loaded
+                    compositor?.setEffects(loaded)
+                }
+            }
+        }
+        scope.launch {
+            settings.settings.map { it.fixedHorizon }.distinctUntilChanged().drop(1).collect {
+                synchronized(this@StreamEngine) { syncHorizon() }
+            }
+        }
+        scope.launch {
+            settings.settings.map { it.autoSwitcherId }.distinctUntilChanged().collectLatest { id ->
+                val switching = AutoSceneSwitcher()
+                while (id != null) {
+                    val current = settings.settings.value
+                    val next = current.autoSwitchers.firstOrNull { it.id == id }?.takeIf { previewActive }?.let { switcher ->
+                        switching.next(switcher) { sceneId -> current.scenes.any { it.id == sceneId } }
+                    }
+                    if (next == null) {
+                        delay(1000)
+                    } else {
+                        selectScene(next.sceneId!!)
+                        delay(next.seconds.coerceAtLeast(1) * 1000L)
+                    }
+                }
+            }
+        }
+        scope.launch {
+            settings.settings.map { it.selectedScene?.id }.distinctUntilChanged().drop(1).collect { id ->
+                macros.onEvent(MacroEvent(MacroEventType.SWITCH_SCENE, id))
+            }
         }
         scope.launch {
             settings.settings.map { it.scenes.isEmpty() }.distinctUntilChanged().drop(1).collect { empty ->
@@ -309,20 +526,11 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             }
         }
         scope.launch {
-            var playing = settings.settings.value.selectedScene?.let(::videoKey)
             settings.settings
                 .map { Triple(it.selectedScene?.cameraKey, it.selectedScene?.let(::videoKey), usbIsFeed(it)) }
                 .distinctUntilChanged()
                 .drop(1)
-                .collect { (_, video, _) ->
-                    synchronized(this@StreamEngine) {
-                        val next = sceneCamera(_ui.value.cameras)
-                        val changed = next != null && next.key != _ui.value.camera?.key
-                        if (changed) _ui.update { it.copy(camera = next, lens = defaultLens(next!!), zoom = 1f, torch = false) }
-                        if (previewActive && (changed || video != playing)) openCamera()
-                        playing = video
-                    }
-                }
+                .collect { synchronized(this@StreamEngine) { syncScene() } }
         }
         scope.launch {
             settings.settings.map { it.selectedScene?.let { scene -> scene.videoVolume to scene.micWithVideo } }
@@ -387,10 +595,26 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             }
         }
         scope.launch {
-            settings.settings.map { it.mic }.distinctUntilChanged().drop(1).collect {
-                synchronized(this@StreamEngine) { if (!busy && previewActive) startAudioMeter() }
+            combine(settings.settings.map { it.micKey }.distinctUntilChanged(), micCatalog.mics) { key, _ -> key }.drop(1).collect {
+                synchronized(this@StreamEngine) { audioEncoder?.let { it.input = openMic() } }
             }
         }
+        scope.launch {
+            settings.settings.map { it.moblink to it.remoteControl }.distinctUntilChanged().drop(1).debounce(500).collect {
+                synchronized(this@StreamEngine) { syncConnections() }
+            }
+        }
+        scope.launch {
+            settings.settings.map { it.selectedStreamDeck }.distinctUntilChanged().drop(1).collect { streamDecks.show() }
+        }
+        scope.launch {
+            combine(settings.settings, _ui, _recording) { current, ui, recording -> remoteState(current, ui, recording != null) }
+                .distinctUntilChanged()
+                .conflate()
+                .collect(remote::stateChanged)
+        }
+        scope.launch { moblink.relayRunning.drop(1).collect { synchronized(this@StreamEngine) { updateService() } } }
+        controls.start()
         ioScope.launch {
             val recovered = recordings.recover()
             if (recovered > 0) {
@@ -422,8 +646,8 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                     val temperature = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) / 10
                     val battery = level * 100 / scale
                     val previous = _ui.value.battery
-                    _ui.update { it.copy(battery = battery, temperature = temperature) }
                     val charging = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
+                    _ui.update { it.copy(battery = battery, temperature = temperature, charging = charging) }
                     if (!charging && listOf(15, 5).any { battery <= it && previous > it }) {
                         showAlert(AlertLevel.WARNING, text(R.string.battery_low), "$battery%")
                     }
@@ -475,6 +699,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     )
 
     private fun onUsbChanged(attachedId: String?) {
+        streamDecks.refresh()
         scope.launch {
             val cameras = listCameras()
             synchronized(this@StreamEngine) {
@@ -590,6 +815,18 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
 
     fun selectScene(id: String) = settings.update { it.copy(selectedSceneId = id) }
 
+    private var sceneVideo = settings.settings.value.selectedScene?.let(::videoKey)
+
+    @Synchronized
+    private fun syncScene() {
+        val video = settings.settings.value.selectedScene?.let(::videoKey)
+        val next = sceneCamera(_ui.value.cameras)
+        val changed = next != null && next.key != _ui.value.camera?.key
+        if (changed) _ui.update { it.copy(camera = next, lens = defaultLens(next!!), zoom = 1f, torch = false) }
+        if (previewActive && (changed || video != sceneVideo)) openCamera()
+        sceneVideo = video
+    }
+
     private fun ensureScenes(cameras: List<CameraDescriptor>) = settings.update { current ->
         if (current.scenes.isNotEmpty()) return@update current
         val scenes = defaultScenes(cameras.filter { it.facing != Facing.EXTERNAL }.map { it.key to it.label })
@@ -611,7 +848,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         chat.stop()
     }
 
-    private val busy: Boolean get() = session != null || activeRecording != null
+    private val busy: Boolean get() = session != null || activeRecording != null || monitorOutput != null
 
     fun startPreview() {
         synchronized(this) {
@@ -622,6 +859,10 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             val cameras = listCameras()
             synchronized(this@StreamEngine) {
                 if (!previewActive) return@launch
+                if (!macrosStarted) {
+                    macrosStarted = true
+                    macros.startAutomatic()
+                }
                 ensureScenes(cameras)
                 val selected = sceneCamera(cameras)
                 _ui.update { it.copy(cameras = cameras, camera = selected, lens = selected?.let(::defaultLens)) }
@@ -633,18 +874,84 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 }
                 syncObs()
                 syncWidgetSources()
+                syncConnections()
+                syncHorizon()
             }
         }
     }
 
-    private fun micDevice(): AudioDeviceInfo? {
-        val types = when (settings.settings.value.mic) {
-            MicSource.AUTO -> return null
-            MicSource.BUILT_IN -> listOf(AudioDeviceInfo.TYPE_BUILTIN_MIC)
-            MicSource.USB -> listOf(AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET)
-            MicSource.WIRED -> listOf(AudioDeviceInfo.TYPE_WIRED_HEADSET)
+    private fun micLabel(mic: Mic): String = micLabel(mic, text(mic.kind.label))
+
+    private fun openMic(): MicInput {
+        val next = micCatalog.open(settings.settings.value.micKey)
+        if (next.device?.id != micInput.device?.id || next.source != micInput.source) micInput = next
+        return micInput
+    }
+
+    private fun syncHorizon() {
+        val sensor = sensors.getDefaultSensor(Sensor.TYPE_GRAVITY)
+        val wanted = sensor != null && previewActive && settings.settings.value.fixedHorizon
+        if (wanted == horizonOn) return
+        horizonOn = wanted
+        if (wanted) {
+            sensors.registerListener(gravityListener, sensor, 100_000, mainHandler)
+        } else {
+            sensors.unregisterListener(gravityListener)
+            compositor?.horizonTilt = null
         }
-        return audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull { it.type in types }
+    }
+
+    @Suppress("DEPRECATION")
+    fun react(reaction: Reaction) {
+        val target = compositor ?: return
+        ioScope.launch {
+            val movie = runCatching {
+                context.assets.open("props/${reaction.name.lowercase(Locale.ROOT)}.gif").use { Movie.decodeStream(it) }
+            }.getOrNull() ?: return@launch
+            target.playProp(reaction, movie)
+        }
+    }
+
+    fun drawBegin(x: Float, y: Float, color: Int, width: Float) {
+        drawBoard.begin(x, y, color, width)
+        drawChanged()
+    }
+
+    fun drawExtend(x: Float, y: Float) {
+        drawBoard.extend(x, y)
+        drawChanged()
+    }
+
+    fun drawEnd() {
+        drawBoard.end()
+        drawChanged()
+    }
+
+    fun drawUndo() {
+        drawBoard.undo()
+        drawChanged()
+    }
+
+    fun drawWipe() {
+        drawBoard.wipe()
+        drawChanged()
+    }
+
+    private fun drawChanged() {
+        if (drawPending) return
+        drawPending = true
+        mainHandler.postDelayed(
+            {
+                drawPending = false
+                synchronized(this) { applyOverlays() }
+            },
+            33,
+        )
+    }
+
+    private fun applyOverlays() {
+        overlays = widgetOverlays + listOfNotNull(drawBoard.overlay())
+        compositor?.setOverlays(overlays)
     }
 
     private fun startAudioMeter() {
@@ -652,7 +959,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         audioEncoder = null
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
         audioEncoder = runCatching {
-            AudioEncoder(0, null, micDevice(), audioMix, { _audioLevel.value = it }) { Log.w(TAG, "Audio meter: $it") }
+            AudioEncoder(0, null, openMic(), audioMix, { _audioLevel.value = it }) { Log.w(TAG, "Audio meter: $it") }
         }.onFailure { Log.w(TAG, "Audio meter failed", it) }.getOrNull()?.also { it.muted = _ui.value.muted }
     }
 
@@ -663,11 +970,14 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     fun stopPreviewIfIdle() {
         if (!previewActive || busy) return
         previewActive = false
+        syncConnections()
+        syncHorizon()
         stopChat()
         obs.stop()
         syncWidgetSources()
         audioEncoder?.release()
         audioEncoder = null
+        micCatalog.close()
         closeSources()
         val closing = compositor
         compositor = null
@@ -716,6 +1026,135 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         _ui.update { it.copy(muted = muted) }
     }
 
+    fun setStealth(on: Boolean) = _ui.update { it.copy(stealth = on) }
+
+    fun reloadBrowserWidgets() {
+        mainHandler.post(browsers::reload)
+    }
+
+    private fun syncConnections() {
+        val current = settings.settings.value
+        val active = previewActive || busy
+        moblink.sync(current.moblink, active)
+        remote.sync(current.remoteControl, active)
+        streamDecks.setActive(active)
+    }
+
+    @Synchronized
+    fun restartConnections() {
+        val current = settings.settings.value
+        moblink.sync(current.moblink, false)
+        remote.sync(current.remoteControl, false)
+        obs.stop()
+        syncConnections()
+        syncObs()
+    }
+
+    fun perform(action: ControllerAction, pressed: Boolean) {
+        val current = settings.settings.value
+        when (action.function) {
+            ControllerFunction.ZOOM_IN -> rampZoom(if (pressed) 1.03f else null)
+            ControllerFunction.ZOOM_OUT -> rampZoom(if (pressed) 1 / 1.03f else null)
+            else -> if (!pressed) {
+                when (action.function) {
+                    ControllerFunction.RECORD -> if (_recording.value == null) startRecording() else stopRecording()
+                    ControllerFunction.STREAM -> if (isLive) stopLive() else goLive()
+                    ControllerFunction.MUTE -> setMuted(!_ui.value.muted)
+                    ControllerFunction.TORCH -> if (_ui.value.activeCamera?.hasFlash == true) setTorch(!_ui.value.torch)
+                    ControllerFunction.STEALTH -> setStealth(!_ui.value.stealth)
+                    ControllerFunction.SCENE -> current.scenes.firstOrNull { it.id == action.sceneId }?.let { selectScene(it.id) }
+                    ControllerFunction.SWITCH_SCENE -> nextScene(current.scenes.map { it.id }, current.selectedScene?.id)?.let(::selectScene)
+                    ControllerFunction.WIDGET -> {
+                        val scene = current.selectedScene
+                        val widget = current.widgets.firstOrNull { it.id == action.widgetId }
+                        if (scene != null && widget != null) {
+                            settings.update { it.withPlacement(scene.id, scene.placement(widget).let { p -> p.copy(enabled = !p.enabled) }) }
+                        }
+                    }
+                    ControllerFunction.SNAPSHOT -> takeSnapshot()
+                    ControllerFunction.STREAM_DECK_LAYOUT -> settings.update { it.copy(selectedStreamDeckId = action.layoutId) }
+                    else -> Unit
+                }
+            }
+        }
+    }
+
+    @Synchronized
+    private fun rampZoom(factor: Float?) {
+        zoomRamp?.cancel()
+        zoomRamp = factor?.let {
+            scope.launch {
+                while (isActive) {
+                    val before = _ui.value.zoom
+                    setZoom(before * it, switchLens = false)
+                    if (_ui.value.zoom == before) break
+                    delay(33)
+                }
+            }
+        }
+    }
+
+    private fun handleRemote(request: RemoteRequest): Boolean {
+        val current = settings.settings.value
+        when (request) {
+            is RemoteRequest.SetRecord -> if (request.on) startRecording() else stopRecording()
+            is RemoteRequest.SetLive -> if (request.on) goLive() else stopLive()
+            is RemoteRequest.SetMute -> setMuted(request.on)
+            is RemoteRequest.SetStealthMode -> setStealth(request.on)
+            is RemoteRequest.SetTorch -> setTorch(request.on)
+            is RemoteRequest.SetZoom -> setZoom(request.x)
+            is RemoteRequest.SetZoomPreset -> setZoom(
+                _ui.value.camera?.lensZoomStops?.firstOrNull { zoomPresetId(it).equals(request.id, ignoreCase = true) } ?: return false,
+            )
+            is RemoteRequest.SetStream -> {
+                val id = current.profiles.firstOrNull { it.id.equals(request.id, ignoreCase = true) }?.id ?: return false
+                if (synchronized(this) { busy }) return false
+                settings.update { it.copy(selectedProfileId = id) }
+            }
+            is RemoteRequest.SetScene -> selectScene(current.scenes.firstOrNull { it.id.equals(request.id, ignoreCase = true) }?.id ?: return false)
+            is RemoteRequest.SetBitratePreset -> setMaxBitrate(
+                current.bitratePresetsKbps.firstOrNull { bitratePresetId(it).equals(request.id, ignoreCase = true) } ?: return false,
+            )
+            is RemoteRequest.SetMic -> {
+                val key = if (request.id == REMOTE_MIC_AUTO) null else mics.value.firstOrNull { it.key == request.id }?.key ?: return false
+                settings.update { it.copy(micKey = key) }
+            }
+            RemoteRequest.ReloadBrowserWidgets -> reloadBrowserWidgets()
+            is RemoteRequest.SetDebugLogging -> Unit
+            else -> return false
+        }
+        return true
+    }
+
+    private fun remoteStatus(): RemoteStatus {
+        val current = settings.settings.value
+        val profile = liveProfile ?: current.selectedProfile
+        val (w, h) = outputSize(profile)
+        val codec = liveCodec ?: CodecCatalog.choose(profile.codec, profile.allowedCodecs, w, h, profile.fps)
+        val transport = profile.url.substringBefore("://").uppercase()
+        val obsState = obs.state.value
+        return remoteStatus(
+            RemoteStatusInput(
+                settings = current,
+                ui = _ui.value,
+                stats = _stats.value,
+                recording = _recording.value,
+                audioLevel = _audioLevel.value,
+                streamText = "${profile.name} (${profile.resolution.label}${profile.fps}, ${codec.label}, $transport)",
+                micName = findMic(mics.value, current.micKey)?.let(::micLabel) ?: text(R.string.mic_auto),
+                obs = when {
+                    !profile.obs.enabled -> null
+                    obsState.connected -> obsState.scene ?: text(R.string.connected)
+                    else -> obsState.error ?: text(R.string.connecting)
+                },
+                moblink = moblink.status.value?.let { RemoteStatusItem(it.text, it.ok) },
+                remoteControl = remote.status.value?.let { RemoteStatusItem(it.text, it.ok) },
+                gameControllers = controls.gamepadCount.value,
+                mutedText = text(R.string.muted),
+            ),
+        )
+    }
+
     @Synchronized
     fun tapToFocus(x: Float, y: Float) {
         compositor?.previewToInput(x, y, camera::tapToFocus)
@@ -743,6 +1182,8 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         ensureCompositor()
         if (!previewActive) startPreview()
         compositor!!.setOutputSize(w, h)
+        drawBoard.setSize(w, h)
+        applyOverlays()
         compositor!!.setFrameRate(encoderFps(profile))
         return true
     }
@@ -753,6 +1194,9 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         ticker?.cancel()
         ticker = null
         liveProfile = null
+        stopReplay()
+        replayBuffer = null
+        syncSinks()
         scope.launch { applyThermal(_ui.value.thermal) }
         if (previewSurface == null) stopPreviewIfIdle() else if (previewActive) startAudioMeter()
     }
@@ -768,15 +1212,19 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     }
 
     private fun updateService() {
+        val relay = moblink.relayRunning.value
         val title = when {
             session != null && activeRecording != null -> text(R.string.notification_live_recording)
             session != null -> text(R.string.notification_live)
             activeRecording != null -> text(R.string.recording_now)
+            monitorOutput != null -> text(R.string.notification_preview_stream)
+            relay -> text(R.string.notification_moblink_relay)
             else -> null
         }
         val service = Intent(context, StreamService::class.java)
         if (title != null) {
-            service.putExtra(StreamService.EXTRA_USB, uvcCamera != null)
+            service.putExtra(StreamService.EXTRA_USB, uvcCamera != null || relay)
+                .putExtra(StreamService.EXTRA_MEDIA, busy)
                 .putExtra(StreamService.EXTRA_LOCATION, Need.Location in widgetNeeds && location.allowed)
                 .putExtra(StreamService.EXTRA_TITLE, title)
             if (serviceStarted) {
@@ -804,12 +1252,30 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         targetBitrate = profile.bitrateKbps * 1000
         liveMaxBitrate = targetBitrate.toLong()
         transportMeter = TransportBitrateMeter(ADAPTIVE_BITRATE_START_BPS)
-        val newSession = StreamSession(ioScope, { listener -> createPublisher(profile, listener) }) {
-            videoEncoder?.requestKeyFrame()
-        }
+        val requestKeyFrame: () -> Unit = { videoEncoder?.requestKeyFrame() }
+        val newSession = StreamSession(
+            ioScope,
+            { listener -> createPublisher(streamUrl(profile), profile.streamKey, profile.bonded, true, requestKeyFrame, listener) },
+            requestKeyFrame,
+        )
         session = newSession
-        tee.setStream(newSession)
-        if (profile.url.startsWith("srtla://")) links.start(profile.bondingNetworks)
+        mainOutput = LiveOutput(profile.id, profile.name, newSession, profile.transport == Transport.WHIP)
+        extraOutputs = profile.destinations.filter { it.enabled && it.url.isNotBlank() }.map { destination ->
+            LiveOutput(
+                destination.id,
+                destination.name,
+                StreamSession(
+                    ioScope,
+                    { listener -> createPublisher(destination.url.trim(), destination.streamKey, false, false, requestKeyFrame, listener) },
+                    requestKeyFrame,
+                ),
+                transportOf(destination.url) == Transport.WHIP,
+            )
+        }
+        if (profile.replay.enabled && replayBuffer == null) {
+            replayBuffer = ReplayBuffer((REPLAY_SECONDS.max() + profile.replay.delaySeconds) * 1_000_000L, REPLAY_MAX_BYTES)
+        }
+        if (profile.bonded) links.start(profile.bondingNetworks)
         linkBytes = emptyMap()
         try {
             syncEncoders()
@@ -822,6 +1288,9 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         videoEncoder?.setBitrate(targetBitrate)
         updateService()
         newSession.start()
+        val extras = extraOutputs
+        extras.forEach { it.session.start() }
+        macros.onEvent(MacroEvent(MacroEventType.GO_LIVE))
         liveStartedAt = System.nanoTime()
         lowBitrate = LowBitrateWatch()
         _ui.update { it.copy(error = null) }
@@ -843,6 +1312,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 }
             }
             launch { newSession.lastError.collect { e -> if (e != null) _ui.update { it.copy(error = e) } } }
+            for (output in extras) launch { watchDestination(output) }
             if (profile.adaptiveBitrate) launch { runAdaptiveBitrate(newSession, profile) }
         }
         startTicker()
@@ -902,11 +1372,16 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         liveJob = null
         session?.stop()
         session = null
-        tee.setStream(null)
+        mainOutput = null
+        extraOutputs.forEach { it.session.stop() }
+        extraOutputs = emptyList()
+        _destinations.value = emptyMap()
         links.stop()
+        moblink.stopTunnels()
         _ui.update { it.copy(live = LiveState.OFFLINE, error = null) }
         _stats.value = LiveStats()
         if (wasLive) {
+            macros.onEvent(MacroEvent(MacroEventType.END))
             val wanted = settings.settings.value.selectedProfile.obs
             val remote = connectedObs(wanted)
             if (wanted.stopStream && remote?.stream == ObsOutput.STARTED) obs.stopStream()
@@ -960,6 +1435,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         _recording.value = RecordingStats()
         startTicker()
         updateService()
+        macros.onEvent(MacroEvent(MacroEventType.START_RECORDING))
         showAlert(AlertLevel.INFO, text(R.string.alert_recording_started))
     }
 
@@ -969,6 +1445,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         activeRecording = null
         tee.setRecorder(null, video = false)
         _recording.value = null
+        macros.onEvent(MacroEvent(MacroEventType.STOP_RECORDING))
         finishRecording(active, error)
         syncEncoders()
         end()
@@ -997,6 +1474,154 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 showAlert(AlertLevel.ERROR, text(R.string.alert_recording_stopped), error)
             }
         }
+    }
+
+    @Synchronized
+    fun instantReplay() = if (_replay.value == ReplayState.PLAYING) stopReplay() else startReplay(play = true)
+
+    fun saveReplay() = startReplay(play = false)
+
+    @Synchronized
+    fun playReplay(uri: Uri, startMs: Long) {
+        if (_replay.value != ReplayState.IDLE || !previewActive) return
+        replayPlaying = SceneVideo(uri.toString(), "Replay")
+        replayStartMs = startMs
+        _replay.value = ReplayState.PLAYING
+        openCamera()
+    }
+
+    @Synchronized
+    private fun startReplay(play: Boolean) {
+        val buffer = replayBuffer
+        val profile = liveProfile
+        if (_replay.value != ReplayState.IDLE) return
+        if (buffer == null || profile == null) {
+            showAlert(AlertLevel.WARNING, text(R.string.alert_replay_unavailable), text(R.string.alert_replay_unavailable_detail))
+            return
+        }
+        _replay.value = ReplayState.PENDING
+        if (profile.replay.delaySeconds > 0) {
+            showAlert(AlertLevel.INFO, text(R.string.alert_replay_in, profile.replay.delaySeconds))
+        }
+        replayJob = ioScope.launch {
+            delay(profile.replay.delaySeconds * 1000L)
+            val clip = buffer.clip(profile.replay.seconds * 1_000_000L)
+            val saved = clip?.let {
+                runCatching { writeReplay(it) }.onFailure { Log.e(TAG, "Replay not saved", it) }.getOrNull()
+            }
+            synchronized(this@StreamEngine) {
+                if (replayJob?.isActive != true) {
+                    return@launch
+                }
+                if (saved == null) {
+                    _replay.value = ReplayState.IDLE
+                    showAlert(AlertLevel.ERROR, text(R.string.alert_replay_failed))
+                } else if (play && previewActive) {
+                    replayPlaying = SceneVideo(saved.toString(), "Replay")
+                    replayStartMs = 0
+                    _replay.value = ReplayState.PLAYING
+                    openCamera()
+                } else {
+                    _replay.value = ReplayState.IDLE
+                    showAlert(AlertLevel.INFO, text(R.string.alert_replay_saved))
+                }
+            }
+        }
+    }
+
+    private fun writeReplay(clip: ReplayClip): Uri? {
+        val file = recordings.create(replay = true)
+        val summary = try {
+            val recorder = Mp4Recorder(file.input, file.output, Int.MAX_VALUE) { Log.w(TAG, "Replay: $it") }
+            recorder.start()
+            clip.writeTo(recorder)
+            recorder.stop()
+        } catch (e: Exception) {
+            file.close()
+            recordings.delete(file.uri)
+            throw e
+        }
+        file.close()
+        if (summary == null) {
+            recordings.delete(file.uri)
+            return null
+        }
+        recordings.publish(file.uri)
+        return file.uri
+    }
+
+    @Synchronized
+    fun stopReplay() {
+        replayJob?.cancel()
+        replayJob = null
+        _replay.value = ReplayState.IDLE
+        if (replayPlaying == null) return
+        replayPlaying = null
+        if (previewActive) openCamera()
+    }
+
+    @Synchronized
+    fun toggleMonitor() {
+        if (monitorOutput != null) {
+            stopMonitor()
+            return
+        }
+        if (!hasLivePermissions()) return
+        val profile = liveProfile ?: settings.settings.value.selectedProfile
+        val wanted = profile.previewStream
+        if (transportOf(wanted.url) != Transport.WHIP || CodecCatalog.encoders[VideoCodec.H264] == null) {
+            showAlert(AlertLevel.WARNING, text(R.string.alert_preview_stream_not_set))
+            return
+        }
+        if (!busy && !begin(profile)) return
+        val requestKeyFrame: () -> Unit = { monitorEncoder?.requestKeyFrame() }
+        val session = StreamSession(
+            ioScope,
+            { listener -> createPublisher(wanted.url.trim(), wanted.token, false, false, requestKeyFrame, listener) },
+            requestKeyFrame,
+        )
+        monitorOutput = LiveOutput("monitor", text(R.string.preview_stream), session, true)
+        try {
+            syncEncoders()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start the preview stream encoder", e)
+            stopMonitor()
+            _ui.update { it.copy(error = e.message ?: text(R.string.error_encoder)) }
+            return
+        }
+        _monitoring.value = true
+        updateService()
+        session.start()
+        monitorJob = scope.launch {
+            var previous = LiveState.CONNECTING
+            session.state.collect { state ->
+                if (state == LiveState.RECONNECTING && previous != LiveState.RECONNECTING) {
+                    showAlert(
+                        AlertLevel.ERROR,
+                        text(R.string.alert_destination_failed, text(R.string.preview_stream)),
+                        session.lastError.value ?: text(R.string.retrying),
+                    )
+                }
+                previous = state
+            }
+        }
+    }
+
+    private fun clearMonitor(): Boolean {
+        val output = monitorOutput ?: return false
+        monitorJob?.cancel()
+        monitorJob = null
+        output.session.stop()
+        monitorOutput = null
+        _monitoring.value = false
+        return true
+    }
+
+    @Synchronized
+    private fun stopMonitor() {
+        if (!clearMonitor()) return
+        runCatching { syncEncoders() }
+        end()
     }
 
     fun takeSnapshot() {
@@ -1040,17 +1665,53 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         compositor?.setPreview(if (enabled) previewSurface else null)
     }
 
-    private fun createPublisher(profile: StreamProfile, listener: PublisherListener): Publisher {
-        val url = streamUrl(profile)
-        return when {
-            url.startsWith("rtmp://") || url.startsWith("rtmps://") -> RtmpPublisher(url, profile.streamKey.trim(), listener)
-            url.startsWith("srtla://") -> SrtPublisher(url, listener, links)
-            url.startsWith("srt://") -> SrtPublisher(url, listener)
-            else -> throw IllegalArgumentException("Unsupported URL: $url")
+    private fun createPublisher(
+        url: String,
+        key: String,
+        bonded: Boolean,
+        moblinked: Boolean,
+        requestKeyFrame: () -> Unit,
+        listener: PublisherListener,
+    ): Publisher = when (transportOf(url)) {
+        Transport.RTMP -> RtmpPublisher(url, key.trim(), listener)
+        Transport.SRTLA -> if (moblinked) SrtPublisher(url, listener, streamLinks, onServer = moblink::startTunnels) else SrtPublisher(url, listener, links)
+        Transport.SRT -> SrtPublisher(url, listener)
+        Transport.RIST -> RistPublisher(url, listener, links.takeIf { bonded })
+        Transport.WHIP -> WhipPublisher(
+            url,
+            if (key.isBlank()) emptyMap() else mapOf("Authorization" to "Bearer ${key.trim()}"),
+            listener,
+            http,
+            requestKeyFrame,
+        )
+        else -> throw IllegalArgumentException("Unsupported URL: $url")
+    }
+
+    private suspend fun watchDestination(output: LiveOutput) {
+        var previous = LiveState.CONNECTING
+        output.session.state.collect { state ->
+            _destinations.update { it + (output.id to state) }
+            if (state == LiveState.LIVE && previous != LiveState.LIVE) {
+                showAlert(AlertLevel.INFO, text(R.string.alert_live_at, output.name))
+            } else if (state == LiveState.RECONNECTING && previous != LiveState.RECONNECTING) {
+                showAlert(
+                    AlertLevel.ERROR,
+                    text(R.string.alert_destination_failed, output.name),
+                    output.session.lastError.value ?: text(R.string.retrying),
+                )
+            }
+            previous = state
         }
     }
 
+    private fun syncSinks() {
+        val outputs = listOfNotNull(mainOutput) + extraOutputs
+        tee.setStreams(outputs.map { it.sink } + listOfNotNull(replayBuffer))
+        opusTee.setStreams((outputs + listOfNotNull(monitorOutput)).mapNotNull { it.opusSink })
+    }
+
     private fun syncEncoders() {
+        syncSinks()
         val profile = liveProfile ?: return
         val (w, h) = outputSize(profile)
         val recording = activeRecording
@@ -1060,7 +1721,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             audioEncoder = AudioEncoder(
                 profile.audioBitrateKbps * 1000,
                 tee,
-                micDevice(),
+                openMic(),
                 audioMix,
                 { _audioLevel.value = it },
                 ::onFatal,
@@ -1071,7 +1732,9 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             audioEncoder = null
             audioLive = false
             tee.forgetAudioFormat()
+            opusTee.forgetAudioFormat()
         }
+        if (audioLive) audioEncoder?.opusSink = opusTee.takeIf { mainOutput?.opusSink != null || monitorOutput != null || extraOutputs.any { it.opusSink != null } }
         if (session == null && recording?.settings?.separate != false) {
             videoEncoder?.let {
                 compositor?.setEncoder(null)
@@ -1113,6 +1776,28 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             recordEncoder = encoder
             compositor!!.setRecorder(encoder.inputSurface)
         }
+        val monitor = monitorOutput
+        if (monitor == null) {
+            monitorEncoder?.let {
+                compositor?.setMonitor(null)
+                it.release()
+                monitorEncoder = null
+            }
+        } else if (monitorEncoder == null) {
+            val settings = profile.previewStream
+            val encoder = VideoEncoder(
+                codec = VideoCodec.H264,
+                width = if (profile.portrait) settings.resolution.height else settings.resolution.width,
+                height = if (profile.portrait) settings.resolution.width else settings.resolution.height,
+                fps = encoderFps(profile),
+                bitrateBps = settings.bitrateKbps * 1000,
+                keyFrameIntervalSeconds = 2,
+                sink = monitor.sink,
+                onError = ::onEncoderError,
+            )
+            monitorEncoder = encoder
+            compositor!!.setMonitor(encoder.inputSurface)
+        }
     }
 
     @Synchronized
@@ -1121,9 +1806,12 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         Log.w(TAG, "Restarting video encoders: $reason")
         compositor?.setEncoder(null)
         compositor?.setRecorder(null)
-        val released = (videoEncoder?.release(timeoutMs = 5000) ?: true) and (recordEncoder?.release(timeoutMs = 5000) ?: true)
+        compositor?.setMonitor(null)
+        val released = (videoEncoder?.release(timeoutMs = 5000) ?: true) and (recordEncoder?.release(timeoutMs = 5000) ?: true) and
+            (monitorEncoder?.release(timeoutMs = 5000) ?: true)
         videoEncoder = null
         recordEncoder = null
+        monitorEncoder = null
         if (!released) {
             fail(text(R.string.error_encoder_stalled))
             return
@@ -1146,6 +1834,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         tee.setRecorder(null, video = false)
         _recording.value = null
         active?.let { finishRecording(it, message) }
+        clearMonitor()
         stopLive()
         if (wasLive) showAlert(AlertLevel.ERROR, text(R.string.alert_stream_stopped), message)
         _ui.update { it.copy(error = message) }
@@ -1158,7 +1847,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private fun tick() {
         val now = System.nanoTime()
         val stalled = { encoder: VideoEncoder? -> encoder != null && now - encoder.lastOutputNanos > 5_000_000_000L }
-        if (_ui.value.cameraState == CameraState.Streaming && (stalled(videoEncoder) || stalled(recordEncoder))) {
+        if (_ui.value.cameraState == CameraState.Streaming && (stalled(videoEncoder) || stalled(recordEncoder) || stalled(monitorEncoder))) {
             restartVideoEncoders("no output for 5 s")
         }
         session?.let(::tickLive)
@@ -1181,7 +1870,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         ) {
             showAlert(AlertLevel.WARNING, text(R.string.alert_low_bitrate), formatKbps(stats.sendBitrateBps))
         }
-        val linkStats = (session.publisher as? SrtPublisher)?.linkStats().orEmpty()
+        val linkStats = if (liveProfile?.bonded == true) (session.publisher as? BondedPublisher)?.linkUsage().orEmpty() else emptyList()
         val shares = linkShares(linkBytes, linkStats)
         linkBytes = linkStats.associate { it.id to it.bytesSent }
         val live = LiveStats(
@@ -1195,6 +1884,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             bytesSent = stats.bytesSent,
             codec = liveCodec,
             links = shares,
+            totalBytes = stats.bytesSent,
         )
         _stats.value = live
         if (live.uptimeSeconds % 10 == 0L) {
@@ -1224,10 +1914,11 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             val min = minOf(profile.minBitrateKbps * 1000L, cap)
             if (owner !== publisher) {
                 owner = publisher
-                abr = if (publisher is SrtPublisher) {
-                    BelaboxAdaptiveBitrate(cap, min)
-                } else {
-                    QueueAdaptiveBitrate(cap, min)
+                abr = when (publisher) {
+                    is SrtPublisher -> BelaboxAdaptiveBitrate(cap, min)
+                    is RistPublisher -> RistAdaptiveBitrate(cap, min)
+                    is WhipPublisher -> LossAdaptiveBitrate(cap, min)
+                    else -> QueueAdaptiveBitrate(cap, min)
                 }
                 max = cap
             } else if (cap != max) {
@@ -1254,8 +1945,10 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         compositor = VideoCompositor(w, h).also {
             it.setFrameRate(thermalGuard.fps(profile.fps))
             it.setPreview(if (previewEnabled) previewSurface else null)
-            it.setOverlays(overlays)
+            it.setEffects(effectSettings)
         }
+        drawBoard.setSize(w, h)
+        applyOverlays()
         syncBrowsers()
         syncVTubers()
     }
@@ -1311,13 +2004,31 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         uvcSurface = null
     }
 
-    private fun openVideo(scene: Scene, compositor: VideoCompositor) {
+    private fun openReplay(clip: SceneVideo, compositor: VideoCompositor) {
+        openPlayer(listOf(clip), compositor, 1f, true, false, settings.settings.value.replaySpeedPercent / 100f, replayStartMs) {
+            scope.launch { synchronized(this@StreamEngine) { if (replayPlaying === clip) stopReplay() } }
+        }
+    }
+
+    private fun openVideo(scene: Scene, compositor: VideoCompositor) =
+        openPlayer(scene.videos, compositor, scene.videoVolume / 100f, scene.micWithVideo, true, 1f, 0) {}
+
+    private fun openPlayer(
+        videos: List<SceneVideo>,
+        compositor: VideoCompositor,
+        volume: Float,
+        micWhilePlaying: Boolean,
+        loop: Boolean,
+        speed: Float,
+        startMs: Long,
+        onFinished: () -> Unit,
+    ) {
         val generation = cameraGeneration
         cameraFps = 0
         compositor.setFrameRate(thermalGuard.fps((liveProfile ?: settings.settings.value.selectedProfile).fps))
         val player = VideoPlayer(
             context,
-            scene.videos.map { VideoFile(Uri.parse(it.uri), it.name) },
+            videos.map { VideoFile(Uri.parse(it.uri), it.name) },
             compositor.newInputSurface(),
             { width, height, rotation ->
                 scope.launch {
@@ -1330,9 +2041,13 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 }
             },
             compositor::repeatFrame,
+            loop,
+            speed,
+            startMs,
+            onFinished,
         ) { message -> _ui.update { it.copy(error = message) } }
-        player.volume = scene.videoVolume / 100f
-        player.micWhilePlaying = scene.micWithVideo
+        player.volume = volume
+        player.micWhilePlaying = micWhilePlaying
         audioMix.source = player
         _videoPlayer.value = player
     }
@@ -1454,6 +2169,15 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
 
     private fun openSource() {
         val compositor = compositor ?: return
+        val replay = replayPlaying
+        if (replay != null) {
+            val key = REPLAY_KEY to listOf(replay)
+            if (key == playingVideo) return
+            closeSources()
+            openReplay(replay, compositor)
+            playingVideo = key
+            return
+        }
         val scene = settings.settings.value.selectedScene
         val video = scene?.let(::videoKey)
         if (scene != null && video != null) {
@@ -1597,6 +2321,8 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         const val UVC_PREFIX = "uvc:"
         const val ADAPTIVE_BITRATE_START_BPS = 1_000_000L
         const val MIN_FREE_BYTES = 300L shl 20
+        const val REPLAY_MAX_BYTES = 96L shl 20
+        const val REPLAY_KEY = "replay"
         val LIVE_PERMISSIONS = arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
     }
 }

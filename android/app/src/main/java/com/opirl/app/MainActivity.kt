@@ -1,7 +1,12 @@
 package com.opirl.app
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.view.KeyEvent
+import android.view.MotionEvent
+import com.opirl.app.settings.DEEP_LINK_SCHEME
 import android.content.pm.PackageManager
 import android.hardware.display.DisplayManager
 import android.os.Build
@@ -88,6 +93,7 @@ class MainActivity : ComponentActivity() {
         }
         portrait = app.settings.settings.value.selectedProfile.portrait
         updateOrientation()
+        if (savedInstanceState == null) handleLink(intent)
         setContent {
             OpirlTheme {
                 val settings by app.settings.settings.collectAsStateWithLifecycle()
@@ -107,6 +113,29 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleLink(intent)
+    }
+
+    private fun handleLink(intent: Intent?) {
+        val link = intent?.data?.takeIf { intent.action == Intent.ACTION_VIEW && it.scheme.equals(DEEP_LINK_SCHEME, ignoreCase = true) }
+        if (link != null) app.engine.pendingLink.value = link.toString()
+    }
+
+    @SuppressLint("RestrictedApi")
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean =
+        app.engine.controls.onGamepadKey(event) || super.dispatchKeyEvent(event)
+
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean =
+        app.engine.controls.onMotion(event) || super.dispatchGenericMotionEvent(event)
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
+        app.engine.controls.onKeyboardKey(event, true) || super.onKeyDown(keyCode, event)
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean =
+        app.engine.controls.onKeyboardKey(event, false) || super.onKeyUp(keyCode, event)
 
     override fun onStart() {
         super.onStart()
