@@ -3,7 +3,7 @@ package com.opirl.app.stream
 import com.opirl.app.engine.net.LinkType
 import com.opirl.app.engine.srtla.SrtlaLinkStats
 
-data class LinkShare(val name: String, val percent: Int)
+data class LinkShare(val name: String, val percent: Int, val rttMs: Int = 0)
 
 fun linkShares(previous: Map<String, Long>, links: List<SrtlaLinkStats>): List<LinkShare> {
     val sent = links.map { maxOf(it.bytesSent - (previous[it.id] ?: 0), 0) }
@@ -16,6 +16,6 @@ fun linkShares(previous: Map<String, Long>, links: List<SrtlaLinkStats>): List<L
             LinkType.ETHERNET -> "Ethernet"
             LinkType.OTHER -> link.name
         }
-        LinkShare(name, Math.round(sent[index] * 100f / total))
+        LinkShare(name, Math.round(sent[index] * 100f / total), link.rttMs)
     }
 }

@@ -135,8 +135,17 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
             side = Side.SETTINGS
         }
     }
+    val remotePanel: @Composable () -> Unit = {
+        RemotePanel(engine, appSettings.remoteControl, onHide = { panelHidden = true }, onClose = closePanel) {
+            settingsPages.open(Route.RemoteControl, Route.RemoteAssistant)
+            side = Side.SETTINGS
+        }
+    }
     var showBitrate by remember { mutableStateOf(false) }
-    var stealth by remember { mutableStateOf(false) }
+    val stealth = ui.stealth
+    val moblinkStatus by engine.moblink.status.collectAsStateWithLifecycle()
+    val remoteStatus by engine.remote.status.collectAsStateWithLifecycle()
+    val pendingLink by engine.pendingLink.collectAsStateWithLifecycle()
     var confirmStop by remember { mutableStateOf(false) }
     var confirmRecordStop by remember { mutableStateOf(false) }
     val busy = ui.live != LiveState.OFFLINE || recording != null
@@ -161,6 +170,8 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
         widgetsOpen = side == Side.WIDGETS && !panelHidden,
         obsOpen = side == Side.OBS && !panelHidden,
         browserOpen = side == Side.BROWSER && !panelHidden,
+        remote = appSettings.remoteControl.assistant,
+        remoteOpen = side == Side.REMOTE && !panelHidden,
         filters = (side == Side.FILTERS && !panelHidden) || appSettings.effects.filters.isNotEmpty() ||
             appSettings.effects.luts.any { it.enabled },
         drawing = drawing,
@@ -175,6 +186,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
         onWidgets = { toggle(Side.WIDGETS) },
         onObs = { toggle(Side.OBS) },
         onBrowser = { toggle(Side.BROWSER) },
+        onRemote = { toggle(Side.REMOTE) },
         onChat = { toggle(Side.CHAT) },
         onRecord = {
             when {
@@ -194,7 +206,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
             }
         },
         onBitrate = { showBitrate = true },
-        onStealth = { stealth = true },
+        onStealth = { engine.setStealth(true) },
         onMute = { engine.setMuted(!ui.muted) },
         onTorch = { engine.setTorch(!ui.torch) },
     )
@@ -209,7 +221,19 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
 
     val statusView: @Composable (Boolean, Modifier) -> Unit = { compact, modifier ->
         if (showOverlays) {
-            Status(ui, stats, recording, obs, engine.audioLevel, appSettings.hiddenStatusItems, engine::clearError, compact, modifier)
+            Status(
+                ui,
+                stats,
+                recording,
+                obs,
+                moblinkStatus.takeIf { appSettings.moblink.streamer || appSettings.moblink.relay },
+                remoteStatus,
+                engine.audioLevel,
+                appSettings.hiddenStatusItems,
+                engine::clearError,
+                compact,
+                modifier,
+            )
         }
     }
     val sidePanel: @Composable (Side, (@Composable () -> Unit)?) -> Unit = { shown, chatHeader ->
@@ -217,6 +241,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
             Side.CHAT -> ChatPanel(engine, appSettings, chatDraft, chatTools, onHide = { panelHidden = true }, onClose = closePanel, header = chatHeader)
             Side.WIDGETS -> WidgetsPanel(settings, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
             Side.OBS -> obsPanel()
+            Side.REMOTE -> remotePanel()
             Side.BROWSER -> BrowserPanel(settings, appSettings, browser, onHide = { panelHidden = true }, onClose = closePanel)
             Side.FILTERS -> FiltersPanel(settings, appSettings, engine, onHide = { panelHidden = true }, onClose = closePanel)
             Side.SWITCHER -> SwitcherPanel(settings, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
@@ -509,7 +534,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                     Modifier
                         .fillMaxSize()
                         .background(Color.Black)
-                        .clickable(interactionSource = null, indication = null) { stealth = false },
+                        .clickable(interactionSource = null, indication = null) { engine.setStealth(false) },
                 )
             }
             if (banded && hinge == null) {
@@ -550,7 +575,8 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
             confirmRecordStop = false
         }
     }
-    BackHandler(stealth) { stealth = false }
+    BackHandler(stealth) { engine.setStealth(false) }
+    pendingLink?.let { DeepLinkDialog(it, settings, appSettings, engine, busy) }
 
     if (showBitrate) {
         ModalBottomSheet(
@@ -566,7 +592,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
     }
 }
 
-private enum class Side { SETTINGS, CHAT, WIDGETS, OBS, BROWSER, FILTERS, SWITCHER, MACROS }
+private enum class Side { SETTINGS, CHAT, WIDGETS, OBS, BROWSER, FILTERS, SWITCHER, MACROS, REMOTE }
 
 fun formatBitrate(bps: Long): String = if (bps >= 1_000_000) "%.1f Mbps".format(Locale.ROOT, bps / 1e6) else "${bps / 1000} kbps"
 

@@ -69,6 +69,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.Share
+import com.opirl.app.settings.createDeepLink
+import androidx.compose.material.icons.rounded.Hub
+import androidx.compose.material.icons.rounded.Keyboard
+import androidx.compose.material.icons.rounded.SettingsRemote
+import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
@@ -229,6 +236,36 @@ internal sealed interface Route {
     data class License(val name: String) : Route
 
     data object ImportExport : Route
+
+    data object ShareStreams : Route
+
+    data object RemoteControl : Route
+
+    data object RemoteStreamer : Route
+
+    data object RemoteAssistant : Route
+
+    data object RemoteWeb : Route
+
+    data object Moblink : Route
+
+    data object MoblinkStreamer : Route
+
+    data object MoblinkRelay : Route
+
+    data object Gamepad : Route
+
+    data object Keyboard : Route
+
+    data class KeyboardKeyPage(val id: String) : Route
+
+    data object StreamDecks : Route
+
+    data class StreamDeckPage(val id: String) : Route
+
+    data class StreamDeckKeyPage(val layoutId: String, val index: Int) : Route
+
+    data class ActionPage(val target: ActionTarget) : Route
 }
 
 private fun AppSettings.profile(id: String) = profiles.firstOrNull { it.id == id }
@@ -287,6 +324,25 @@ private fun title(route: Route, settings: AppSettings) = when (route) {
     Route.Licenses -> stringResource(R.string.licenses)
     is Route.License -> route.name
     Route.ImportExport -> stringResource(R.string.import_export)
+    Route.ShareStreams -> stringResource(R.string.share_streams)
+    Route.RemoteControl -> stringResource(R.string.remote_control)
+    Route.RemoteStreamer -> stringResource(R.string.remote_streamer)
+    Route.RemoteAssistant -> stringResource(R.string.remote_assistant)
+    Route.RemoteWeb -> stringResource(R.string.remote_web)
+    Route.Moblink -> stringResource(R.string.moblink)
+    Route.MoblinkStreamer -> stringResource(R.string.remote_streamer)
+    Route.MoblinkRelay -> stringResource(R.string.moblink_relay)
+    Route.Gamepad -> stringResource(R.string.game_controller)
+    Route.Keyboard -> stringResource(R.string.keyboard)
+    is Route.KeyboardKeyPage -> stringResource(R.string.key)
+    Route.StreamDecks -> "Stream Deck"
+    is Route.StreamDeckPage -> settings.streamDecks.firstOrNull { it.id == route.id }?.name.orEmpty()
+    is Route.StreamDeckKeyPage -> stringResource(
+        R.string.key_position,
+        route.index / (settings.streamDecks.firstOrNull { it.id == route.layoutId }?.model?.columns ?: 5) + 1,
+        route.index % (settings.streamDecks.firstOrNull { it.id == route.layoutId }?.model?.columns ?: 5) + 1,
+    )
+    is Route.ActionPage -> stringResource(R.string.function)
 }
 
 private const val SOURCE_URL = "https://github.com/neyako/mobdroid"
@@ -395,7 +451,7 @@ fun SettingsPanel(
                         is Route.StreamRecording -> settings.profile(route.id)?.let {
                             StreamRecording(store, it, editable(settings, it, live))
                         }
-                        is Route.StreamObs -> settings.profile(route.id)?.let { StreamObs(store, it) }
+                        is Route.StreamObs -> settings.profile(route.id)?.let { StreamObs(store, engine, it) }
                         Route.Recordings -> RecordingsPage(engine)
                         Route.Scenes -> ScenesPage(store, settings, engine, push)
                         is Route.ScenePage -> settings.scenes.firstOrNull { it.id == route.id }?.let {
@@ -485,7 +541,31 @@ fun SettingsPanel(
                             LICENSES.forEach { item -> row { NavRow(it, item.name, item.license) { push(Route.License(item.name)) } } }
                         }
                         is Route.License -> LICENSES.firstOrNull { it.name == route.name }?.let { LicenseText(it.file) }
-                        Route.ImportExport -> ImportExport(store, live)
+                        Route.ImportExport -> ImportExport(store, engine, live, push)
+                        Route.ShareStreams -> ShareStreamsPage(settings)
+                        Route.RemoteControl -> RemoteControlPage(store, settings, engine, push)
+                        Route.RemoteStreamer -> RemoteStreamerPage(store, settings.remoteControl)
+                        Route.RemoteAssistant -> RemoteAssistantPage(store, settings.remoteControl)
+                        Route.RemoteWeb -> RemoteWebPage(store, settings.remoteControl)
+                        Route.Moblink -> MoblinkPage(store, settings, engine, push)
+                        Route.MoblinkStreamer -> {
+                            val relays by engine.moblink.relays.collectAsStateWithLifecycle()
+                            MoblinkStreamerPage(store, settings.moblink, relays)
+                        }
+                        Route.MoblinkRelay -> MoblinkRelayPage(store, settings.moblink)
+                        Route.Gamepad -> GamepadPage(settings, engine, push)
+                        Route.Keyboard -> KeyboardPage(store, settings, push)
+                        is Route.KeyboardKeyPage -> settings.keyboard.firstOrNull { it.id == route.id }?.let {
+                            KeyboardKeyPage(store, settings, it, push, pop)
+                        }
+                        Route.StreamDecks -> StreamDecksPage(store, settings, engine, push)
+                        is Route.StreamDeckPage -> settings.streamDecks.firstOrNull { it.id == route.id }?.let {
+                            StreamDeckPage(store, settings, it, push, pop)
+                        }
+                        is Route.StreamDeckKeyPage -> settings.streamDecks.firstOrNull { it.id == route.layoutId }?.let {
+                            StreamDeckKeyPage(store, settings, it, route.index, push)
+                        }
+                        is Route.ActionPage -> ActionPage(store, settings, route.target)
                     }
                 }
             }
@@ -558,6 +638,40 @@ private fun Home(settings: AppSettings, push: (Route) -> Unit) {
             ) {
                 push(Route.BitratePresets)
             }
+        }
+    }
+    Group {
+        row {
+            NavRow(
+                it,
+                stringResource(R.string.remote_control),
+                badge = Badge(Icons.Rounded.SettingsRemote, Color(0xFF8FD3FF), MaterialShapes.Diamond),
+            ) { push(Route.RemoteControl) }
+        }
+        row {
+            NavRow(it, stringResource(R.string.moblink), badge = Badge(Icons.Rounded.Hub, Color(0xFFB5E48C), MaterialShapes.Flower)) {
+                push(Route.Moblink)
+            }
+        }
+        row {
+            NavRow(
+                it,
+                stringResource(R.string.game_controller),
+                badge = Badge(Icons.Rounded.SportsEsports, Color(0xFFFFA8A8), MaterialShapes.Ghostish),
+            ) { push(Route.Gamepad) }
+        }
+        row {
+            NavRow(it, stringResource(R.string.keyboard), badge = Badge(Icons.Rounded.Keyboard, Color(0xFFE0C3FC), MaterialShapes.Bun)) {
+                push(Route.Keyboard)
+            }
+        }
+        row {
+            NavRow(
+                it,
+                "Stream Deck",
+                settings.selectedStreamDeck?.name,
+                Badge(Icons.Rounded.Apps, Color(0xFFFFD6A5), MaterialShapes.ClamShell),
+            ) { push(Route.StreamDecks) }
         }
     }
     Group {
@@ -663,6 +777,19 @@ private fun StreamPage(
         }
     }
     Group {
+        row { shapes ->
+            val context = LocalContext.current
+            ActionRow(shapes, stringResource(R.string.share_link), Icons.Rounded.Share) {
+                runCatching {
+                    context.startActivity(
+                        Intent.createChooser(
+                            Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, createDeepLink(listOf(profile))),
+                            null,
+                        ),
+                    )
+                }
+            }
+        }
         row { shapes ->
             val name = stringResource(R.string.copy_name, profile.name)
             ActionRow(shapes, stringResource(R.string.duplicate), Icons.Rounded.ContentCopy) {
@@ -921,6 +1048,7 @@ private class LicenseItem(val name: String, val license: String, val file: Strin
 
 private val LICENSES = listOf(
     LicenseItem("Moblin", "MIT", "moblin.txt"),
+    LicenseItem("SolidJS, Tailwind CSS, tailwind-merge", "MIT", "web-remote.txt"),
     LicenseItem("libusb", "LGPL 2.1", "libusb.txt"),
     LicenseItem("libuvc", "BSD", "libuvc.txt"),
     LicenseItem("libjpeg-turbo", "BSD, IJG, zlib", "libjpeg-turbo.txt"),
@@ -1240,9 +1368,10 @@ private fun StreamRecording(store: SettingsStore, profile: StreamProfile, editab
 }
 
 @Composable
-private fun StreamObs(store: SettingsStore, profile: StreamProfile) {
+private fun StreamObs(store: SettingsStore, engine: StreamEngine, profile: StreamProfile) {
     val obs = profile.obs
     val update = { changed: ObsSettings -> store.updateProfile(profile.copy(obs = changed)) }
+    LocalNetworkAccess(engine)
     Group {
         row { SwitchRow(it, stringResource(R.string.enabled), obs.enabled) { on -> update(obs.copy(enabled = on)) } }
     }
@@ -1494,7 +1623,7 @@ private fun BitratePresetsPage(store: SettingsStore, settings: AppSettings) {
 }
 
 @Composable
-private fun ImportExport(store: SettingsStore, live: Boolean) {
+private fun ImportExport(store: SettingsStore, engine: StreamEngine, live: Boolean, push: (Route) -> Unit) {
     val context = LocalContext.current
     var message by remember { mutableStateOf<Int?>(null) }
     var confirmReset by remember { mutableStateOf(false) }
@@ -1524,6 +1653,10 @@ private fun ImportExport(store: SettingsStore, live: Boolean) {
                 import.launch(arrayOf("*/*"))
             }
         }
+    }
+    Group {
+        row { NavRow(it, stringResource(R.string.share_streams)) { push(Route.ShareStreams) } }
+        row { ImportLinkRow(it, engine, !live) }
     }
     Group {
         row { shapes ->
