@@ -45,6 +45,7 @@ class WidgetRenderer(
         }
         scope.launch { runtime.version.collect { wake.trySend(Unit) } }
         scope.launch { runtime.chat.collect { if (WidgetType.CHAT in types) wake.trySend(Unit) } }
+        scope.launch { runtime.emotes.loaded.collect { if (WidgetType.CHAT in types) wake.trySend(Unit) } }
         scope.launch { runtime.track.collect { if (WidgetType.MUSIC in types) wake.trySend(Unit) } }
         scope.launch { runtime.location.collect { if (Need.Location in needs) wake.trySend(Unit) } }
         scope.launch { runtime.faces.collect { if (needs.any { it is Need.FaceOf }) wake.trySend(Unit) } }

@@ -1,7 +1,7 @@
 package com.opirl.app.chat
 
 import android.net.Uri
-import com.opirl.app.settings.TWITCH_CHAT_SCOPES
+import com.opirl.app.engine.chat.twitch.TWITCH_SCOPES
 import com.opirl.app.settings.TwitchAccount
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -22,7 +22,7 @@ fun twitchAuthUrl(state: String): String = Uri.parse("https://id.twitch.tv/oauth
     .appendQueryParameter("force_verify", "true")
     .appendQueryParameter("redirect_uri", "https://$TWITCH_REDIRECT_HOST")
     .appendQueryParameter("response_type", "token")
-    .appendQueryParameter("scope", (TWITCH_CHAT_SCOPES + TWITCH_ALERT_SCOPES).joinToString(" "))
+    .appendQueryParameter("scope", (TWITCH_SCOPES + TWITCH_ALERT_SCOPES).joinToString(" "))
     .appendQueryParameter("state", state)
     .build().toString()
 
@@ -43,7 +43,7 @@ fun validateTwitchToken(http: OkHttpClient, accessToken: String): TwitchAccount?
             login = body.getValue("login").jsonPrimitive.content,
             userId = body.getValue("user_id").jsonPrimitive.content,
             accessToken = accessToken,
-            scopes = (body["scopes"] as? JsonArray).orEmpty().map { it.jsonPrimitive.content },
+            scopes = (body["scopes"] as? JsonArray)?.map { it.jsonPrimitive.content }.orEmpty(),
         )
     }
 }.getOrNull()

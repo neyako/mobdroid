@@ -20,8 +20,8 @@
     <string name="alerts_kicks_at_least">Kicks %1$s+</string>
     <string name="alerts_first_match_note">The first enabled item that matches is played.</string>
     <string name="alerts_add_command">Add command</string>
-    <string name="alerts_commands_note">Chat users trigger a command with !moblin alert and its name. The channel owner can always use commands.</string>
-    <string name="alerts_command_note">Trigger with the chat message !moblin alert %1$s</string>
+    <string name="alerts_commands_note">Chat users trigger a command with !opirl alert and its name. The channel owner can always use commands.</string>
+    <string name="alerts_command_note">Trigger with the chat message !opirl alert %1$s</string>
     <string name="alerts_moderators">Moderators</string>
     <string name="alerts_subscribers">Subscribers</string>
     <string name="alerts_everyone">Everyone</string>

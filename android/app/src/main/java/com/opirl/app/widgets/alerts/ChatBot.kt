@@ -1,10 +1,12 @@
 package com.opirl.app.widgets.alerts
 
+import com.opirl.app.engine.chat.bot.BOT_PREFIX
+
 private val whitespace = Regex("\\s+")
 
 fun parseAlertCommand(text: String): String? {
     val words = ArrayDeque(text.trim().split(whitespace).filter { it.isNotEmpty() })
-    if (words.removeFirstOrNull()?.lowercase() != "!moblin") return null
+    if (words.removeFirstOrNull()?.lowercase() != BOT_PREFIX) return null
     if (words.removeFirstOrNull()?.lowercase() != "alert") return null
     val first = words.removeFirstOrNull() ?: return null
     if (!first.startsWith("\"")) return first

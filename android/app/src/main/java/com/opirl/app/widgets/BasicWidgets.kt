@@ -9,13 +9,16 @@ import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.graphics.drawable.BitmapDrawable
 import android.text.Layout
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.StaticLayout
 import android.text.TextPaint
 import android.text.TextUtils
+import android.text.style.DynamicDrawableSpan
 import android.text.style.ForegroundColorSpan
+import android.text.style.ImageSpan
 import android.text.style.StyleSpan
 import com.opirl.app.chat.ChatLine
 import com.opirl.app.chat.chatNameColor
@@ -70,13 +73,19 @@ object ChatWidget : WidgetDrawer {
         val shown = context.runtime.chat.value.takeLast(LINES)
         val width = context.width * placement.size / 100
         val size = context.settings.chatTextSize.sp * context.textScale
-        val bitmap = context.cached(widget.id, listOf(shown.map { it.key }, width, size, context.height)) {
-            draw(shown, width, size, context.height)
+        val emotes = HashMap<String, Bitmap>()
+        for (line in shown) {
+            for (segment in line.message.segments) {
+                if (segment is ChatSegment.Emote) context.runtime.emotes.get(segment.url)?.let { emotes[segment.url] = it }
+            }
+        }
+        val bitmap = context.cached(widget.id, listOf(shown.map { it.key }, width, size, context.height, emotes.keys)) {
+            draw(shown, emotes, width, size, context.height)
         } ?: return null
         return context.natural(bitmap)
     }
 
-    private fun draw(lines: List<ChatLine>, width: Int, size: Float, maxHeight: Int): Bitmap? {
+    private fun draw(lines: List<ChatLine>, emotes: Map<String, Bitmap>, width: Int, size: Float, maxHeight: Int): Bitmap? {
         if (lines.isEmpty() || width <= 0) return null
         val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
@@ -92,12 +101,18 @@ object ChatWidget : WidgetDrawer {
             text.setSpan(StyleSpan(Typeface.BOLD), start, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             text.append("  ")
             for (segment in line.message.segments) {
-                text.append(
-                    when (segment) {
-                        is ChatSegment.Text -> segment.text
-                        is ChatSegment.Emote -> segment.name
-                    },
-                )
+                val emote = (segment as? ChatSegment.Emote)?.let { emotes[it.url] }
+                when {
+                    segment is ChatSegment.Text -> text.append(segment.text)
+                    emote == null -> text.append((segment as ChatSegment.Emote).name)
+                    else -> {
+                        val height = (size * 1.3f).toInt()
+                        val drawable = BitmapDrawable(null, emote).apply {
+                            setBounds(0, 0, height * emote.width / emote.height, height)
+                        }
+                        text.append("\uFFFC", ImageSpan(drawable, DynamicDrawableSpan.ALIGN_CENTER), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    }
+                }
             }
         }
         val layout = StaticLayout.Builder.obtain(text, 0, text.length, paint, width)

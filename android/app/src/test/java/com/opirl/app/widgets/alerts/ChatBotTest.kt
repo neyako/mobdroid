@@ -10,12 +10,12 @@ class ChatBotTest {
     @Test
     fun readsTheAlertNameOutOfTheChatMessage() {
         val cases = mapOf(
-            "!moblin alert hello" to "hello",
-            "  !MOBLIN   Alert   Hello  " to "Hello",
-            "!moblin alert \"two words\"" to "two words",
-            "!moblin alert \"one\"" to "one",
-            "!moblin alert \"\"" to "",
-            "!moblin alert hello extra words" to "hello",
+            "!opirl alert hello" to "hello",
+            "  !OPIRL   Alert   Hello  " to "Hello",
+            "!opirl alert \"two words\"" to "two words",
+            "!opirl alert \"one\"" to "one",
+            "!opirl alert \"\"" to "",
+            "!opirl alert hello extra words" to "hello",
         )
         for ((text, name) in cases) assertEquals(name, parseAlertCommand(text), text)
     }
@@ -25,13 +25,13 @@ class ChatBotTest {
         val ignored = listOf(
             "",
             "hello",
-            "!moblin",
-            "!moblin alert",
-            "!moblin alert \"never closed",
-            "!moblin tts on",
-            "moblin alert hello",
+            "!opirl",
+            "!opirl alert",
+            "!opirl alert \"never closed",
+            "!opirl tts on",
+            "opirl alert hello",
             "!other alert hello",
-            "hi !moblin alert hello",
+            "hi !opirl alert hello",
         )
         for (text in ignored) assertNull(parseAlertCommand(text), text)
     }

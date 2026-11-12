@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.location.Location
 import android.util.Log
 import com.opirl.app.chat.ChatLine
+import com.opirl.app.chat.EmoteImages
 import com.opirl.app.media.gl.OverlaySource
 import com.opirl.app.settings.AppSettings
 import com.opirl.app.settings.SceneWidget
@@ -77,6 +78,7 @@ class WidgetRuntime(
     val store: SettingsStore,
     val http: OkHttpClient,
     val chat: StateFlow<List<ChatLine>>,
+    val emotes: EmoteImages,
     val track: StateFlow<Track?>,
     val location: StateFlow<Location?>,
     val faces: StateFlow<Map<String?, Face>>,

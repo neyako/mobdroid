@@ -48,6 +48,8 @@ fun applyChatEvents(lines: List<ChatLine>, events: List<ChatEvent>, nextKey: () 
 class ChatController(
     scope: CoroutineScope,
     private val createClients: ((ChatPlatform) -> ChatListener) -> List<Pair<ChatPlatform, ChatClient>>,
+    private val transform: (ChatMessage) -> ChatMessage,
+    private val onChannelId: (ChatPlatform, String) -> Unit,
     private val onMessage: (ChatMessage) -> Unit,
 ) {
     private val _lines = MutableStateFlow<List<ChatLine>>(emptyList())
@@ -86,9 +88,10 @@ class ChatController(
 
                 override fun onMessage(message: ChatMessage) {
                     if (current != generation) return
-                    pending += ChatEvent.Added(message)
+                    val shown = transform(message)
+                    pending += ChatEvent.Added(shown)
                     wake.trySend(Unit)
-                    this@ChatController.onMessage(message)
+                    this@ChatController.onMessage(shown)
                 }
 
                 override fun onMessageDeleted(messageId: String) {
@@ -105,6 +108,10 @@ class ChatController(
 
                 override fun onAlert(event: AlertEvent) {
                     if (current == generation) _alerts.tryEmit(event)
+                }
+
+                override fun onChannelId(id: String) {
+                    if (current == generation) this@ChatController.onChannelId(platform, id)
                 }
             }
         }

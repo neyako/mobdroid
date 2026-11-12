@@ -17,6 +17,9 @@ fun messageRes(text: String): Int? = when (text) {
     "Connection dropped" -> R.string.message_dropped
     "Twitch login expired" -> R.string.message_twitch_expired
     "Not logged in" -> R.string.not_logged_in
+    "User not found" -> R.string.message_user_not_found
+    "Category not found" -> R.string.message_category_not_found
+    "Not supported" -> R.string.message_not_supported
     "Camera in use by another app" -> R.string.message_camera_in_use
     "Too many cameras in use" -> R.string.message_too_many_cameras
     "Camera disabled by policy" -> R.string.message_camera_disabled
@@ -31,4 +34,17 @@ fun messageRes(text: String): Int? = when (text) {
 }
 
 @Composable
-fun localized(text: String): String = messageRes(text)?.let { stringResource(it) } ?: text
+fun localized(text: String): String {
+    messageRes(text)?.let { return stringResource(it) }
+    val patterns = listOf(
+        Triple("Cannot reach ", "", R.string.message_cannot_reach),
+        Triple("", " login expired", R.string.message_login_expired),
+        Triple("", " API key was not accepted", R.string.message_key_rejected),
+    )
+    for ((prefix, suffix, res) in patterns) {
+        if (text.length > prefix.length + suffix.length && text.startsWith(prefix) && text.endsWith(suffix)) {
+            return stringResource(res, text.removePrefix(prefix).removeSuffix(suffix))
+        }
+    }
+    return text
+}

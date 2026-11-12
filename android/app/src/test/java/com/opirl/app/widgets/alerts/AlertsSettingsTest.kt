@@ -1,6 +1,6 @@
 package com.opirl.app.widgets.alerts
 
-import com.opirl.app.settings.TWITCH_CHAT_SCOPES
+import com.opirl.app.engine.chat.twitch.TWITCH_SCOPES
 import com.opirl.app.settings.TwitchAccount
 import com.opirl.app.settings.Widget
 import com.opirl.app.settings.WidgetType
@@ -68,12 +68,10 @@ class AlertsSettingsTest {
     }
 
     @Test
-    fun aLoginFromBeforeTheAlertsHasOnlyTheChatScopes() {
+    fun aLoginWithoutTheAlertScopesIsAskedToLogInAgain() {
         val old = json.decodeFromString(TwitchAccount.serializer(), """{"login":"me","userId":"1","accessToken":"t"}""")
-        assertEquals(TWITCH_CHAT_SCOPES, old.scopes)
         assertEquals(TWITCH_ALERT_SCOPES, missingTwitchScopes(old))
-        val fresh = old.copy(scopes = TWITCH_CHAT_SCOPES + TWITCH_ALERT_SCOPES)
-        assertEquals(emptyList(), missingTwitchScopes(fresh))
-        assertEquals(listOf("bits:read"), missingTwitchScopes(old.copy(scopes = TWITCH_CHAT_SCOPES + listOf("moderator:read:followers", "channel:read:redemptions"))))
+        assertEquals(emptyList(), missingTwitchScopes(old.copy(scopes = TWITCH_SCOPES + TWITCH_ALERT_SCOPES)))
+        assertEquals(listOf("bits:read"), missingTwitchScopes(old.copy(scopes = listOf("moderator:read:followers", "channel:read:redemptions"))))
     }
 }

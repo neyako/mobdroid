@@ -20,8 +20,8 @@
     <string name="alerts_kicks_at_least">Kicks %1$s+</string>
     <string name="alerts_first_match_note">Mục đầu tiên đang bật và khớp sẽ được phát.</string>
     <string name="alerts_add_command">Thêm lệnh</string>
-    <string name="alerts_commands_note">Người xem kích hoạt lệnh bằng !moblin alert và tên lệnh. Chủ kênh luôn dùng được lệnh.</string>
-    <string name="alerts_command_note">Kích hoạt bằng tin nhắn chat !moblin alert %1$s</string>
+    <string name="alerts_commands_note">Người xem kích hoạt lệnh bằng !opirl alert và tên lệnh. Chủ kênh luôn dùng được lệnh.</string>
+    <string name="alerts_command_note">Kích hoạt bằng tin nhắn chat !opirl alert %1$s</string>
     <string name="alerts_moderators">Người điều hành</string>
     <string name="alerts_subscribers">Người đăng ký</string>
     <string name="alerts_everyone">Mọi người</string>

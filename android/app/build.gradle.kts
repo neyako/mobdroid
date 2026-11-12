@@ -90,6 +90,7 @@ dependencies {
     implementation(libs.filament)
     implementation(libs.filament.gltfio)
     implementation(libs.zxing.core)
+    implementation(libs.play.services.auth)
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
 

@@ -101,6 +101,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
     var panelHidden by remember { mutableStateOf(false) }
     val settingsPages = remember { SettingsPages() }
     val chatDraft = remember { mutableStateOf("") }
+    val chatTools = remember { mutableStateOf(false) }
     val browser = remember { BrowserState() }
     val showSettings = side == Side.SETTINGS
     val toggle = { target: Side ->
@@ -200,6 +201,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                     engine,
                     appSettings,
                     chatDraft,
+                    chatTools,
                     onHide = { panelHidden = true },
                     onClose = closePanel,
                     header = if (chatStatus) ({ statusView(true, Modifier) }) else null,
@@ -466,7 +468,14 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                             ) {
                                 AnimatedContent(shownSide, transitionSpec = { through }, label = "panel") { shown ->
                                     when (shown) {
-                                        Side.CHAT -> ChatPanel(engine, appSettings, chatDraft, onHide = { panelHidden = true }, onClose = closePanel)
+                                        Side.CHAT -> ChatPanel(
+                                            engine,
+                                            appSettings,
+                                            chatDraft,
+                                            chatTools,
+                                            onHide = { panelHidden = true },
+                                            onClose = closePanel,
+                                        )
                                         Side.WIDGETS -> WidgetsPanel(settings, engine, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
                                         Side.OBS -> obsPanel()
                                         Side.BROWSER -> BrowserPanel(
