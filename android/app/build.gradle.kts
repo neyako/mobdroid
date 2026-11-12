@@ -92,15 +92,47 @@ dependencies {
     implementation(libs.compose.material.icons)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    implementation(libs.mlkit.face.detection)
+    implementation(libs.mlkit.text.recognition)
+    implementation(libs.play.services.auth)
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
 
     testImplementation(kotlin("test-junit5"))
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
+    testImplementation(libs.kotlinx.coroutines.test)
     testRuntimeOnly(libs.junit.launcher)
 }
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+}
+
+abstract class CopyWebRemote : DefaultTask() {
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val source: DirectoryProperty
+
+    @get:OutputDirectory
+    abstract val output: DirectoryProperty
+
+    @get:Inject
+    abstract val files: FileSystemOperations
+
+    @TaskAction
+    fun copy() {
+        files.sync {
+            from(source)
+            into(output.dir("remote"))
+        }
+    }
+}
+
+val copyWebRemote = tasks.register<CopyWebRemote>("copyWebRemote") {
+    source.set(rootProject.layout.projectDirectory.dir("../Moblin/RemoteControl/Web"))
+}
+
+androidComponents {
+    onVariants { variant -> variant.sources.assets?.addGeneratedSourceDirectory(copyWebRemote, CopyWebRemote::output) }
 }

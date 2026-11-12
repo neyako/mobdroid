@@ -53,13 +53,15 @@ class SrtPublisher internal constructor(
     private val links: NetworkLinkProvider?,
     private val options: SrtOptions,
     private val environment: SrtEnvironment,
+    private val onServer: ((InetSocketAddress) -> Unit)? = null,
 ) : Publisher, BondedPublisher, SrtSessionListener {
     constructor(
         url: String,
         listener: PublisherListener,
         links: NetworkLinkProvider? = null,
         options: SrtOptions = SrtOptions(),
-    ) : this(url, listener, links, options, SrtEnvironment())
+        onServer: ((InetSocketAddress) -> Unit)? = null,
+    ) : this(url, listener, links, options, SrtEnvironment(), onServer)
 
     private val queue = FrameQueue(environment.maximumQueuedBytes)
     private val engine = SrtEngine("srt-publisher") { failure ->
@@ -201,6 +203,9 @@ class SrtPublisher internal constructor(
         }
         if (terminated.get()) {
             return
+        }
+        if (target.bonded) {
+            onServer?.invoke(address)
         }
         val transport = environment.transportFactory?.invoke(engine, address, target)
             ?: if (target.bonded) {

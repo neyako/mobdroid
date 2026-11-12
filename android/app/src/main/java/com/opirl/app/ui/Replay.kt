@@ -161,7 +161,7 @@ fun ReplayOverlay(engine: StreamEngine, store: SettingsStore, panel: ReplayPanel
                     style = statusStyle,
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
-                Segments(REPLAY_SPEEDS, settings.replaySpeedPercent, Modifier, small = true, label = ::formatSpeed) { speed ->
+                Segments(REPLAY_SPEEDS, settings.replaySpeedPercent, Modifier, ::formatSpeed, small = true, container = Color.White.copy(alpha = 0.14f)) { speed ->
                     store.update { it.copy(replaySpeedPercent = speed) }
                 }
                 if (state == ReplayState.PLAYING) {

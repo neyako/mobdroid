@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.serialization.json.Json
@@ -21,14 +22,17 @@ class SettingsStore(private val file: File, scope: CoroutineScope) {
         encodeDefaults = true
         coerceInputValues = true
     }
-    private val _settings = MutableStateFlow(load())
+    private val loaded = runCatching { decode(file.readText()) }.getOrDefault(AppSettings())
+    private val _settings = MutableStateFlow(loaded.withIdentity())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
     init {
-        _settings.drop(1).debounce(300).onEach(::write).launchIn(CoroutineScope(scope.coroutineContext + Dispatchers.IO))
+        val io = CoroutineScope(scope.coroutineContext + Dispatchers.IO)
+        _settings.drop(1).debounce(300).onEach(::write).launchIn(io)
+        if (_settings.value !== loaded) io.launch { write(_settings.value) }
     }
 
-    fun update(transform: (AppSettings) -> AppSettings) = _settings.update(transform)
+    fun update(transform: (AppSettings) -> AppSettings) = _settings.update { transform(it).withIdentity() }
 
     fun updateProfile(profile: StreamProfile) = update { s ->
         s.copy(profiles = s.profiles.map { if (it.id == profile.id) profile else it })
@@ -36,11 +40,7 @@ class SettingsStore(private val file: File, scope: CoroutineScope) {
 
     fun exportJson(): String = json.encodeToString(AppSettings.serializer(), _settings.value)
 
-    fun importJson(text: String): Boolean = runCatching { _settings.value = decode(text) }.isSuccess
-
-    private fun load(): AppSettings = runCatching {
-        decode(file.readText())
-    }.getOrDefault(AppSettings())
+    fun importJson(text: String): Boolean = runCatching { _settings.value = decode(text).withIdentity() }.isSuccess
 
     internal fun decode(text: String): AppSettings {
         val tree = json.parseToJsonElement(text).jsonObject

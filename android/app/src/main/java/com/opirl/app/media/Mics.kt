@@ -44,6 +44,8 @@ fun listMics(ports: List<MicPort>): List<Mic> {
     }.distinctBy { it.key }
 }
 
+fun micLabel(mic: Mic, kind: String): String = if (mic.name.isEmpty()) kind else "$kind: ${mic.name}"
+
 fun findMic(mics: List<Mic>, key: String?): Mic? =
     if (key == null) null else mics.firstOrNull { it.key == key } ?: mics.firstOrNull { it.kind.name == key }
 

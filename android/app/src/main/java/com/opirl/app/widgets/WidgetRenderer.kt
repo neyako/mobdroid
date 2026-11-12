@@ -9,16 +9,21 @@ import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.graphics.drawable.BitmapDrawable
 import android.text.Layout
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.StaticLayout
 import android.text.TextPaint
 import android.text.TextUtils
+import android.text.style.DynamicDrawableSpan
 import android.text.style.ForegroundColorSpan
+import android.text.style.ImageSpan
 import android.text.style.StyleSpan
 import com.opirl.app.chat.ChatLine
+import com.opirl.app.chat.EmoteImages
 import com.opirl.app.chat.chatNameColor
+import com.opirl.app.effects.chromaKey
 import com.opirl.app.engine.chat.ChatSegment
 import com.opirl.app.media.gl.BrowserPage
 import com.opirl.app.media.gl.Overlay
@@ -59,6 +64,7 @@ class WidgetRenderer(
     settings: StateFlow<AppSettings>,
     chat: StateFlow<List<ChatLine>>,
     track: StateFlow<Track?>,
+    private val emoteImages: EmoteImages,
     private val onOverlays: (List<Overlay>) -> Unit,
 ) {
     private val cache = HashMap<String, Rendered>()
@@ -73,7 +79,11 @@ class WidgetRenderer(
         val inputs = settings.map(::inputs).distinctUntilChanged()
         @OptIn(ExperimentalCoroutinesApi::class)
         val withChat = inputs.flatMapLatest { input ->
-            if (input.placed.any { it.widget.type == WidgetType.CHAT }) chat.map { input to it } else flowOf(input to emptyList())
+            if (input.placed.any { it.widget.type == WidgetType.CHAT }) {
+                chat.combine(emoteImages.loaded) { lines, _ -> input to lines }
+            } else {
+                flowOf(input to emptyList())
+            }
         }
         @OptIn(ExperimentalCoroutinesApi::class)
         val withMusic = withChat.flatMapLatest { (input, lines) ->
@@ -105,7 +115,7 @@ class WidgetRenderer(
                 val page = BrowserPage(widget.url, widget.browserWidth, widget.browserHeight)
                 val width = placement.size / 100f
                 val rect = overlayRect(placement, width, width * input.width / input.height * page.height / page.width)
-                return@mapNotNull Overlay(widget.id, null, rect.x, rect.y, rect.width, rect.height, widget.previewOnly, page)
+                return@mapNotNull Overlay(widget.id, null, rect.x, rect.y, rect.width, rect.height, widget.previewOnly, page, key(widget))
             }
             val bitmap = runCatching {
                 when (widget.type) {
@@ -121,8 +131,14 @@ class WidgetRenderer(
                     WidgetType.CHAT -> {
                         val shown = lines.takeLast(CHAT_LINES)
                         val width = input.width * placement.size / 100
-                        cached(widget.id, Triple(shown.map { it.key }, width, input.chatTextSize * input.textScale)) {
-                            chat(shown, width, input.chatTextSize * input.textScale, input.height)
+                        val emotes = HashMap<String, Bitmap>()
+                        for (line in shown) {
+                            for (segment in line.message.segments) {
+                                if (segment is ChatSegment.Emote) emoteImages.get(segment.url)?.let { emotes[segment.url] = it }
+                            }
+                        }
+                        cached(widget.id, listOf(shown.map { it.key }, width, input.chatTextSize * input.textScale, emotes.keys)) {
+                            chat(shown, emotes, width, input.chatTextSize * input.textScale, input.height)
                         }
                     }
                     WidgetType.BROWSER -> null
@@ -138,9 +154,20 @@ class WidgetRenderer(
             val width = if (widget.type == WidgetType.IMAGE) placement.size / 100f else bitmap.width.toFloat() / input.width
             val height = width * input.width / input.height * bitmap.height / bitmap.width
             val rect = overlayRect(placement, width, height)
-            Overlay(widget.id, bitmap, rect.x, rect.y, rect.width, rect.height, widget.previewOnly)
+            Overlay(
+                widget.id,
+                bitmap,
+                rect.x,
+                rect.y,
+                rect.width,
+                rect.height,
+                widget.previewOnly,
+                key = if (widget.type == WidgetType.IMAGE) key(widget) else null,
+            )
         }
     }
+
+    private fun key(widget: Widget) = if (widget.removeBackground) chromaKey(widget.keyFrom, widget.keyTo) else null
 
     private fun cached(id: String, key: Any, create: () -> Bitmap?): Bitmap? {
         cache[id]?.takeIf { it.key == key }?.let { return it.bitmap }
@@ -221,7 +248,7 @@ class WidgetRenderer(
         }
     }
 
-    private fun chat(lines: List<ChatLine>, width: Int, size: Float, maxHeight: Int): Bitmap? {
+    private fun chat(lines: List<ChatLine>, emotes: Map<String, Bitmap>, width: Int, size: Float, maxHeight: Int): Bitmap? {
         if (lines.isEmpty() || width <= 0) return null
         val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
@@ -237,12 +264,18 @@ class WidgetRenderer(
             text.setSpan(StyleSpan(Typeface.BOLD), start, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             text.append("  ")
             for (segment in line.message.segments) {
-                text.append(
-                    when (segment) {
-                        is ChatSegment.Text -> segment.text
-                        is ChatSegment.Emote -> segment.name
-                    },
-                )
+                val emote = (segment as? ChatSegment.Emote)?.let { emotes[it.url] }
+                when {
+                    segment is ChatSegment.Text -> text.append(segment.text)
+                    emote == null -> text.append((segment as ChatSegment.Emote).name)
+                    else -> {
+                        val height = (size * 1.3f).toInt()
+                        val drawable = BitmapDrawable(null, emote).apply {
+                            setBounds(0, 0, height * emote.width / emote.height, height)
+                        }
+                        text.append("\uFFFC", ImageSpan(drawable, DynamicDrawableSpan.ALIGN_CENTER), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    }
+                }
             }
         }
         val layout = StaticLayout.Builder.obtain(text, 0, text.length, paint, width)

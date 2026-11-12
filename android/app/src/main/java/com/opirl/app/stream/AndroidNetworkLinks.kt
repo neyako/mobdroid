@@ -10,6 +10,7 @@ import com.opirl.app.engine.net.LinkType
 import com.opirl.app.engine.net.NetworkLink
 import com.opirl.app.engine.net.NetworkLinkProvider
 import java.net.DatagramSocket
+import java.net.InetAddress
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -33,6 +34,8 @@ class AndroidNetworkLinks(context: Context) : NetworkLinkProvider {
             }
             return socket
         }
+
+        override fun resolve(host: String): InetAddress = network.getByName(host)
     }
 
     fun start(types: Set<LinkType>) {
