@@ -55,9 +55,10 @@ class RemoteModelTest {
 
     @Test
     fun `the settings list streams, scenes, presets and each side's zoom stops`() {
-        val remote = remoteSettings(settings, listOf(camera(Facing.FRONT), camera(Facing.BACK))) { it.name }
+        val remote = remoteSettings(settings, listOf(camera(Facing.FRONT), camera(Facing.BACK)), "Auto", listOf("USB:Rode:1" to "USB: Rode"))
         assertEquals(listOf("Main"), remote.streams.map { it.name })
         assertEquals(listOf("s1", "s2"), remote.scenes.map { it.id })
+        assertEquals(listOf("AUTO", "USB:Rode:1"), remote.mics.map { it.id })
         assertEquals(settings.bitratePresetsKbps.map { it * 1000L }, remote.bitratePresets.map { it.bitrate })
         assertEquals(listOf("0.6x", "1x", "3x"), remote.zoomBack.map { it.name })
         assertEquals(listOf(0.6f, 1f, 3f), remote.zoomFront.map { it.x })

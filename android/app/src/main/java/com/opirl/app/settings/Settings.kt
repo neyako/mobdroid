@@ -37,14 +37,6 @@ enum class Resolution(val label: String, val width: Int, val height: Int) {
 enum class StabilizationSetting { OFF, STANDARD, PREVIEW }
 
 @Serializable
-enum class MicSource(@StringRes val label: Int) {
-    AUTO(R.string.mic_auto),
-    BUILT_IN(R.string.mic_phone),
-    USB(R.string.mic_usb),
-    WIRED(R.string.mic_headset),
-}
-
-@Serializable
 enum class ChatTextSize(@StringRes val label: Int, val sp: Int) {
     SMALL(R.string.size_small, 12),
     MEDIUM(R.string.size_medium, 14),
@@ -93,6 +85,8 @@ enum class QuickButtonId(@StringRes val label: Int) {
     CHAT(R.string.quick_chat),
     RECORD(R.string.quick_record),
     SNAPSHOT(R.string.quick_snapshot),
+    REPLAY(R.string.replay),
+    INSTANT_REPLAY(R.string.quick_instant_replay),
     WIDGETS(R.string.quick_widgets),
     OBS(R.string.quick_obs),
     BROWSER(R.string.quick_browser),
@@ -101,6 +95,7 @@ enum class QuickButtonId(@StringRes val label: Int) {
     MIC(R.string.quick_mic),
     STEALTH(R.string.quick_stealth),
     TORCH(R.string.quick_torch),
+    PREVIEW_STREAM(R.string.quick_preview_stream),
     FILTERS(R.string.filters),
     DRAW(R.string.quick_draw),
     OVERLAYS(R.string.quick_overlays),
@@ -126,6 +121,30 @@ data class ObsSettings(
     val stopStream: Boolean = false,
     val startRecording: Boolean = false,
     val stopRecording: Boolean = false,
+)
+
+@Serializable
+data class Destination(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String = "Destination",
+    val url: String = "rtmp://",
+    val streamKey: String = "",
+    val enabled: Boolean = true,
+)
+
+@Serializable
+data class ReplaySettings(
+    val enabled: Boolean = false,
+    val seconds: Int = 20,
+    val delaySeconds: Int = 3,
+)
+
+@Serializable
+data class PreviewStreamSettings(
+    val url: String = "",
+    val token: String = "",
+    val resolution: Resolution = Resolution.R480,
+    val bitrateKbps: Int = 500,
 )
 
 val RECORDING_CODECS = listOf(VideoCodec.HEVC, VideoCodec.H264, VideoCodec.AV1)
@@ -492,8 +511,12 @@ data class StreamProfile(
     val youtubeChannel: String = "",
     val srtLatencyMs: Int = 3000,
     val bondingNetworks: Set<LinkType> = BONDING_NETWORKS,
+    val ristBonding: Boolean = false,
     val recording: RecordingSettings = RecordingSettings(),
     val obs: ObsSettings = ObsSettings(),
+    val destinations: List<Destination> = emptyList(),
+    val replay: ReplaySettings = ReplaySettings(),
+    val previewStream: PreviewStreamSettings = PreviewStreamSettings(),
 )
 
 @Serializable
@@ -515,7 +538,8 @@ data class AppSettings(
     val chatBot: Boolean = false,
     val chatBotPermissions: Map<BotCommand, BotPermissionSettings> = emptyMap(),
     val mirrorFrontCameraOnStream: Boolean = false,
-    val mic: MicSource = MicSource.AUTO,
+    val micKey: String? = null,
+    val replaySpeedPercent: Int = 100,
     val hiddenStatusItems: Set<StatusItem> = emptySet(),
     val hiddenQuickButtons: Set<QuickButtonId> = emptySet(),
     val fixedLensCameras: Set<String> = emptySet(),
@@ -556,11 +580,42 @@ val fpsChoices = listOf(25, 30, 50, 60)
 
 val BONDING_NETWORKS = setOf(LinkType.WIFI, LinkType.CELLULAR, LinkType.ETHERNET)
 
+enum class Transport(val label: String, val bonded: Boolean = false) {
+    RTMP("RTMP"),
+    SRT("SRT"),
+    SRTLA("SRTLA", true),
+    RIST("RIST"),
+    WHIP("WHIP"),
+}
+
+fun transportOf(url: String): Transport? {
+    val scheme = url.trim().substringBefore("://", "").lowercase()
+    return when (scheme) {
+        "rtmp", "rtmps" -> Transport.RTMP
+        "srt" -> Transport.SRT
+        "srtla" -> Transport.SRTLA
+        "rist" -> Transport.RIST
+        "whip", "whips" -> Transport.WHIP
+        else -> null
+    }
+}
+
+val StreamProfile.transport: Transport? get() = transportOf(url)
+
+val StreamProfile.bonded: Boolean get() = transport == Transport.SRTLA || transport == Transport.RIST && ristBonding
+
 fun streamUrl(profile: StreamProfile): String {
     val url = profile.url.trim()
-    if (!url.startsWith("srt") || Regex("[?&]latency=").containsMatchIn(url)) return url
+    val transport = transportOf(url)
+    if (transport != Transport.SRT && transport != Transport.SRTLA || Regex("[?&]latency=").containsMatchIn(url)) return url
     return url + (if ('?' in url) "&" else "?") + "latency=${profile.srtLatencyMs}"
 }
 
 val StreamProfile.allowedCodecs: List<VideoCodec>
-    get() = if (url.startsWith("srt")) platform.codecs - VideoCodec.AV1 else platform.codecs
+    get() = if (transport == null || transport == Transport.RTMP) platform.codecs else platform.codecs - VideoCodec.AV1
+
+val REPLAY_SECONDS = listOf(10, 20, 30, 60)
+
+val REPLAY_SPEEDS = listOf(100, 50)
+
+val PREVIEW_RESOLUTIONS = listOf(Resolution.R720, Resolution.R540, Resolution.R480)

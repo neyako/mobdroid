@@ -73,6 +73,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.opirl.app.settings.SettingsStore
+import com.opirl.app.settings.Transport
+import com.opirl.app.settings.transportOf
 import com.opirl.app.stream.LiveState
 import com.opirl.app.stream.StreamEngine
 import com.opirl.app.stream.outputSize
@@ -148,7 +150,11 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
     val pendingLink by engine.pendingLink.collectAsStateWithLifecycle()
     var confirmStop by remember { mutableStateOf(false) }
     var confirmRecordStop by remember { mutableStateOf(false) }
-    val busy = ui.live != LiveState.OFFLINE || recording != null
+    val replay by engine.replay.collectAsStateWithLifecycle()
+    val replayPanel = remember { ReplayPanel() }
+    val replayOpen = replayPanel.open && profile.replay.enabled
+    val monitoring by engine.monitoring.collectAsStateWithLifecycle()
+    val busy = ui.live != LiveState.OFFLINE || recording != null || monitoring
     val (outW, outH) = outputSize(profile)
     val aspect = outW.toFloat() / outH
     val onLive = {
@@ -170,6 +176,12 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
         widgetsOpen = side == Side.WIDGETS && !panelHidden,
         obsOpen = side == Side.OBS && !panelHidden,
         browserOpen = side == Side.BROWSER && !panelHidden,
+        replay = replay.takeIf { profile.replay.enabled },
+        replayOpen = replayOpen,
+        monitoring = monitoring.takeIf { transportOf(profile.previewStream.url) == Transport.WHIP },
+        onReplay = { replayPanel.open = !replayOpen },
+        onInstantReplay = engine::instantReplay,
+        onMonitor = engine::toggleMonitor,
         remote = appSettings.remoteControl.assistant,
         remoteOpen = side == Side.REMOTE && !panelHidden,
         filters = (side == Side.FILTERS && !panelHidden) || appSettings.effects.filters.isNotEmpty() ||
@@ -259,15 +271,19 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
             Preview(engine, ui, 16.dp, access, draw) { flash.value }
             statusView(false, Modifier.align(Alignment.TopEnd).padding(12.dp).padding(top = statusInset))
             floatingButtons(Modifier.align(Alignment.TopEnd).padding(8.dp))
-            CameraControls(
-                ui,
-                appSettings.scenes,
-                appSettings.selectedScene,
-                video,
-                engine,
-                draw,
-                Modifier.align(Alignment.BottomEnd).padding(10.dp),
-            )
+            if (replayOpen) {
+                ReplayOverlay(engine, settings, replayPanel, aspect, Modifier.matchParentSize())
+            } else {
+                CameraControls(
+                    ui,
+                    appSettings.scenes,
+                    appSettings.selectedScene,
+                    video,
+                    engine,
+                    draw,
+                    Modifier.align(Alignment.BottomEnd).padding(10.dp),
+                )
+            }
         }
     }
     val enter = fadeIn(motion.defaultEffectsSpec())
@@ -385,7 +401,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                     Box(Modifier.fillMaxWidth().height(previewHeight), contentAlignment = Alignment.Center) {
                         Box(Modifier.size(previewHeight * aspect, previewHeight)) {
                             Preview(engine, ui, 14.dp, access, draw) { flash.value }
-                            if (appSettings.chatOnPreview && showOverlays) {
+                            if (appSettings.chatOnPreview && showOverlays && !replayOpen) {
                                 ChatOverlay(
                                     engine,
                                     appSettings.chatTextSize.sp - 1,
@@ -395,23 +411,33 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                             }
                             floatingButtons(Modifier.align(Alignment.TopEnd).padding(6.dp))
                         }
-                        Row(
-                            Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            if (draw != null) {
-                                DrawStrip(draw, engine, Modifier)
-                            } else {
-                                AnimatedContent(
-                                    video,
-                                    if (video != null) Modifier.weight(1f) else Modifier,
-                                    transitionSpec = { through },
-                                    label = "source",
-                                ) { player ->
-                                    if (player != null) VideoStrip(player, Modifier.fillMaxWidth()) else ZoomStops(ui, engine::setZoom)
+                        if (replayOpen) {
+                            ReplayOverlay(
+                                engine,
+                                settings,
+                                replayPanel,
+                                aspect,
+                                Modifier.size(maxOf(previewHeight * aspect, minOf(maxWidth, 300.dp)), previewHeight),
+                            )
+                        } else {
+                            Row(
+                                Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                if (draw != null) {
+                                    DrawStrip(draw, engine, Modifier)
+                                } else {
+                                    AnimatedContent(
+                                        video,
+                                        if (video != null) Modifier.weight(1f) else Modifier,
+                                        transitionSpec = { through },
+                                        label = "source",
+                                    ) { player ->
+                                        if (player != null) VideoStrip(player, Modifier.fillMaxWidth()) else ZoomStops(ui, engine::setZoom)
+                                    }
+                                    Spacer(Modifier.width(8.dp))
+                                    SceneSwitch(appSettings.scenes, appSettings.selectedScene, engine::selectScene, Modifier.weight(1f, fill = false))
                                 }
-                                Spacer(Modifier.width(8.dp))
-                                SceneSwitch(appSettings.scenes, appSettings.selectedScene, engine::selectScene, Modifier.weight(1f, fill = false))
                             }
                         }
                     }
@@ -451,7 +477,9 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                                 Preview(engine, ui, 16.dp, access, draw) { flash.value }
                                 statusView(false, Modifier.align(Alignment.TopEnd).padding(12.dp).padding(top = statusInset))
                                 floatingButtons(Modifier.align(Alignment.TopEnd).padding(8.dp))
-                                if (!below) {
+                                if (replayOpen) {
+                                    ReplayOverlay(engine, settings, replayPanel, aspect, Modifier.matchParentSize())
+                                } else if (!below) {
                                     CameraControls(
                                         ui,
                                         appSettings.scenes,
@@ -463,7 +491,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                                     )
                                 }
                             }
-                            if (below) {
+                            if (below && !replayOpen) {
                                 CameraControls(
                                     ui,
                                     appSettings.scenes,

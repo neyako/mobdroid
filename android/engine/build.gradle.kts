@@ -17,6 +17,8 @@ dependencies {
     api(libs.kotlinx.coroutines.core)
     api(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.bouncycastle.prov)
+    implementation(libs.bouncycastle.tls)
 
     testImplementation(kotlin("test"))
     testImplementation(libs.okhttp.mockwebserver)

@@ -25,7 +25,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-data class Recording(val uri: Uri, val name: String, val durationMs: Long, val bytes: Long)
+data class Recording(val uri: Uri, val name: String, val durationMs: Long, val bytes: Long) {
+    val isReplay: Boolean get() = name.startsWith(REPLAY_LABEL)
+}
+
+private const val REPLAY_LABEL = "Replay "
 
 class RecordingFile(val uri: Uri, private val descriptor: ParcelFileDescriptor) : Closeable {
     val input: FileChannel = FileInputStream(descriptor.fileDescriptor).channel
@@ -46,8 +50,8 @@ class RecordingStore(private val context: Context) {
     private val _recordings = MutableStateFlow<List<Recording>>(emptyList())
     val recordings: StateFlow<List<Recording>> = _recordings.asStateFlow()
 
-    fun create(): RecordingFile {
-        val uri = insert(videos, "mp4", "video/mp4", Environment.DIRECTORY_MOVIES)
+    fun create(replay: Boolean = false): RecordingFile {
+        val uri = insert(videos, "mp4", "video/mp4", Environment.DIRECTORY_MOVIES, if (replay) REPLAY_LABEL else "")
         val descriptor = try {
             resolver.openFileDescriptor(uri, "rw") ?: throw IOException("Storage unavailable")
         } catch (e: Exception) {
@@ -112,8 +116,8 @@ class RecordingStore(private val context: Context) {
     fun freeBytes(): Long = runCatching { StatFs(Environment.getExternalStorageDirectory().path).availableBytes }
         .getOrDefault(Long.MAX_VALUE)
 
-    private fun insert(collection: Uri, extension: String, mime: String, directory: String): Uri {
-        val name = "opIRL ${SimpleDateFormat("yyyy-MM-dd HH.mm.ss", Locale.US).format(Date())}.$extension"
+    private fun insert(collection: Uri, extension: String, mime: String, directory: String, label: String = ""): Uri {
+        val name = "opIRL $label${SimpleDateFormat("yyyy-MM-dd HH.mm.ss", Locale.US).format(Date())}.$extension"
         return resolver.insert(
             collection,
             ContentValues().apply {

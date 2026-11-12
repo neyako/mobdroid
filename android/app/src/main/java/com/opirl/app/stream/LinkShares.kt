@@ -1,11 +1,11 @@
 package com.opirl.app.stream
 
 import com.opirl.app.engine.net.LinkType
-import com.opirl.app.engine.srtla.SrtlaLinkStats
+import com.opirl.app.engine.net.LinkUsage
 
 data class LinkShare(val name: String, val percent: Int, val rttMs: Int = 0)
 
-fun linkShares(previous: Map<String, Long>, links: List<SrtlaLinkStats>): List<LinkShare> {
+fun linkShares(previous: Map<String, Long>, links: List<LinkUsage>): List<LinkShare> {
     val sent = links.map { maxOf(it.bytesSent - (previous[it.id] ?: 0), 0) }
     val total = sent.sum()
     if (total == 0L) return emptyList()

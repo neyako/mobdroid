@@ -61,7 +61,7 @@ class MediaTeeTest {
     fun aStreamAttachedWhileRecordingGetsTheFormatsBeforeItsFirstFrame() {
         val tee = runningTee()
         val stream = Sink()
-        tee.setStream(stream)
+        tee.setStreams(listOf(stream))
         tee.writeOneOfEach()
         assertEquals(listOf("video format", "audio format", "video", "audio"), stream.calls)
     }

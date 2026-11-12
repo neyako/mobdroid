@@ -4,6 +4,8 @@ import com.opirl.app.engine.media.AudioFormat
 import com.opirl.app.engine.media.EncodedFrame
 import com.opirl.app.engine.media.MediaSink
 import com.opirl.app.engine.media.VideoFormat
+import com.opirl.app.engine.net.BondedPublisher
+import com.opirl.app.engine.net.LinkUsage
 import com.opirl.app.engine.net.NetworkLinkProvider
 import com.opirl.app.engine.net.Publisher
 import com.opirl.app.engine.net.PublisherListener
@@ -52,7 +54,7 @@ class SrtPublisher internal constructor(
     private val options: SrtOptions,
     private val environment: SrtEnvironment,
     private val onServer: ((InetSocketAddress) -> Unit)? = null,
-) : Publisher, SrtSessionListener {
+) : Publisher, BondedPublisher, SrtSessionListener {
     constructor(
         url: String,
         listener: PublisherListener,
@@ -127,6 +129,8 @@ class SrtPublisher internal constructor(
 
     fun linkStats(): List<SrtlaLinkStats> =
         (session?.transport as? SrtlaClient)?.linkStats() ?: emptyList()
+
+    override fun linkUsage(): List<LinkUsage> = linkStats().map { LinkUsage(it.id, it.name, it.type, it.bytesSent, it.rttMs) }
 
     fun setLinkPriorities(newPriorities: SrtlaPriorities) {
         priorities = newPriorities

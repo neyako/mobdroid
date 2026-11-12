@@ -104,7 +104,7 @@ class WebServer(private val port: Int, private val handler: WebServerHandler, pr
         val current = server ?: return
         server = null
         runCatching { current.close() }
-        connections.toList().forEach { it.terminate() }
+        connections.forEach { it.terminate() }
     }
 
     private fun thread(name: String, block: () -> Unit) = Thread(block, name).apply {

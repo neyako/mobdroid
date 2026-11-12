@@ -91,6 +91,7 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
     private var previewSurface: EGLSurface? = null
     private var encoderSurface: EGLSurface? = null
     private var recorderSurface: EGLSurface? = null
+    private var monitorSurface: EGLSurface? = null
     private var snapshot: ((Bitmap?) -> Unit)? = null
     private var thumbnail: ((Bitmap?) -> Unit)? = null
     private var thumbnailWidth = 0
@@ -213,6 +214,12 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         nextEncodeNs = 0
     }
 
+    fun setMonitor(surface: Surface?) = runBlockingOnThread {
+        monitorSurface?.let { egl.makeNothingCurrent(); egl.releaseSurface(it) }
+        monitorSurface = surface?.let { egl.createWindowSurface(it) }
+        nextEncodeNs = 0
+    }
+
     fun setEffects(settings: EffectSettings) = handler.post {
         if (released) return@post
         egl.makeNothingCurrent()
@@ -314,6 +321,8 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
             previewSurface?.let { egl.releaseSurface(it) }
             encoderSurface?.let { egl.releaseSurface(it) }
             recorderSurface?.let { egl.releaseSurface(it) }
+            monitorSurface?.let { egl.releaseSurface(it) }
+            monitorSurface = null
             previewSurface = null
             encoderSurface = null
             recorderSurface = null
@@ -398,9 +407,10 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         } else {
             effects.idle()
         }
-        if ((encoderSurface != null || recorderSurface != null) && shouldEncode(ts)) {
-            encoderSurface?.let { encode(it, processed, ts) }
-            recorderSurface?.let { encode(it, processed, ts) }
+        if ((encoderSurface != null || recorderSurface != null || monitorSurface != null) && shouldEncode(ts)) {
+            encoderSurface?.let { encode(it, processed, ts, outputWidth, outputHeight) }
+            recorderSurface?.let { encode(it, processed, ts, outputWidth, outputHeight) }
+            monitorSurface?.let { encode(it, processed, ts, egl.surfaceWidth(it), egl.surfaceHeight(it)) }
         }
         snapshot?.let {
             snapshot = null
@@ -432,9 +442,9 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         Matrix.translateM(horizonMatrix, 0, -0.5f, -0.5f, 0f)
     }
 
-    private fun encode(surface: EGLSurface, processed: Boolean, ts: Long) {
+    private fun encode(surface: EGLSurface, processed: Boolean, ts: Long, width: Int, height: Int) {
         if (!egl.makeCurrent(surface)) return
-        GLES20.glViewport(0, 0, outputWidth, outputHeight)
+        GLES20.glViewport(0, 0, width, height)
         if (processed) effects.blit(false) else draw(streamScene)
         drawOverlays(preview = false)
         egl.setPresentationTime(surface, ts)

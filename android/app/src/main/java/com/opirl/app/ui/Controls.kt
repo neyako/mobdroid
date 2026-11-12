@@ -48,6 +48,9 @@ import androidx.compose.material.icons.rounded.BatteryAlert
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Brush
 import androidx.compose.material.icons.rounded.Dashboard
+import androidx.compose.material.icons.rounded.CastConnected
+import androidx.compose.material.icons.rounded.Replay
+import androidx.compose.material.icons.rounded.SlowMotionVideo
 import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Visibility
@@ -140,6 +143,7 @@ import androidx.compose.material.icons.rounded.SettingsRemote
 import com.opirl.app.stream.LiveState
 import com.opirl.app.stream.LiveStats
 import com.opirl.app.stream.RecordingStats
+import com.opirl.app.stream.ReplayState
 import com.opirl.app.stream.formatBytes
 import com.opirl.app.stream.StreamEngine
 import com.opirl.app.stream.UiState
@@ -174,6 +178,12 @@ fun quickButtons(
     widgetsOpen: Boolean,
     obsOpen: Boolean,
     browserOpen: Boolean,
+    replay: ReplayState?,
+    replayOpen: Boolean,
+    monitoring: Boolean?,
+    onReplay: () -> Unit,
+    onInstantReplay: () -> Unit,
+    onMonitor: () -> Unit,
     remote: Boolean,
     remoteOpen: Boolean,
     filters: Boolean,
@@ -208,6 +218,16 @@ fun quickButtons(
             onRecord,
         )
         QuickButtonId.SNAPSHOT -> QuickButton(id.label, Icons.Rounded.PhotoCamera, false, onClick = onSnapshot)
+        QuickButtonId.REPLAY -> replay?.let { QuickButton(id.label, Icons.Rounded.SlowMotionVideo, replayOpen, onClick = onReplay) }
+        QuickButtonId.INSTANT_REPLAY -> replay?.let {
+            QuickButton(
+                if (it == ReplayState.PLAYING) R.string.stop else id.label,
+                if (it == ReplayState.PLAYING) Icons.Rounded.Stop else Icons.Rounded.Replay,
+                it != ReplayState.IDLE,
+                onClick = onInstantReplay,
+            )
+        }
+        QuickButtonId.PREVIEW_STREAM -> monitoring?.let { QuickButton(id.label, Icons.Rounded.CastConnected, it, onClick = onMonitor) }
         QuickButtonId.WIDGETS -> QuickButton(id.label, Icons.Rounded.Widgets, widgetsOpen, onClick = onWidgets)
         QuickButtonId.OBS -> QuickButton(id.label, ObsLogo, obsOpen, onClick = onObs)
         QuickButtonId.BROWSER -> QuickButton(id.label, Icons.Rounded.Language, browserOpen, onClick = onBrowser)
@@ -710,6 +730,7 @@ internal fun <T> Segments(
     label: (T) -> String,
     fill: Boolean = false,
     container: Color = Color.Black.copy(alpha = 0.55f),
+    small: Boolean = false,
     onSelect: (T) -> Unit,
 ) {
     val haptics = LocalHapticFeedback.current
@@ -727,12 +748,17 @@ internal fun <T> Segments(
                     else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
                 },
                 colors = ToggleButtonDefaults.colors(containerColor = container, contentColor = Color.White),
-                contentPadding = PaddingValues(horizontal = if (fill) 4.dp else 12.dp),
-                modifier = if (fill) Modifier.height(36.dp).weight(1f) else Modifier.height(36.dp).widthIn(min = 46.dp, max = 132.dp),
+                contentPadding = PaddingValues(horizontal = if (fill) 4.dp else if (small) 8.dp else 12.dp),
+                modifier = when {
+                    fill -> Modifier.height(36.dp).weight(1f)
+                    small -> Modifier.height(28.dp).widthIn(min = 36.dp)
+                    else -> Modifier.height(36.dp).widthIn(min = 46.dp, max = 132.dp)
+                },
             ) {
                 Text(
                     label(value),
-                    style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
+                    style = (if (small) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge)
+                        .copy(fontFeatureSettings = "tnum"),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -752,7 +778,7 @@ fun ZoomStops(ui: UiState, onZoom: (Float) -> Unit) {
 @Composable
 fun SceneSwitch(scenes: List<Scene>, scene: Scene?, onSelect: (String) -> Unit, modifier: Modifier) {
     if (scenes.size < 2) return
-    Segments(scenes, scene, modifier.horizontalScroll(rememberScrollState()), { it.name }) {
+    Segments(scenes, scene, modifier.horizontalScroll(rememberScrollState()), label = { it.name }) {
         if (it.id != scene?.id) onSelect(it.id)
     }
 }

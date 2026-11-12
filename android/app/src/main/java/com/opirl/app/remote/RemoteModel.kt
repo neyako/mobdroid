@@ -15,7 +15,6 @@ import com.opirl.app.engine.remote.RemoteStatusTopRight
 import com.opirl.app.engine.remote.RemoteZoomCamera
 import com.opirl.app.engine.remote.RemoteZoomPreset
 import com.opirl.app.settings.AppSettings
-import com.opirl.app.settings.MicSource
 import com.opirl.app.stream.LiveState
 import com.opirl.app.stream.LiveStats
 import com.opirl.app.stream.RecordingStats
@@ -32,11 +31,13 @@ fun zoomPresetId(ratio: Float): String = UUID.nameUUIDFromBytes("zoom-$ratio".to
 
 private fun zoomPresets(camera: CameraDescriptor?) = camera?.lensZoomStops.orEmpty().map { RemoteZoomPreset(zoomPresetId(it), formatZoom(it), it) }
 
-fun remoteSettings(settings: AppSettings, cameras: List<CameraDescriptor>, micName: (MicSource) -> String) = RemoteSettings(
+const val REMOTE_MIC_AUTO = "AUTO"
+
+fun remoteSettings(settings: AppSettings, cameras: List<CameraDescriptor>, autoMic: String, mics: List<Pair<String, String>>) = RemoteSettings(
     streams = settings.profiles.map { RemoteNamed(it.id, it.name) },
     scenes = settings.scenes.map { RemoteNamed(it.id, it.name) },
     bitratePresets = settings.bitratePresetsKbps.map { RemoteBitratePreset(bitratePresetId(it), it * 1000L) },
-    mics = MicSource.entries.map { RemoteNamed(it.name, micName(it)) },
+    mics = listOf(RemoteNamed(REMOTE_MIC_AUTO, autoMic)) + mics.map { (key, name) -> RemoteNamed(key, name) },
     zoomFront = zoomPresets(cameras.firstOrNull { it.facing == Facing.FRONT }),
     zoomBack = zoomPresets(cameras.firstOrNull { it.facing == Facing.BACK }),
 )
@@ -46,7 +47,7 @@ fun remoteState(settings: AppSettings, ui: UiState, recording: Boolean): RemoteS
     val stops = camera?.lensZoomStops.orEmpty()
     return RemoteState(
         scene = settings.selectedScene?.id,
-        mic = settings.mic.name,
+        mic = settings.micKey ?: REMOTE_MIC_AUTO,
         bitrate = settings.selectedProfile.bitrateKbps.takeIf { it in settings.bitratePresetsKbps }?.let(::bitratePresetId),
         zoom = ui.zoom,
         zoomPreset = stops.firstOrNull { kotlin.math.abs(it - ui.zoom) < 0.01f }?.let(::zoomPresetId),
