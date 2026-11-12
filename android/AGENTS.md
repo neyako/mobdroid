@@ -10,7 +10,9 @@ them, not code style.
   muxers, transports, adaptive bitrate, chat clients, the OBS remote.
   - `media/` — `VideoFormat`, `AudioFormat`, `EncodedFrame`, `MediaSink`.
   - `net/` — `Publisher` (one-shot ingest connection), `NetworkLink`/`NetworkLinkProvider` (sockets
-    pinned to an interface, used by SRTLA bonding).
+    pinned to an interface, used by SRTLA bonding), `WebServer` (HTTP and WebSocket server).
+  - `moblink/` — Moblink streamer and relay. `remote/` — remote control protocol, streamer, assistant,
+    web remote and relay bridge. `json/` — helpers for JSON trees.
   - `flv/`, `rtmp/` — FLV tags and the RTMP/RTMPS publisher. HEVC and AV1 use Enhanced RTMP.
   - `ts/` — MPEG-TS muxer (H264, HEVC, AV1, AAC).
   - `mp4/` — the recorder: a crash-safe MP4 writer and the function that finishes or recovers a file.
@@ -372,7 +374,7 @@ them, not code style.
   rest moves over it. The control bar's width and the quick buttons' positions follow one spring
   (`QuickButtonGrid` places each button between its place in the wide and the two column layout), read in
   the layout phase only, while the panel slides out from behind the bar or fades away over the preview.
-- Panels (settings, chat, widgets, OBS, browser) sit between the preview and the control bar on wide screens (350 dp, Moblin's
+- Panels (settings, chat, widgets, OBS, browser, remote) sit between the preview and the control bar on wide screens (350 dp, Moblin's
   `settingsHalfWidth`) and fill the screen on near-square ones. Their header is 44 dp with `PanelButtons`:
   hide and close, extra small filled icon buttons with the expressive shape morph. They are 32 dp with
   16 dp between them, so their 48 dp touch targets do not overlap. Hide takes the panel off the screen and
@@ -401,6 +403,13 @@ them, not code style.
   state. Stopping an output takes a second tap within 3 seconds. A stream without OBS set up gets the URL
   and password fields in the panel; an unreachable OBS shows why and a link to Streams, the stream, OBS
   remote. The OBS status item (scene, live, rec, or offline) shows while OBS is enabled for the stream.
+- The Remote quick button shows while the remote control assistant is on and opens the Remote panel
+  (`ui/Remote.kt`): the streamer's picture with its uptime, bitrate, bonding shares and battery (coloured
+  by the streamer's flame) over it and its zoom presets in the bottom right, then Go Live or End, record,
+  mute, torch and stealth, then the scenes and the bitrate presets. End and stopping a recording take a
+  second tap within 3 seconds. The status texts are the streamer's own (`uptime`, `srtla`), so they read
+  the same for a Moblin streamer. Until a streamer connects the panel shows why, the `ws://` addresses to
+  enter on the streamer, and a link to Remote control, Assistant.
 - The Browser quick button opens a web browser in the panel slot (`ui/Browser.kt`). `BrowserState` in
   `MainScreen` owns the one `WebView`, created at the first load: it lives while the browser is the
   selected panel, shown or hidden, so a hidden page keeps running, and is destroyed when the panel is closed
@@ -414,6 +423,10 @@ them, not code style.
   The system back button goes back in the page's history before it closes the panel. Bookmarks
   (`AppSettings.bookmarks`) are listed where the page would be until one is loaded, and on their own page
   with "Add this page"; the page's sound plays on the phone and is not in the stream.
+- Settings, Remote control, Moblink, Game controller, Keyboard and Stream Deck follow Moblin's pages. A
+  function is chosen on its own page (`Route.ActionPage`) because there are too many for a choice row.
+  The Moblink and Remote control status items show while the feature is on: an icon, and its text on wide
+  layouts.
 - The Record quick button asks for a second tap to stop, like the End button. The recording time and size
   are a status item. Recording settings are per stream (Streams, a stream, Recording); the recordings list
   is Settings, Recordings.
@@ -462,6 +475,107 @@ every new bundled library or asset.
 Engine tests that talk to a real server use the system `ffmpeg`/`ffprobe` as the receiver and are
 skipped when they are missing. The SRTLA end-to-end tests also need `SRTLA_REC` pointing at a built
 `srtla_rec` from https://github.com/BELABOX/srtla.
+
+## Connections
+
+Moblink, remote control and the web remote speak Moblin's protocols, so opIRL and Moblin work with each
+other. Messages are Swift's Codable JSON: an enum case is an object with one key (`{"setLive":{"on":true}}`,
+`{"ok":{}}`), and an optional that is nil is left out. The password proof is `hashPassword` (the same
+formula as OBS). Codecs read and write `JsonElement` trees; a test pins each side against literal Moblin
+JSON.
+
+- `net/WebServer(port, handler)`: blocking sockets, one reader and one writer thread per connection, at most
+  32 connections. A request with `Upgrade: websocket` becomes a `WebSocketConnection`, anything else goes to
+  `onHttp` and the connection closes. `send` queues (128 frames) and never blocks; a full queue ends the
+  connection. `close()` sends what is queued first; a second `close()` or `stop()` cuts it. Handler calls
+  come from the connection's reader thread. A stopped server never binds again: `start()` after `stop()`
+  does nothing, so a bind that is still running when its owner stops cannot leave a listener behind.
+  The Moblink streamer, the Moblink relay (its streamers come from mDNS, so they are not chosen by the
+  user) and the remote control assistant handle each message on their executor before the connection
+  reads the next one (`deliver`), which bounds what a connection can queue.
+- Use `String(bytes, charset)` in the engine, never `ByteArrayOutputStream.toString(Charset)`: that one is
+  API 33 and the engine is not covered by Android lint.
+- Everything in `StreamEngine.syncConnections` (Moblink streamer, remote control, web remote, Stream Deck)
+  runs while the preview runs or the app is live or recording, like the OBS client, and is rebuilt when its
+  settings change (500 ms debounce). The Moblink relay is the exception: once started it runs until it is
+  turned off, with the foreground service holding it (`connectedDevice` type only, title "Moblink relay").
+- On Android 17 an app that targets API 37 needs the runtime permission `ACCESS_LOCAL_NETWORK` for any
+  traffic on the local network. The Remote control, Moblink and OBS pages show an Allow row while it is
+  missing (`LocalNetworkAccess`); granting it calls `StreamEngine.restartConnections`.
+
+### Moblink
+
+- Streamer (`MoblinkStreamer`, `moblink/MoblinkController`): a WebSocket server on the Moblink port,
+  advertised with `NsdManager` as `_moblink._tcp`, service name the device's id, TXT `name` the device name.
+  Each relay gets `hello`, answers `identify`, and is asked for its status every 5 s; a relay that does not
+  answer a ping is dropped. While live over SRTLA, `SrtPublisher`'s `onServer` hands the resolved server
+  address to `startTunnels`; each relay answers with a UDP port, and that tunnel becomes a `NetworkLink`
+  with `destination` set to the relay's address. `SrtlaLink` connects to `destination` when a link has one,
+  to the server otherwise. `StreamEngine.streamLinks` is the phone's own links plus the tunnels. The tunnel
+  socket is bound to the network the relay's connection came in on, and left unbound when that is no
+  Android network (the phone's own hotspot).
+- Relay (`MoblinkRelay`): one per streamer URL and per cellular or Ethernet network of this phone. The
+  WebSocket and the socket facing the streamer go over Wi-Fi, the socket facing the server over the mobile
+  network, and the server name is resolved on that network too. Streamers come from mDNS discovery, or from
+  the one URL in manual mode. Two threads forward packets with one reused buffer each. The relay's id and
+  name are generated once (`AppSettings.withIdentity`) and kept.
+- The status item shows each relay's name, battery and a flame when it is hot, then the relay state.
+
+### Remote control
+
+- `RemoteControlTarget` is the phone as seen by a controller: `status()`, `settings()`, `state()` and
+  `handle(request)`. `StreamEngine.remoteTarget` implements it with the pure functions in
+  `remote/RemoteModel.kt`. A request Moblin has and opIRL does not (filters, gimbal, scoreboard, macros, SRT
+  priorities) is `RemoteRequest.Unknown` and answered `unknownRequest`; a known one that cannot be done now
+  (another stream while live, an unknown scene) is answered `error`.
+- Ids on the wire are UUIDs. Scenes and streams have one; a bitrate preset's and a zoom stop's are derived
+  from its value (`bitratePresetId`, `zoomPresetId`), a mic's is its `MicSource` name.
+- `RemoteControlStreamer` connects out to the assistant's URL (direct, or a relay's `/streamer/<bridge id>`),
+  retries every 5 s, pings every 30 s and reconnects without a pong. `RemoteControlWeb` serves the pages
+  built from `WebRemoteControlFrontend/` (copied into the APK's assets at build time by `copyWebRemote`, so
+  never committed twice) on its port and WebSockets on that port and the next one, which is the one
+  `/js/config.mjs` names, as in Moblin. The web remote has no password, as in Moblin. Ports under 1024
+  cannot be bound on Android, so the default is 8080.
+- State goes out as changes only (`RemoteState.changesFrom`). The preview is a 640 px JPEG once a second
+  from `VideoCompositor.takeThumbnail`, rendered at that size, and only while a controller asked for it.
+- `RemoteControlAssistant` is the other side: a server the streamer connects to, with `state` (the
+  streamer's state, settings and status) and `preview` as `StateFlow`s and `request()` for commands.
+  `RemoteControlBridge` connects it to a relay server so a streamer can reach it from anywhere. Its state
+  changes only from the streamer's events, never optimistically. `setActive(true)` asks for the preview
+  and polls the status every second; the Remote panel turns it on only while it is on screen and the
+  activity is started.
+- Stealth mode is `UiState.stealth`, so a controller can set it.
+
+### Deep links
+
+- `settings/DeepLink.kt`: `moblin://?<URL encoded JSON>`, Moblin's `MoblinSettingsUrl` format.
+  `parseDeepLink` throws `DeepLinkException` with a fixed English message (mapped in `ui/Messages.kt`).
+  Streams, the quick buttons opIRL has, and remote control are applied; the rest is ignored. A resolution or
+  frame rate opIRL does not have is refused. A plus sign is kept as it is, stream keys contain them.
+- The activity takes `moblin://` VIEW intents; `StreamEngine.pendingLink` holds the link until
+  `DeepLinkDialog` has asked. A stream whose name exists is replaced or added beside the old one, the user
+  chooses. Nothing is imported while live or recording.
+- `createDeepLink` writes the same format (Share link on a stream, Share streams under Import and export).
+  An RTMP stream key goes into the URL's last path segment, where Moblin keeps it. AV1 is left out because
+  Moblin refuses a codec it does not know.
+
+### Controllers
+
+- `ControllerAction` (a `ControllerFunction` plus the scene, widget or layout it names) is what a keyboard
+  key, a game controller button and a Stream Deck key are bound to; `StreamEngine.perform(action, pressed)`
+  runs it. Everything acts on release, except zoom in and out, which ramp while held.
+- `control/Controls`: game controller keys are taken in `dispatchKeyEvent`, before Compose can use the D-pad
+  for focus, and only when the button is bound. Triggers and the D-pad also arrive as axes
+  (`dispatchGenericMotionEvent`); a button is down while its key or its axis says so. Keyboard keys are
+  taken in `onKeyDown`/`onKeyUp`, so a focused text field gets them first; a key is its typed character,
+  and Ctrl or Meta combinations are left alone. One mapping serves every controller.
+- `control/StreamDecks`: a userspace HID driver over `UsbManager` for Elgato Stream Decks (vendor 0x0fd9):
+  Mini (6 keys, 80 px BMP), the 15 key models from the second hardware revision on, and XL (72 and 96 px
+  JPEG). The first 15 key model (product 0x0060) speaks an older protocol and is not supported.
+  `StreamDeckProtocol.kt` builds the reports and is unit tested; it follows python-elgato-streamdeck. No
+  Stream Deck has been plugged into it yet, so treat the driver as untested on hardware. Key pictures are
+  the key's text on its colour, sent only when they change. The read loop wakes every 2 s on a timeout;
+  unplugging is noticed through the USB detach broadcast.
 
 ## Stream service
 

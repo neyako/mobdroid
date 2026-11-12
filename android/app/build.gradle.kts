@@ -98,3 +98,31 @@ dependencies {
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
 }
+
+abstract class CopyWebRemote : DefaultTask() {
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val source: DirectoryProperty
+
+    @get:OutputDirectory
+    abstract val output: DirectoryProperty
+
+    @get:Inject
+    abstract val files: FileSystemOperations
+
+    @TaskAction
+    fun copy() {
+        files.sync {
+            from(source)
+            into(output.dir("remote"))
+        }
+    }
+}
+
+val copyWebRemote = tasks.register<CopyWebRemote>("copyWebRemote") {
+    source.set(rootProject.layout.projectDirectory.dir("../Moblin/RemoteControl/Web"))
+}
+
+androidComponents {
+    onVariants { variant -> variant.sources.assets?.addGeneratedSourceDirectory(copyWebRemote, CopyWebRemote::output) }
+}

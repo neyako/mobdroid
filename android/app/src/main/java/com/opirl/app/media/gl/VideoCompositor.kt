@@ -81,6 +81,8 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
     private var encoderSurface: EGLSurface? = null
     private var recorderSurface: EGLSurface? = null
     private var snapshot: ((Bitmap?) -> Unit)? = null
+    private var thumbnail: ((Bitmap?) -> Unit)? = null
+    private var thumbnailWidth = 0
     private var overlayProgram = 0
     private var overlayPos = 0
     private var overlayRect = 0
@@ -253,11 +255,23 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         if (released) onResult(null) else snapshot = onResult
     }
 
+    fun takeThumbnail(width: Int, onResult: (Bitmap?) -> Unit) = handler.post {
+        if (released) {
+            onResult(null)
+        } else {
+            thumbnail?.invoke(null)
+            thumbnail = onResult
+            thumbnailWidth = width
+        }
+    }
+
     fun release() {
         runBlockingOnThread {
             released = true
             snapshot?.invoke(null)
             snapshot = null
+            thumbnail?.invoke(null)
+            thumbnail = null
             previewSurface?.let { egl.releaseSurface(it) }
             encoderSurface?.let { egl.releaseSurface(it) }
             recorderSurface?.let { egl.releaseSurface(it) }
@@ -326,7 +340,12 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         }
         snapshot?.let {
             snapshot = null
-            it(runCatching { capture(streamMatrix) }.getOrNull())
+            it(runCatching { capture(streamMatrix, outputWidth, outputHeight) }.getOrNull())
+        }
+        thumbnail?.let {
+            thumbnail = null
+            val width = minOf(thumbnailWidth, outputWidth)
+            it(runCatching { capture(streamMatrix, width, maxOf(width * outputHeight / outputWidth, 1)) }.getOrNull())
         }
         previewSurface?.let { surface ->
             if (egl.makeCurrent(surface)) {
@@ -347,7 +366,7 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         egl.swap(surface)
     }
 
-    private fun capture(matrix: FloatArray): Bitmap {
+    private fun capture(matrix: FloatArray, width: Int, height: Int): Bitmap {
         egl.makeNothingCurrent()
         val ids = IntArray(2)
         GLES20.glGenTextures(1, ids, 0)
@@ -355,20 +374,20 @@ class VideoCompositor(outputWidth: Int, outputHeight: Int) {
         try {
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, ids[0])
             GLES20.glTexImage2D(
-                GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, outputWidth, outputHeight, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null,
+                GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, width, height, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null,
             )
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, ids[1])
             GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, ids[0], 0)
             check(GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER) == GLES20.GL_FRAMEBUFFER_COMPLETE)
-            GLES20.glViewport(0, 0, outputWidth, outputHeight)
+            GLES20.glViewport(0, 0, width, height)
             draw(matrix)
             drawOverlays(preview = false)
-            val pixels = ByteBuffer.allocateDirect(outputWidth * outputHeight * 4).order(ByteOrder.nativeOrder())
-            GLES20.glReadPixels(0, 0, outputWidth, outputHeight, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixels)
-            val upsideDown = Bitmap.createBitmap(outputWidth, outputHeight, Bitmap.Config.ARGB_8888)
+            val pixels = ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.nativeOrder())
+            GLES20.glReadPixels(0, 0, width, height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixels)
+            val upsideDown = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             upsideDown.copyPixelsFromBuffer(pixels)
             val flip = android.graphics.Matrix().apply { preScale(1f, -1f) }
-            return Bitmap.createBitmap(upsideDown, 0, 0, outputWidth, outputHeight, flip, false).also { upsideDown.recycle() }
+            return Bitmap.createBitmap(upsideDown, 0, 0, width, height, flip, false).also { upsideDown.recycle() }
         } finally {
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
             GLES20.glDeleteFramebuffers(1, ids, 1)

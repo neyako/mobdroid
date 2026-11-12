@@ -41,6 +41,9 @@ fun <T> sceneCamera(
     ?: cameras.firstOrNull(external)
     ?: cameras.firstOrNull { key(it) == sceneKey }
 
+fun nextScene(ids: List<String>, current: String?): String? =
+    if (ids.size < 2) null else ids[(ids.indexOf(current) + 1) % ids.size]
+
 fun defaultPlacement(widget: Widget): SceneWidget = when (widget.type) {
     WidgetType.TEXT -> SceneWidget(widget.id)
     WidgetType.IMAGE -> SceneWidget(widget.id, corner = Corner.TOP_RIGHT, size = 15)

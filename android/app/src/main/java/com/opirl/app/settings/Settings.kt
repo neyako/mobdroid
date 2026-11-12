@@ -57,6 +57,8 @@ enum class StatusItem(@StringRes val label: Int) {
     AUDIO_LEVEL(R.string.status_audio_level),
     RECORDING(R.string.recording),
     OBS(R.string.quick_obs),
+    MOBLINK(R.string.moblink),
+    REMOTE_CONTROL(R.string.remote_control),
 }
 
 @Serializable
@@ -67,6 +69,7 @@ enum class QuickButtonId(@StringRes val label: Int) {
     WIDGETS(R.string.quick_widgets),
     OBS(R.string.quick_obs),
     BROWSER(R.string.quick_browser),
+    REMOTE(R.string.quick_remote),
     BITRATE(R.string.quick_bitrate),
     MIC(R.string.quick_mic),
     STEALTH(R.string.quick_stealth),
@@ -156,6 +159,133 @@ data class Scene(
 }
 
 @Serializable
+enum class ControllerFunction(@StringRes val label: Int) {
+    UNUSED(R.string.function_unused),
+    RECORD(R.string.quick_record),
+    STREAM(R.string.function_stream),
+    ZOOM_IN(R.string.function_zoom_in),
+    ZOOM_OUT(R.string.function_zoom_out),
+    MUTE(R.string.function_mute),
+    TORCH(R.string.quick_torch),
+    STEALTH(R.string.quick_stealth),
+    SCENE(R.string.function_scene),
+    SWITCH_SCENE(R.string.function_switch_scene),
+    WIDGET(R.string.function_widget),
+    SNAPSHOT(R.string.quick_snapshot),
+    STREAM_DECK_LAYOUT(R.string.function_stream_deck_layout),
+}
+
+@Serializable
+data class ControllerAction(
+    val function: ControllerFunction = ControllerFunction.UNUSED,
+    val sceneId: String? = null,
+    val widgetId: String? = null,
+    val layoutId: String? = null,
+)
+
+@Serializable
+data class KeyboardKey(
+    val id: String = UUID.randomUUID().toString(),
+    val key: String = "",
+    val action: ControllerAction = ControllerAction(),
+)
+
+@Serializable
+enum class GamepadButton(val label: String) {
+    A("A"),
+    B("B"),
+    X("X"),
+    Y("Y"),
+    L1("L1"),
+    R1("R1"),
+    L2("L2"),
+    R2("R2"),
+    DPAD_UP("D-pad ↑"),
+    DPAD_DOWN("D-pad ↓"),
+    DPAD_LEFT("D-pad ←"),
+    DPAD_RIGHT("D-pad →"),
+    MENU("Menu"),
+}
+
+@Serializable
+enum class StreamDeckModel(val label: String, val keys: Int, val columns: Int) {
+    MINI("Mini", 6, 3),
+    CLASSIC("Classic", 15, 5),
+    XL("XL", 32, 8),
+}
+
+const val STREAM_DECK_KEYS = 32
+
+@Serializable
+data class StreamDeckKey(val text: String = "", val color: Int = 0, val action: ControllerAction = ControllerAction())
+
+@Serializable
+data class StreamDeckLayout(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String = "Layout",
+    val model: StreamDeckModel = StreamDeckModel.CLASSIC,
+    val keys: List<StreamDeckKey> = List(STREAM_DECK_KEYS) { StreamDeckKey() },
+) {
+    fun key(index: Int): StreamDeckKey = keys.getOrNull(index) ?: StreamDeckKey()
+
+    fun withKey(index: Int, key: StreamDeckKey): StreamDeckLayout =
+        copy(keys = List(STREAM_DECK_KEYS) { if (it == index) key else key(it) })
+}
+
+@Serializable
+data class MoblinkSettings(
+    val password: String = "1234",
+    val streamer: Boolean = false,
+    val streamerPort: Int = 7777,
+    val relay: Boolean = false,
+    val relayName: String = "",
+    val relayId: String = "",
+    val relayManual: Boolean = false,
+    val relayUrl: String = "",
+)
+
+@Serializable
+data class RemoteControlSettings(
+    val password: String = "",
+    val streamerId: String = "",
+    val streamer: Boolean = false,
+    val streamerUrl: String = "",
+    val assistant: Boolean = false,
+    val assistantPort: Int = 2345,
+    val relay: Boolean = false,
+    val relayUrl: String = "wss://moblin.mys-lang.org/moblin-remote-control-relay",
+    val bridgeId: String = "",
+    val web: Boolean = false,
+    val webPort: Int = 8080,
+)
+
+val RELAY_NAMES = listOf("Black", "Red", "Green", "Yellow", "Blue", "Purple", "Cyan", "White")
+
+fun randomPassword(): String {
+    val bytes = ByteArray(15).also { java.security.SecureRandom().nextBytes(it) }
+    return java.util.Base64.getEncoder().encodeToString(bytes).filter { it.isLetterOrDigit() }
+}
+
+fun AppSettings.withIdentity(): AppSettings {
+    if (moblink.relayId.isNotEmpty() && moblink.relayName.isNotEmpty() && remoteControl.password.isNotEmpty() &&
+        remoteControl.streamerId.isNotEmpty() && remoteControl.bridgeId.isNotEmpty()
+    ) {
+        return this
+    }
+    return copy(
+        moblink = moblink.copy(
+            relayId = moblink.relayId.ifEmpty { UUID.randomUUID().toString() },
+            relayName = moblink.relayName.ifEmpty { RELAY_NAMES.random() },
+        ),
+        remoteControl = remoteControl.copy(
+            password = remoteControl.password.ifEmpty { randomPassword() },
+            streamerId = remoteControl.streamerId.ifEmpty { UUID.randomUUID().toString() },
+            bridgeId = remoteControl.bridgeId.ifEmpty { UUID.randomUUID().toString() },
+        ),
+    )
+}
+
+@Serializable
 data class Bookmark(val id: String = UUID.randomUUID().toString(), val name: String, val url: String)
 
 @Serializable
@@ -207,12 +337,21 @@ data class AppSettings(
     val bookmarks: List<Bookmark> = emptyList(),
     val usbCameraRotation: Int = 0,
     val setupDone: Boolean = false,
+    val moblink: MoblinkSettings = MoblinkSettings(),
+    val remoteControl: RemoteControlSettings = RemoteControlSettings(),
+    val keyboard: List<KeyboardKey> = emptyList(),
+    val gamepad: Map<GamepadButton, ControllerAction> = emptyMap(),
+    val streamDecks: List<StreamDeckLayout> = emptyList(),
+    val selectedStreamDeckId: String? = null,
 ) {
     val selectedProfile: StreamProfile
         get() = profiles.firstOrNull { it.id == selectedProfileId } ?: profiles.first()
 
     val selectedScene: Scene?
         get() = scenes.firstOrNull { it.id == selectedSceneId } ?: scenes.firstOrNull()
+
+    val selectedStreamDeck: StreamDeckLayout?
+        get() = streamDecks.firstOrNull { it.id == selectedStreamDeckId }
 }
 
 fun isValidBitrateKbps(kbps: Int) = kbps in 50..50_000

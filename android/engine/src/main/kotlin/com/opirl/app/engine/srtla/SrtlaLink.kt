@@ -193,7 +193,7 @@ internal class SrtlaLink(
         val created = try {
             networkLink.createDatagramSocket().also {
                 try {
-                    it.connect(server)
+                    it.connect(networkLink.destination ?: server)
                 } catch (error: Exception) {
                     it.close()
                     throw error
