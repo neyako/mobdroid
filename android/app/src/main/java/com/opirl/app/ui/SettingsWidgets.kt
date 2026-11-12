@@ -4,6 +4,17 @@ import androidx.compose.animation.animateContentSize
 import com.opirl.app.R
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -323,6 +334,7 @@ fun TextRow(
     placeholder: String? = null,
     enabled: Boolean = true,
     keyboard: KeyboardType = KeyboardType.Text,
+    singleLine: Boolean = true,
     onChange: (String) -> Unit,
 ) {
     val field = MaterialTheme.colorScheme.surfaceContainerHighest
@@ -332,7 +344,8 @@ fun TextRow(
             onChange,
             label = { Text(title) },
             placeholder = placeholder?.let { { Text(it) } },
-            singleLine = true,
+            singleLine = singleLine,
+            minLines = if (singleLine) 1 else 3,
             enabled = enabled,
             visualTransformation = if (keyboard == KeyboardType.Password) {
                 PasswordVisualTransformation()
@@ -411,4 +424,133 @@ private fun insetShape(shape: Shape, inset: Dp): Shape {
         CornerSize(with(density) { maxOf(corner.toPx(Size.Zero, this).toDp() - inset, 4.dp) })
     }
     return RoundedCornerShape(inner(outer.topStart), inner(outer.topEnd), inner(outer.bottomEnd), inner(outer.bottomStart))
+}
+
+@Composable
+fun Note(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 4.dp),
+    )
+}
+
+@Composable
+fun <T> PickerRow(
+    shapes: ListItemShapes,
+    title: String,
+    values: List<T>,
+    selected: T,
+    label: @Composable (T) -> String,
+    onSelect: (T) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    NavRow(shapes, title, label(selected)) { open = true }
+    if (open) {
+        AlertDialog(
+            onDismissRequest = { open = false },
+            title = { Text(title) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    values.forEach { value ->
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable {
+                                open = false
+                                onSelect(value)
+                            }.padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(value == selected, null, Modifier.padding(10.dp))
+                            Text(label(value), style = RowTitle)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton({ open = false }) { Text(stringResource(R.string.cancel)) } },
+        )
+    }
+}
+
+val COLOR_PRESETS = listOf(
+    0xFFFFFFFF, 0xFF000000, 0xFF8E8E93, 0xFFFF3B30, 0xFFFF9500, 0xFFFFCC00, 0xFF34C759, 0xFF00C7BE,
+    0xFF32ADE6, 0xFF007AFF, 0xFF5856D6, 0xFFAF52DE, 0xFFFF2D55, 0xFFA2845E,
+).map { it.toInt() }
+
+fun colorHex(color: Int): String = "%08X".format(color).let { if (it.startsWith("FF")) it.drop(2) else it }
+
+fun parseColorHex(text: String): Int? {
+    val hex = text.trim().removePrefix("#")
+    return when (hex.length) {
+        6 -> hex.toLongOrNull(16)?.let { (it or 0xFF000000).toInt() }
+        8 -> hex.toLongOrNull(16)?.toInt()
+        else -> null
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun ColorRow(shapes: ListItemShapes, title: String, color: Int, onChange: (Int) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val swatch = @Composable { value: Int, size: Dp, click: (() -> Unit)? ->
+        Box(
+            Modifier
+                .size(size)
+                .clip(RoundedCornerShape(50))
+                .background(Color(value))
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(50))
+                .then(if (click == null) Modifier else Modifier.clickable(onClick = click)),
+        )
+    }
+    SegmentedListItem(
+        contentPadding = RowPadding,
+        colors = rowColors(),
+        onClick = { open = true },
+        shapes = shapes,
+        modifier = Modifier.heightIn(max = RowHeight),
+        trailingContent = { swatch(color, 24.dp, null) },
+    ) { Text(title, style = RowTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+    if (open) {
+        var hex by remember { mutableStateOf(colorHex(color)) }
+        AlertDialog(
+            onDismissRequest = { open = false },
+            title = { Text(title) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    COLOR_PRESETS.chunked(7).forEach { line ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            line.forEach { preset ->
+                                swatch(preset, 30.dp) {
+                                    hex = colorHex(preset)
+                                    onChange(preset)
+                                }
+                            }
+                        }
+                    }
+                    TextField(
+                        hex,
+                        { text ->
+                            hex = text
+                            parseColorHex(text)?.let(onChange)
+                        },
+                        label = { Text("Hex") },
+                        singleLine = true,
+                        isError = parseColorHex(hex) == null,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    val alpha = color ushr 24
+                    Slider(
+                        value = alpha.toFloat(),
+                        onValueChange = { value ->
+                            val next = (color and 0xFFFFFF) or (value.toInt() shl 24)
+                            hex = colorHex(next)
+                            onChange(next)
+                        },
+                        valueRange = 0f..255f,
+                    )
+                }
+            },
+            confirmButton = { TextButton({ open = false }) { Text(stringResource(R.string.done)) } },
+        )
+    }
 }

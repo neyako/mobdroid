@@ -4,7 +4,23 @@ import com.opirl.app.R
 import androidx.annotation.StringRes
 import com.opirl.app.engine.media.VideoCodec
 import com.opirl.app.engine.net.LinkType
+import com.opirl.app.widgets.alerts.AlertsSettings
+import com.opirl.app.widgets.bingo.BingoSettings
+import com.opirl.app.widgets.crop.CropSettings
+import com.opirl.app.widgets.map.MapSettings
+import com.opirl.app.widgets.pngtuber.PngTuberSettings
+import com.opirl.app.widgets.pomodoro.PomodoroSettings
+import com.opirl.app.widgets.qrcode.QrCodeSettings
+import com.opirl.app.widgets.scoreboard.ScoreboardSettings
+import com.opirl.app.widgets.slideshow.SlideshowSettings
+import com.opirl.app.widgets.snapshot.SnapshotSettings
+import com.opirl.app.widgets.text.TextSettings
+import com.opirl.app.widgets.videosource.VideoSourceSettings
+import com.opirl.app.widgets.vtuber.VTuberSettings
+import com.opirl.app.widgets.wheel.WheelSettings
 import java.util.UUID
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -96,12 +112,26 @@ data class ObsSettings(
 val RECORDING_CODECS = listOf(VideoCodec.HEVC, VideoCodec.H264, VideoCodec.AV1)
 
 @Serializable
-enum class WidgetType(@StringRes val label: Int) {
-    TEXT(R.string.widget_text),
-    IMAGE(R.string.widget_image),
-    CHAT(R.string.chat),
-    BROWSER(R.string.widget_browser),
-    MUSIC(R.string.widget_music),
+enum class WidgetType(@StringRes val label: Int, @StringRes val description: Int) {
+    TEXT(R.string.widget_text, R.string.widget_text_description),
+    BROWSER(R.string.widget_browser, R.string.widget_browser_description),
+    VIDEO_SOURCE(R.string.widget_video_source, R.string.widget_video_source_description),
+    IMAGE(R.string.widget_image, R.string.widget_image_description),
+    ALERTS(R.string.widget_alerts, R.string.widget_alerts_description),
+    MAP(R.string.widget_map, R.string.widget_map_description),
+    SNAPSHOT(R.string.widget_snapshot, R.string.widget_snapshot_description),
+    CHAT(R.string.chat, R.string.widget_chat_description),
+    MUSIC(R.string.widget_music, R.string.widget_music_description),
+    SCENE(R.string.widget_scene, R.string.widget_scene_description),
+    SLIDESHOW(R.string.widget_slideshow, R.string.widget_slideshow_description),
+    VTUBER(R.string.widget_vtuber, R.string.widget_vtuber_description),
+    PNGTUBER(R.string.widget_pngtuber, R.string.widget_pngtuber_description),
+    QR_CODE(R.string.widget_qr_code, R.string.widget_qr_code_description),
+    SCOREBOARD(R.string.widget_scoreboard, R.string.widget_scoreboard_description),
+    WHEEL_OF_LUCK(R.string.widget_wheel_of_luck, R.string.widget_wheel_of_luck_description),
+    BINGO_CARD(R.string.widget_bingo_card, R.string.widget_bingo_card_description),
+    CROP(R.string.widget_crop, R.string.widget_crop_description),
+    POMODORO(R.string.widget_pomodoro, R.string.widget_pomodoro_description),
 }
 
 @Serializable
@@ -112,6 +142,7 @@ enum class Corner(@StringRes val label: Int, val left: Boolean, val top: Boolean
     BOTTOM_RIGHT(R.string.corner_bottom_right, false, false),
 }
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class Widget(
     val id: String = UUID.randomUUID().toString(),
@@ -126,6 +157,21 @@ data class Widget(
     val previewOnly: Boolean = false,
     val cover: Boolean = true,
     val hideWhenPaused: Boolean = true,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val sceneId: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val textOptions: TextSettings = TextSettings(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val videoSource: VideoSourceSettings = VideoSourceSettings(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val alerts: AlertsSettings = AlertsSettings(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val map: MapSettings = MapSettings(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val snapshot: SnapshotSettings = SnapshotSettings(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val slideshow: SlideshowSettings = SlideshowSettings(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val vTuber: VTuberSettings = VTuberSettings(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val pngTuber: PngTuberSettings = PngTuberSettings(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val qrCode: QrCodeSettings = QrCodeSettings(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val scoreboard: ScoreboardSettings = ScoreboardSettings(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val wheel: WheelSettings = WheelSettings(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val bingo: BingoSettings = BingoSettings(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val crop: CropSettings = CropSettings(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val pomodoro: PomodoroSettings = PomodoroSettings(),
 )
 
 @Serializable

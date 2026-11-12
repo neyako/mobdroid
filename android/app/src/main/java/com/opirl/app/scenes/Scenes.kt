@@ -1,13 +1,10 @@
 package com.opirl.app.scenes
 
 import com.opirl.app.settings.AppSettings
-import com.opirl.app.settings.Corner
 import com.opirl.app.settings.Scene
 import com.opirl.app.settings.SceneWidget
 import com.opirl.app.settings.Widget
-import com.opirl.app.settings.WidgetType
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
+import com.opirl.app.widgets.drawer
 
 class OverlayRect(val x: Float, val y: Float, val width: Float, val height: Float)
 
@@ -22,12 +19,6 @@ fun overlayRect(placement: SceneWidget, width: Float, height: Float): OverlayRec
     )
 }
 
-private val time = DateTimeFormatter.ofPattern("HH:mm")
-private val date = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-
-fun expandText(text: String, now: LocalDateTime): String =
-    text.replace("{time}", now.format(time)).replace("{date}", now.format(date))
-
 fun defaultScenes(cameras: List<Pair<String, String>>): List<Scene> =
     cameras.map { (key, label) -> Scene(name = label, cameraKey = key) }
 
@@ -41,13 +32,7 @@ fun <T> sceneCamera(
     ?: cameras.firstOrNull(external)
     ?: cameras.firstOrNull { key(it) == sceneKey }
 
-fun defaultPlacement(widget: Widget): SceneWidget = when (widget.type) {
-    WidgetType.TEXT -> SceneWidget(widget.id)
-    WidgetType.IMAGE -> SceneWidget(widget.id, corner = Corner.TOP_RIGHT, size = 15)
-    WidgetType.CHAT -> SceneWidget(widget.id, corner = Corner.BOTTOM_LEFT, size = 35)
-    WidgetType.BROWSER -> SceneWidget(widget.id, x = 0, y = 0, size = 100)
-    WidgetType.MUSIC -> SceneWidget(widget.id, corner = Corner.BOTTOM_LEFT, y = 5)
-}
+fun defaultPlacement(widget: Widget): SceneWidget = widget.type.drawer.placement(widget)
 
 fun Scene.placement(widget: Widget): SceneWidget =
     widgets.firstOrNull { it.widgetId == widget.id } ?: defaultPlacement(widget).copy(enabled = false)

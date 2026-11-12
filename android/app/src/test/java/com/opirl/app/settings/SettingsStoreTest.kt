@@ -61,4 +61,15 @@ class SettingsStoreTest {
         assertEquals(false, store.decode("""{"setupDone":false}""").setupDone)
         assertEquals(false, AppSettings().setupDone)
     }
+
+    @Test
+    fun `a widget stores no settings of other widget types`() {
+        store.update { it.copy(widgets = listOf(Widget(id = "w", type = WidgetType.IMAGE))) }
+        val widget = store.exportJson().substringAfter("\"widgets\":[").substringBefore("]")
+        assertEquals(
+            """{"id":"w","name":"Widget","type":"IMAGE","text":"","textSize":15,"image":null,"url":"","browserWidth":1280,""" +
+                """"browserHeight":720,"previewOnly":false,"cover":true,"hideWhenPaused":true}""",
+            widget,
+        )
+    }
 }

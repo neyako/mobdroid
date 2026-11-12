@@ -7,8 +7,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
+val TWITCH_CHAT_SCOPES = listOf("user:read:chat", "user:write:chat")
+
 @Serializable
-data class TwitchAccount(val login: String, val userId: String, val accessToken: String)
+data class TwitchAccount(
+    val login: String,
+    val userId: String,
+    val accessToken: String,
+    val scopes: List<String> = TWITCH_CHAT_SCOPES,
+)
 
 @Serializable
 data class KickAccount(val username: String, val sessionToken: String)

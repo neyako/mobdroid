@@ -1,0 +1,9 @@
+ML Kit face detection
+
+Copyright Google LLC.
+
+ML Kit is used under the ML Kit Terms of Service:
+https://developers.google.com/ml-kit/terms
+
+Its open source components are listed with their licences at
+https://developers.google.com/ml-kit/third-party-notices

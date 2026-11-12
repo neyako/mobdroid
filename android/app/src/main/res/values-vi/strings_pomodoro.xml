@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pomodoro_start">Bắt đầu</string>
+    <string name="pomodoro_pause">Tạm dừng</string>
+    <string name="pomodoro_resume">Tiếp tục</string>
+    <string name="pomodoro_minutes">%1$d phút</string>
+    <string name="pomodoro_focus_duration">Thời gian tập trung</string>
+    <string name="pomodoro_break_duration">Thời gian nghỉ</string>
+    <string name="pomodoro_focus_name">Tên giai đoạn tập trung</string>
+    <string name="pomodoro_break_name">Tên giai đoạn nghỉ</string>
+    <string name="pomodoro_focus_icon">Biểu tượng tập trung</string>
+    <string name="pomodoro_break_icon">Biểu tượng nghỉ</string>
+    <string name="pomodoro_background">Màu nền</string>
+    <string name="pomodoro_text_color">Màu chữ</string>
+    <string name="pomodoro_focus_color">Màu tập trung</string>
+    <string name="pomodoro_break_color">Màu nghỉ</string>
+    <string name="pomodoro_icon_sun">Mặt trời</string>
+    <string name="pomodoro_icon_bolt">Tia chớp</string>
+    <string name="pomodoro_icon_cap">Mũ tốt nghiệp</string>
+    <string name="pomodoro_icon_book">Sách</string>
+    <string name="pomodoro_icon_play">Phát</string>
+    <string name="pomodoro_icon_brain">Bộ não</string>
+    <string name="pomodoro_icon_pencil">Bút chì</string>
+    <string name="pomodoro_icon_flame">Ngọn lửa</string>
+    <string name="pomodoro_icon_timer">Hẹn giờ</string>
+    <string name="pomodoro_icon_target">Mục tiêu</string>
+    <string name="pomodoro_icon_cup">Tách</string>
+    <string name="pomodoro_icon_dance">Nhảy</string>
+    <string name="pomodoro_icon_walk">Đi bộ</string>
+    <string name="pomodoro_icon_music">Âm nhạc</string>
+    <string name="pomodoro_icon_leaf">Chiếc lá</string>
+    <string name="pomodoro_icon_game">Tay cầm</string>
+    <string name="pomodoro_icon_fork">Dao và nĩa</string>
+</resources>

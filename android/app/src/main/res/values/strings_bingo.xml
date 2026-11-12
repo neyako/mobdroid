@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="bingo_squares">Squares</string>
+    <string name="bingo_squares_hint">One square per line</string>
+    <string name="bingo_background">Background</string>
+    <string name="bingo_foreground">Foreground</string>
+</resources>

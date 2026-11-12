@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="bingo_squares">Các ô</string>
+    <string name="bingo_squares_hint">Mỗi dòng một ô</string>
+    <string name="bingo_background">Màu nền</string>
+    <string name="bingo_foreground">Màu chữ và viền</string>
+</resources>

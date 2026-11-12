@@ -204,7 +204,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                     onClose = closePanel,
                     header = if (chatStatus) ({ statusView(true, Modifier) }) else null,
                 )
-                Side.WIDGETS -> WidgetsPanel(settings, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
+                Side.WIDGETS -> WidgetsPanel(settings, engine, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
                 Side.OBS -> obsPanel()
                 Side.BROWSER -> BrowserPanel(settings, appSettings, browser, onHide = { panelHidden = true }, onClose = closePanel)
                 Side.SETTINGS -> SettingsPanel(settings, engine, busy, settingsPages, onHide = { panelHidden = true }, onClose = closePanel)
@@ -467,7 +467,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                                 AnimatedContent(shownSide, transitionSpec = { through }, label = "panel") { shown ->
                                     when (shown) {
                                         Side.CHAT -> ChatPanel(engine, appSettings, chatDraft, onHide = { panelHidden = true }, onClose = closePanel)
-                                        Side.WIDGETS -> WidgetsPanel(settings, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
+                                        Side.WIDGETS -> WidgetsPanel(settings, engine, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
                                         Side.OBS -> obsPanel()
                                         Side.BROWSER -> BrowserPanel(
                                             settings,

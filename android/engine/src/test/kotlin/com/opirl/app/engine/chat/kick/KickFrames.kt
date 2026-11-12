@@ -33,4 +33,19 @@ internal object KickFrames {
 
     val OBJECT_DATA =
         """{"event":"App\\Events\\ChatMessageEvent","data":{"id":"6f1d2c4e-0b7a-4c55-9d1e-2a8f3b7c9e10","chatroom_id":100200,"content":"that last play was clean","type":"message","created_at":"2026-11-10T03:32:02+00:00","sender":{"id":4821,"username":"PixelFox","slug":"pixelfox","identity":{"color":"#FEA0CF","badges":[],"badges_v2":[{"name":"level","badge_type":"global","image_url":"https://ext.cdn.kick.com/chat/badges/29_36298231-50cc-41fa-b3e6-5401d216386d.png","metadata":{"level":29},"selected":true,"sort_order":1}]}},"metadata":{"message_ref":"1794281522944"}},"channel":"chatrooms.100200.v2"}"""
+
+    val SUBSCRIPTION =
+        """{"event":"App\\Events\\SubscriptionEvent","data":"{\"chatroom_id\":4242,\"username\":\"PixelFox\",\"months\":3}","channel":"channel_4243"}"""
+
+    val GIFTED_SUBSCRIPTIONS =
+        """{"event":"GiftedSubscriptionsEvent","data":"{\"chatroom_id\":4242,\"gifted_usernames\":[\"Alpha\",\"Bravo\",\"Charlie\"],\"gifter_username\":\"ModMoss\",\"gifter_total\":12}","channel":"channel_4243"}"""
+
+    val REWARD =
+        """{"event":"RewardRedeemedEvent","data":"{\"reward_title\":\"Hydrate\",\"user_id\":4821,\"channel_id\":4243,\"username\":\"PixelFox\",\"user_input\":\"drink up\",\"reward_background_color\":\"#00e701\"}","channel":"channel_4243"}"""
+
+    val HOST =
+        """{"event":"App\\Events\\StreamHostEvent","data":"{\"chatroom_id\":4242,\"optional_message\":\"\",\"number_viewers\":57,\"host_username\":\"ChannelOwner\"}","channel":"channel_4243"}"""
+
+    val KICKS =
+        """{"event":"KicksGifted","data":"{\"message\":\"gg\",\"sender\":{\"id\":90177,\"username\":\"ModMoss\",\"username_color\":\"#FF9D00\"},\"gift\":{\"gift_id\":\"rage_quit\",\"name\":\"Rage Quit\",\"amount\":100,\"type\":\"BASIC\",\"tier\":\"BASIC\",\"character_limit\":0,\"pinned_time\":0}}","channel":"channel_4243"}"""
 }

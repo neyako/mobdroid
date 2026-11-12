@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="map_north_up">North up</string>
+    <string name="map_north_up_note">With north up off, the map turns so that the way you move points up.</string>
+    <string name="map_delay">Delay</string>
+    <string name="map_delay_note">Delays the map to match a camera with high latency.</string>
+    <string name="map_corner_radius">Corner radius</string>
+    <string name="map_border_width">Border width</string>
+    <string name="map_border_color">Border color</string>
+    <string name="map_credit_note">Map data © OpenStreetMap contributors, openstreetmap.org/copyright. Add the link to your stream description.</string>
+</resources>

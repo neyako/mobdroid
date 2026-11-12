@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pngtuber_choose_model">Chọn mô hình</string>
+    <string name="pngtuber_change_model">Đổi mô hình</string>
+    <string name="pngtuber_model">Mô hình</string>
+    <string name="pngtuber_loading">Đang tải</string>
+    <string name="pngtuber_invalid">Không phải tệp PNGTuber Plus</string>
+    <string name="pngtuber_scene_camera">Camera của cảnh</string>
+    <string name="pngtuber_mouth_sensitivity">Độ nhạy miệng</string>
+    <string name="pngtuber_eye_sensitivity">Độ nhạy mắt</string>
+    <string name="pngtuber_costume">Trang phục</string>
+    <string name="pngtuber_mirror">Lật gương</string>
+    <string name="pngtuber_note">Tệp .save từ PNGTuber Plus.</string>
+    <plurals name="pngtuber_images">
+        <item quantity="other">%d hình ảnh</item>
+    </plurals>
+</resources>

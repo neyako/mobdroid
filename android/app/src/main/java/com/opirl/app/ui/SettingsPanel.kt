@@ -130,6 +130,11 @@ import com.opirl.app.settings.StreamProfile
 import com.opirl.app.settings.allowedCodecs
 import com.opirl.app.settings.fpsChoices
 import com.opirl.app.stream.StreamEngine
+import com.opirl.app.ui.widgets.WidgetScope
+import com.opirl.app.ui.widgets.WidgetSettings
+import com.opirl.app.ui.widgets.icon
+import com.opirl.app.ui.widgets.widgetFiles
+import com.opirl.app.widgets.drawer
 import com.opirl.app.stream.outputSize
 import java.util.UUID
 
@@ -177,7 +182,9 @@ internal sealed interface Route {
 
     data class Placement(val sceneId: String, val widgetId: String) : Route
 
-    data class WidgetPage(val id: String) : Route
+    data class WidgetPage(val id: String, val page: String? = null, val title: String? = null) : Route
+
+    data object NewWidget : Route
 
     data object Chat : Route
 
@@ -235,7 +242,8 @@ private fun title(route: Route, settings: AppSettings) = when (route) {
         settings.widgets.firstOrNull { it.id == route.widgetId }?.name.orEmpty(),
         settings.scenes.firstOrNull { it.id == route.sceneId }?.name.orEmpty(),
     )
-    is Route.WidgetPage -> settings.widgets.firstOrNull { it.id == route.id }?.name.orEmpty()
+    is Route.WidgetPage -> route.title ?: settings.widgets.firstOrNull { it.id == route.id }?.name.orEmpty()
+    Route.NewWidget -> stringResource(R.string.create_widget)
     Route.Chat -> stringResource(R.string.chat)
     Route.TwitchAccount -> stringResource(R.string.twitch_account)
     Route.KickAccount -> stringResource(R.string.kick_account)
@@ -370,7 +378,11 @@ fun SettingsPanel(
                             if (scene != null && widget != null) PlacementPage(store, scene, widget)
                         }
                         is Route.WidgetPage -> settings.widgets.firstOrNull { it.id == route.id }?.let {
-                            WidgetPage(store, it, engine, pop)
+                            WidgetPage(store, settings, it, route, engine, push, pop)
+                        }
+                        Route.NewWidget -> NewWidgetPage(store) { widget ->
+                            pop()
+                            push(Route.WidgetPage(widget.id))
                         }
                         Route.TwitchAccount -> TwitchAccountPage(engine)
                         Route.KickAccount -> KickAccountPage(engine)
@@ -865,12 +877,26 @@ private fun ScenesPage(store: SettingsStore, settings: AppSettings, engine: Stre
         settings.widgets.forEach { widget ->
             row { shapes -> NavRow(shapes, widget.name, stringResource(widget.type.label)) { push(Route.WidgetPage(widget.id)) } }
         }
-        row { shapes ->
-            val name = stringResource(R.string.widget_default_name, settings.widgets.size + 1)
-            ActionRow(shapes, stringResource(R.string.create_widget), Icons.Rounded.Add) {
-                val widget = Widget(name = name)
-                store.update { it.copy(widgets = it.widgets + widget) }
-                push(Route.WidgetPage(widget.id))
+        row { shapes -> ActionRow(shapes, stringResource(R.string.create_widget), Icons.Rounded.Add) { push(Route.NewWidget) } }
+    }
+}
+
+@Composable
+private fun NewWidgetPage(store: SettingsStore, onCreated: (Widget) -> Unit) {
+    Group {
+        WidgetType.entries.forEach { type ->
+            row { shapes ->
+                val name = stringResource(type.label)
+                NavRow(
+                    shapes,
+                    name,
+                    leading = { Icon(type.icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary) },
+                    supporting = stringResource(type.description),
+                ) {
+                    val widget = Widget(name = name, type = type)
+                    store.update { it.copy(widgets = it.widgets + widget) }
+                    onCreated(widget)
+                }
             }
         }
     }
@@ -968,7 +994,11 @@ private val LICENSES = listOf(
     LicenseItem("Accompanist", "Apache 2.0", "apache-2.0.txt"),
     LicenseItem("Guava", "Apache 2.0", "apache-2.0.txt"),
     LicenseItem("JSpecify", "Apache 2.0", "apache-2.0.txt"),
+    LicenseItem("ZXing", "Apache 2.0", "apache-2.0.txt"),
     LicenseItem("OBS logo", "GPL 2.0", "gpl-2.0.txt"),
+    LicenseItem("Nunito", "OFL 1.1", "ofl-nunito.txt"),
+    LicenseItem("Filament", "Apache 2.0", "apache-2.0.txt"),
+    LicenseItem("ML Kit", "ML Kit Terms", "ml-kit.txt"),
 )
 
 @Composable
@@ -1049,7 +1079,7 @@ private fun PlacementPage(store: SettingsStore, scene: Scene, widget: Widget) {
         }
         row { SliderRow(it, "X", placement.x, 0..100, "${placement.x}%") { x -> update(placement.copy(x = x)) } }
         row { SliderRow(it, "Y", placement.y, 0..100, "${placement.y}%") { y -> update(placement.copy(y = y)) } }
-        if (widget.type != WidgetType.TEXT && widget.type != WidgetType.MUSIC) {
+        if (widget.type.drawer.sized) {
             row { shapes ->
                 SliderRow(shapes, stringResource(R.string.size), placement.size, 5..100, "${placement.size}%") { size ->
                     update(placement.copy(size = size))
@@ -1065,107 +1095,25 @@ private fun PlacementPage(store: SettingsStore, scene: Scene, widget: Widget) {
 }
 
 @Composable
-private fun WidgetPage(store: SettingsStore, widget: Widget, engine: StreamEngine, pop: () -> Unit) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val update = { changed: Widget -> store.update { s -> s.copy(widgets = s.widgets.map { if (it.id == widget.id) changed else it }) } }
-    val directory = File(context.filesDir, "widgets")
-    val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) {
-            scope.launch(Dispatchers.IO) {
-                val name = "${widget.id}-${System.currentTimeMillis()}"
-                val copied = runCatching {
-                    directory.mkdirs()
-                    context.contentResolver.openInputStream(uri)!!.use { input ->
-                        File(directory, name).outputStream().use { input.copyTo(it) }
-                    }
-                }.isSuccess
-                if (copied) {
-                    widget.image?.let { File(directory, it).delete() }
-                    store.update { s -> s.copy(widgets = s.widgets.map { if (it.id == widget.id) it.copy(image = name) else it }) }
-                }
-            }
-        }
+private fun WidgetPage(
+    store: SettingsStore,
+    settings: AppSettings,
+    widget: Widget,
+    route: Route.WidgetPage,
+    engine: StreamEngine,
+    push: (Route) -> Unit,
+    pop: () -> Unit,
+) {
+    val scope = WidgetScope(store, engine, settings, widget, route.page, { page, title -> push(Route.WidgetPage(widget.id, page, title)) }, pop)
+    if (route.page != null) {
+        WidgetSettings(scope)
+        return
     }
     Group {
-        row { TextRow(it, stringResource(R.string.name), widget.name) { name -> update(widget.copy(name = name)) } }
-        row { shapes ->
-            ChoiceRow(shapes, stringResource(R.string.type), WidgetType.entries, widget.type, { stringResource(it.label) }) {
-                update(widget.copy(type = it))
-            }
-        }
+        row { TextRow(it, stringResource(R.string.name), widget.name) { name -> scope.update { w -> w.copy(name = name) } } }
+        row { ValueRow(it, stringResource(R.string.type), stringResource(widget.type.label)) }
     }
-    when (widget.type) {
-        WidgetType.TEXT -> Group {
-            row { shapes ->
-                TextRow(shapes, stringResource(R.string.widget_text), widget.text, stringResource(R.string.text_hint)) { text ->
-                    update(widget.copy(text = text))
-                }
-            }
-            row { shapes ->
-                SliderRow(shapes, stringResource(R.string.text_size), widget.textSize, 8..60, "${widget.textSize}") { size ->
-                    update(widget.copy(textSize = size))
-                }
-            }
-        }
-        WidgetType.IMAGE -> Group {
-            row { shapes ->
-                ActionRow(
-                    shapes,
-                    stringResource(if (widget.image == null) R.string.choose_image else R.string.change_image),
-                    Icons.Rounded.Add,
-                ) {
-                    pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                }
-            }
-        }
-        WidgetType.CHAT -> Unit
-        WidgetType.BROWSER -> Group {
-            row { TextRow(it, "URL", widget.url, "https://", keyboard = KeyboardType.Uri) { url -> update(widget.copy(url = url.trim())) } }
-            row { shapes ->
-                SliderRow(shapes, stringResource(R.string.width), widget.browserWidth, 200..1920, "${widget.browserWidth}", 10) {
-                    update(widget.copy(browserWidth = it))
-                }
-            }
-            row { shapes ->
-                SliderRow(shapes, stringResource(R.string.height), widget.browserHeight, 100..1080, "${widget.browserHeight}", 10) {
-                    update(widget.copy(browserHeight = it))
-                }
-            }
-        }
-        WidgetType.MUSIC -> {
-            val allowed by engine.nowPlaying.allowed.collectAsStateWithLifecycle()
-            if (allowed) {
-                Group {
-                    row { SwitchRow(it, stringResource(R.string.cover), widget.cover) { on -> update(widget.copy(cover = on)) } }
-                    row { shapes ->
-                        SliderRow(shapes, stringResource(R.string.text_size), widget.textSize, 8..60, "${widget.textSize}") { size ->
-                            update(widget.copy(textSize = size))
-                        }
-                    }
-                    row { shapes ->
-                        SwitchRow(shapes, stringResource(R.string.hide_when_paused), widget.hideWhenPaused) { on ->
-                            update(widget.copy(hideWhenPaused = on))
-                        }
-                    }
-                }
-            } else {
-                Text(
-                    stringResource(R.string.notification_access_note),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 4.dp),
-                )
-                Group {
-                    row { shapes ->
-                        NavRow(shapes, stringResource(R.string.allow_notification_access)) {
-                            context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                        }
-                    }
-                }
-            }
-        }
-    }
+    WidgetSettings(scope)
     Group {
         row { shapes ->
             ChoiceRow(
@@ -1174,17 +1122,15 @@ private fun WidgetPage(store: SettingsStore, widget: Widget, engine: StreamEngin
                 listOf(false, true),
                 widget.previewOnly,
                 { stringResource(if (it) R.string.preview_only else R.string.stream_and_preview) },
-            ) {
-                update(widget.copy(previewOnly = it))
-            }
+            ) { previewOnly -> scope.update { it.copy(previewOnly = previewOnly) } }
         }
     }
     Group {
         row { shapes ->
             ActionRow(shapes, stringResource(R.string.delete), Icons.Rounded.Delete, MaterialTheme.colorScheme.error) {
                 pop()
-                widget.image?.let { File(directory, it).delete() }
                 store.update { it.withoutWidget(widget.id) }
+                widgetFiles(engine.widgets, widget.id).forEach { it.delete() }
             }
         }
     }

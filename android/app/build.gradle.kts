@@ -86,6 +86,10 @@ dependencies {
     implementation(libs.compose.material.icons)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    implementation(libs.mlkit.face.detection)
+    implementation(libs.filament)
+    implementation(libs.filament.gltfio)
+    implementation(libs.zxing.core)
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
 

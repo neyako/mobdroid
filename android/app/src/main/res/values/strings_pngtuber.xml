@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pngtuber_choose_model">Choose model</string>
+    <string name="pngtuber_change_model">Change model</string>
+    <string name="pngtuber_model">Model</string>
+    <string name="pngtuber_loading">Loading</string>
+    <string name="pngtuber_invalid">Not a PNGTuber Plus file</string>
+    <string name="pngtuber_scene_camera">Scene camera</string>
+    <string name="pngtuber_mouth_sensitivity">Mouth sensitivity</string>
+    <string name="pngtuber_eye_sensitivity">Eye sensitivity</string>
+    <string name="pngtuber_costume">Costume</string>
+    <string name="pngtuber_mirror">Mirror</string>
+    <string name="pngtuber_note">A .save file from PNGTuber Plus.</string>
+    <plurals name="pngtuber_images">
+        <item quantity="one">%d image</item>
+        <item quantity="other">%d images</item>
+    </plurals>
+</resources>

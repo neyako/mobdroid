@@ -1,5 +1,7 @@
 package com.opirl.app.engine.chat
 
+import com.opirl.app.engine.alerts.AlertEvent
+
 enum class ChatPlatform { TWITCH, YOUTUBE, KICK }
 
 sealed interface ChatSegment {
@@ -40,6 +42,8 @@ interface ChatListener {
     fun onMessageDeleted(messageId: String)
 
     fun onUserMessagesDeleted(userId: String)
+
+    fun onAlert(event: AlertEvent) {}
 }
 
 interface ChatClient {

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="wheel_options">Lựa chọn</string>
+    <string name="wheel_options_hint">Mỗi dòng một lựa chọn</string>
+    <string name="wheel_option_number">Lựa chọn %1$d</string>
+    <string name="wheel_option_text">Văn bản</string>
+    <string name="wheel_weight">Trọng số</string>
+    <string name="wheel_add_option">Thêm lựa chọn</string>
+    <string name="wheel_advanced">Nâng cao</string>
+    <string name="wheel_only_when_spinning">Chỉ hiện khi đang quay</string>
+    <string name="wheel_spin">Quay</string>
+    <string name="wheel_shuffle">Xáo trộn</string>
+</resources>
