@@ -294,6 +294,7 @@
     <string name="youtube_denied">YouTube không cấp quyền</string>
     <string name="emotes">Emote</string>
     <string name="voice">Giọng đọc</string>
+    <string name="speech_service">Dịch vụ</string>
     <string name="voice_system">Hệ thống</string>
     <string name="api_key">Khóa API</string>
     <string name="test_voice">Thử giọng đọc</string>

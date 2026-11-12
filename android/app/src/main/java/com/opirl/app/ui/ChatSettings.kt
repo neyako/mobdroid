@@ -267,7 +267,7 @@ internal fun SpeechPage(store: SettingsStore, settings: AppSettings, engine: Str
     }
     Group {
         row { shapes ->
-            ChoiceRow(shapes, stringResource(R.string.voice), SpeechProvider.entries, provider, { speechLabel(it) }) { chosen ->
+            ChoiceRow(shapes, stringResource(R.string.speech_service), SpeechProvider.entries, provider, { speechLabel(it) }) { chosen ->
                 store.update { it.copy(chatSpeechProvider = chosen) }
             }
         }

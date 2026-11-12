@@ -430,7 +430,10 @@ them, not code style.
   them. Settings pages follow Moblin's categories and drill down with a back stack. Rows are
   `SegmentedListItem`s built with `Group { row { ... } }` from `SettingsWidgets.kt`, capped at 44 dp (56 dp
   with a supporting line) times the font scale, with 15 sp titles. The cap is a
-  `heightIn(max)`, because the list item's own minimum is 56 dp.
+  `heightIn(max)`, because the list item's own minimum is 56 dp. A `ChoiceRow`'s connected toggle buttons
+  share the row's width equally, or in proportion to their labels when the widest label would not fit an
+  equal share. A `TextRow` is `FilledField`, the wizard's text field drawn in the row's shape with a primary
+  outline while focused, so a field is the row and never a box inside one.
 - The microphone is open whenever the preview runs, so the audio meter works before going live: an
   `AudioEncoder` without a sink only reads and meters. It reports the peak level in dB about nine times a
   second to `StreamEngine.audioLevel`, which the meter reads in its draw phase only.
