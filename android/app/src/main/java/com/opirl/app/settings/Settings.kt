@@ -56,8 +56,8 @@ enum class QuickButtonId(@StringRes val label: Int) {
     CHAT(R.string.quick_chat),
     RECORD(R.string.quick_record),
     SNAPSHOT(R.string.quick_snapshot),
+    REPLAY(R.string.replay),
     INSTANT_REPLAY(R.string.quick_instant_replay),
-    SAVE_REPLAY(R.string.quick_save_replay),
     WIDGETS(R.string.quick_widgets),
     OBS(R.string.quick_obs),
     BROWSER(R.string.quick_browser),
@@ -102,7 +102,6 @@ data class ReplaySettings(
     val enabled: Boolean = false,
     val seconds: Int = 20,
     val delaySeconds: Int = 3,
-    val speedPercent: Int = 100,
 )
 
 @Serializable
@@ -221,6 +220,7 @@ data class AppSettings(
     val chatSpeechNames: Boolean = true,
     val mirrorFrontCameraOnStream: Boolean = false,
     val micKey: String? = null,
+    val replaySpeedPercent: Int = 100,
     val hiddenStatusItems: Set<StatusItem> = emptySet(),
     val hiddenQuickButtons: Set<QuickButtonId> = emptySet(),
     val fixedLensCameras: Set<String> = emptySet(),
@@ -281,6 +281,6 @@ val StreamProfile.allowedCodecs: List<VideoCodec>
 
 val REPLAY_SECONDS = listOf(10, 20, 30, 60)
 
-val REPLAY_SPEEDS = listOf(100, 50, 25)
+val REPLAY_SPEEDS = listOf(100, 50)
 
 val PREVIEW_RESOLUTIONS = listOf(Resolution.R720, Resolution.R540, Resolution.R480)

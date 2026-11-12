@@ -42,7 +42,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BatteryAlert
 import androidx.compose.material.icons.rounded.CastConnected
 import androidx.compose.material.icons.rounded.Replay
-import androidx.compose.material.icons.rounded.SaveAlt
+import androidx.compose.material.icons.rounded.SlowMotionVideo
 import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Visibility
@@ -138,7 +138,7 @@ import com.opirl.app.stream.UiState
 import com.opirl.app.stream.key
 import kotlinx.coroutines.flow.StateFlow
 
-private val statusStyle = TextStyle(
+val statusStyle = TextStyle(
     color = Color.White,
     fontSize = 13.sp,
     fontWeight = FontWeight.Medium,
@@ -167,9 +167,10 @@ fun quickButtons(
     obsOpen: Boolean,
     browserOpen: Boolean,
     replay: ReplayState?,
+    replayOpen: Boolean,
     monitoring: Boolean?,
+    onReplay: () -> Unit,
     onInstantReplay: () -> Unit,
-    onSaveReplay: () -> Unit,
     onMonitor: () -> Unit,
     onWidgets: () -> Unit,
     onObs: () -> Unit,
@@ -192,6 +193,7 @@ fun quickButtons(
             onRecord,
         )
         QuickButtonId.SNAPSHOT -> QuickButton(id.label, Icons.Rounded.PhotoCamera, false, onClick = onSnapshot)
+        QuickButtonId.REPLAY -> replay?.let { QuickButton(id.label, Icons.Rounded.SlowMotionVideo, replayOpen, onClick = onReplay) }
         QuickButtonId.INSTANT_REPLAY -> replay?.let {
             QuickButton(
                 if (it == ReplayState.PLAYING) R.string.stop else id.label,
@@ -200,7 +202,6 @@ fun quickButtons(
                 onClick = onInstantReplay,
             )
         }
-        QuickButtonId.SAVE_REPLAY -> replay?.let { QuickButton(id.label, Icons.Rounded.SaveAlt, false, onClick = onSaveReplay) }
         QuickButtonId.PREVIEW_STREAM -> monitoring?.let { QuickButton(id.label, Icons.Rounded.CastConnected, it, onClick = onMonitor) }
         QuickButtonId.WIDGETS -> QuickButton(id.label, Icons.Rounded.Widgets, widgetsOpen, onClick = onWidgets)
         QuickButtonId.OBS -> QuickButton(id.label, ObsLogo, obsOpen, onClick = onObs)
@@ -634,7 +635,14 @@ fun VideoStrip(video: VideoPlayer, modifier: Modifier) {
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun <T> Segments(values: List<T>, selected: T?, modifier: Modifier, label: (T) -> String, onSelect: (T) -> Unit) {
+fun <T> Segments(
+    values: List<T>,
+    selected: T?,
+    modifier: Modifier,
+    small: Boolean = false,
+    label: (T) -> String,
+    onSelect: (T) -> Unit,
+) {
     val haptics = LocalHapticFeedback.current
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)) {
         values.forEachIndexed { index, value ->
@@ -650,15 +658,16 @@ private fun <T> Segments(values: List<T>, selected: T?, modifier: Modifier, labe
                     else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
                 },
                 colors = ToggleButtonDefaults.colors(
-                    containerColor = Color.Black.copy(alpha = 0.55f),
+                    containerColor = if (small) Color.White.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.55f),
                     contentColor = Color.White,
                 ),
-                contentPadding = PaddingValues(horizontal = 12.dp),
-                modifier = Modifier.height(36.dp).widthIn(min = 46.dp, max = 132.dp),
+                contentPadding = PaddingValues(horizontal = if (small) 8.dp else 12.dp),
+                modifier = if (small) Modifier.height(28.dp).widthIn(min = 36.dp) else Modifier.height(36.dp).widthIn(min = 46.dp, max = 132.dp),
             ) {
                 Text(
                     label(value),
-                    style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
+                    style = (if (small) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge)
+                        .copy(fontFeatureSettings = "tnum"),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -672,13 +681,13 @@ fun ZoomStops(ui: UiState, onZoom: (Float) -> Unit) {
     val stops = ui.camera?.lensZoomStops.orEmpty()
     if (stops.size < 2) return
     val selected = ui.lens?.ratio ?: stops.lastOrNull { ui.zoom >= it - 0.01f }
-    Segments(stops, selected, Modifier, { if (it == selected && ui.zoom != it) formatZoom(ui.zoom) else formatZoom(it) }, onZoom)
+    Segments(stops, selected, Modifier, label = { if (it == selected && ui.zoom != it) formatZoom(ui.zoom) else formatZoom(it) }, onSelect = onZoom)
 }
 
 @Composable
 fun SceneSwitch(scenes: List<Scene>, scene: Scene?, onSelect: (String) -> Unit, modifier: Modifier) {
     if (scenes.size < 2) return
-    Segments(scenes, scene, modifier.horizontalScroll(rememberScrollState()), { it.name }) {
+    Segments(scenes, scene, modifier.horizontalScroll(rememberScrollState()), label = { it.name }) {
         if (it.id != scene?.id) onSelect(it.id)
     }
 }

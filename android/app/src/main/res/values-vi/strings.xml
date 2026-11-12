@@ -283,8 +283,13 @@
     <plurals name="file_count">
         <item quantity="other">%d tệp</item>
     </plurals>
-    <string name="quick_instant_replay">Phát lại</string>
-    <string name="quick_save_replay">Lưu phát lại</string>
+    <string name="quick_instant_replay">Tức thì</string>
+    <string name="save_replay">Lưu phát lại</string>
+    <string name="play_replay">Phát đoạn phát lại</string>
+    <string name="stop_replay">Dừng phát lại</string>
+    <string name="delete_replay">Xóa đoạn phát lại</string>
+    <string name="replay_start">Điểm bắt đầu phát lại</string>
+    <string name="no_replays">Chưa lưu đoạn phát lại nào</string>
     <string name="quick_preview_stream">Xem trước</string>
     <string name="mic_not_connected">Chưa kết nối</string>
     <string name="destinations">Đích phát</string>

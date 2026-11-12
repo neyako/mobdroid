@@ -299,8 +299,13 @@
         <item quantity="one">%d file</item>
         <item quantity="other">%d files</item>
     </plurals>
-    <string name="quick_instant_replay">Replay</string>
-    <string name="quick_save_replay">Save replay</string>
+    <string name="quick_instant_replay">Instant</string>
+    <string name="save_replay">Save replay</string>
+    <string name="play_replay">Play replay</string>
+    <string name="stop_replay">Stop replay</string>
+    <string name="delete_replay">Delete replay</string>
+    <string name="replay_start">Replay start</string>
+    <string name="no_replays">No replays saved</string>
     <string name="quick_preview_stream">Preview</string>
     <string name="mic_bluetooth" translatable="false">Bluetooth</string>
     <string name="mic_not_connected">Not connected</string>

@@ -250,9 +250,13 @@ them, not code style.
   starting at a key frame, writes it with `Mp4Recorder` into `Movies/opIRL` as "opIRL Replay ..." and
   publishes it. `instantReplay` does the same and then plays the file over the stream: `replayPlaying`
   takes the place of the scene's source in `openCamera`, a `VideoPlayer` that plays once (`loop = false`)
-  at the replay speed and reopens the scene's source when it ends. Sound plays only at normal speed. The
-  Replay quick button stops a running replay. The buffer is fed only while the stream encoder runs, so not
-  while recording with a separate encoder off air.
+  at the replay speed (`AppSettings.replaySpeedPercent`, global so it can change on air) and reopens the
+  scene's source when it ends. Sound plays only at normal speed. `playReplay(uri, startMs)` plays a saved
+  replay the same way from a start point, live or not; `VideoPlayer.startMs` seeks the file before the
+  first frame is decoded (a decoder flushed right after it starts gives no picture). The Instant quick
+  button stops a running replay. The buffer is fed only while the stream encoder runs, so not while
+  recording with a separate encoder off air. Saved replays are the recordings whose name starts with
+  "Replay" (`Recording.isReplay`).
 - Preview stream (`StreamProfile.previewStream`, Moblin's name; `monitor` in the code because preview is
   the on-screen picture here): a WHIP session of its own with a small H.264 encoder on the compositor's
   third surface (`VideoCompositor.setMonitor`, drawn at the surface's size) and Opus sound. The Preview
@@ -491,6 +495,16 @@ them, not code style.
   The system back button goes back in the page's history before it closes the panel. Bookmarks
   (`AppSettings.bookmarks`) are listed where the page would be until one is loaded, and on their own page
   with "Add this page"; the page's sound plays on the phone and is not in the stream.
+- The Replay quick button (shown while replay is on for the stream) opens `ui/Replay.kt`'s overlay in
+  the lower right of the picture, Moblin's layout, in place of the zoom stops and the scene row: the
+  selected replay's picture with its delete button, a row with the start slider, the speed, play or stop
+  and save, and the saved replays as thumbnails, newest first. The slider is the start point counted back
+  from the end of the clip (`ReplayPanel.fromEndMs`, kept in `MainScreen` while the app runs, at least a
+  second plays), and the picture and the selected thumbnail show the frame there. The newest replay is
+  selected when the overlay opens and whenever one is saved. Delete takes a second tap within 3 seconds.
+  A picture lower than 260 dp (the cover screen, a preview beside an open panel) gets the compact form:
+  the thumbnails with the delete button, then the row, no large picture. In the near-square layout the
+  overlay is as wide as the picture, or 300 dp for a narrow portrait picture.
 - The Record quick button asks for a second tap to stop, like the End button. The recording time and size
   are a status item. Recording settings are per stream (Streams, a stream, Recording); the recordings list
   is Settings, Recordings.

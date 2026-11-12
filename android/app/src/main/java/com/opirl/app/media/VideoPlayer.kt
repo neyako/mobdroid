@@ -49,6 +49,7 @@ class VideoPlayer(
     private val onIdle: () -> Unit,
     private val loop: Boolean = true,
     private val speed: Float = 1f,
+    private val startMs: Long = 0,
     private val onFinished: () -> Unit = {},
     private val onError: (String) -> Unit,
 ) {
@@ -249,6 +250,12 @@ class VideoPlayer(
             var pendingIndex = -1
             var pendingPtsUs = 0L
             var seekTargetUs = 0L
+            if (startMs > 0) {
+                seekTargetUs = if (durationUs > 0) (startMs * 1000).coerceAtMost(durationUs) else startMs * 1000
+                video.seekTo(seekTargetUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+                if (audioCodec != null) audio.seekTo(seekTargetUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+                baseUs = seekTargetUs
+            }
             var prerolled = false
             var showOne = true
             var videoInputDone = false

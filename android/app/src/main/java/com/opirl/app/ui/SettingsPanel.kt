@@ -125,7 +125,6 @@ import com.opirl.app.media.findMic
 import com.opirl.app.settings.Destination
 import com.opirl.app.settings.PREVIEW_RESOLUTIONS
 import com.opirl.app.settings.REPLAY_SECONDS
-import com.opirl.app.settings.REPLAY_SPEEDS
 import com.opirl.app.settings.Transport
 import com.opirl.app.settings.bonded
 import com.opirl.app.settings.transport
@@ -1771,11 +1770,6 @@ private fun StreamReplay(store: SettingsStore, profile: StreamProfile, editable:
         row { shapes ->
             ChoiceRow(shapes, stringResource(R.string.replay_delay), listOf(0, 1, 2, 3, 5), replay.delaySeconds, { "$it s" }) {
                 update(replay.copy(delaySeconds = it))
-            }
-        }
-        row { shapes ->
-            ChoiceRow(shapes, stringResource(R.string.replay_speed), REPLAY_SPEEDS, replay.speedPercent, { "${it / 100f}x" }) {
-                update(replay.copy(speedPercent = it))
             }
         }
     }

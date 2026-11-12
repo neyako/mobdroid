@@ -231,6 +231,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     private var replayBuffer: ReplayBuffer? = null
     private var replayJob: Job? = null
     private var replayPlaying: SceneVideo? = null
+    private var replayStartMs = 0L
     private val _replay = MutableStateFlow(ReplayState.IDLE)
     val replay: StateFlow<ReplayState> = _replay.asStateFlow()
     private var activeRecording: ActiveRecording? = null
@@ -922,16 +923,22 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         }
     }
 
-    fun instantReplay() = startReplay(play = true)
+    @Synchronized
+    fun instantReplay() = if (_replay.value == ReplayState.PLAYING) stopReplay() else startReplay(play = true)
 
     fun saveReplay() = startReplay(play = false)
 
     @Synchronized
+    fun playReplay(uri: Uri, startMs: Long) {
+        if (_replay.value != ReplayState.IDLE || !previewActive) return
+        replayPlaying = SceneVideo(uri.toString(), "Replay")
+        replayStartMs = startMs
+        _replay.value = ReplayState.PLAYING
+        openCamera()
+    }
+
+    @Synchronized
     private fun startReplay(play: Boolean) {
-        if (_replay.value == ReplayState.PLAYING) {
-            stopReplay()
-            return
-        }
         val buffer = replayBuffer
         val profile = liveProfile
         if (_replay.value != ReplayState.IDLE) return
@@ -958,6 +965,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                     showAlert(AlertLevel.ERROR, text(R.string.alert_replay_failed))
                 } else if (play && previewActive) {
                     replayPlaying = SceneVideo(saved.toString(), "Replay")
+                    replayStartMs = 0
                     _replay.value = ReplayState.PLAYING
                     openCamera()
                 } else {
@@ -990,7 +998,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     }
 
     @Synchronized
-    private fun stopReplay() {
+    fun stopReplay() {
         replayJob?.cancel()
         replayJob = null
         _replay.value = ReplayState.IDLE
@@ -1442,14 +1450,13 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     }
 
     private fun openReplay(clip: SceneVideo, compositor: VideoCompositor) {
-        val speed = (liveProfile ?: settings.settings.value.selectedProfile).replay.speedPercent / 100f
-        openPlayer(listOf(clip), compositor, 1f, true, false, speed) {
+        openPlayer(listOf(clip), compositor, 1f, true, false, settings.settings.value.replaySpeedPercent / 100f, replayStartMs) {
             scope.launch { synchronized(this@StreamEngine) { if (replayPlaying === clip) stopReplay() } }
         }
     }
 
     private fun openVideo(scene: Scene, compositor: VideoCompositor) =
-        openPlayer(scene.videos, compositor, scene.videoVolume / 100f, scene.micWithVideo, true, 1f) {}
+        openPlayer(scene.videos, compositor, scene.videoVolume / 100f, scene.micWithVideo, true, 1f, 0) {}
 
     private fun openPlayer(
         videos: List<SceneVideo>,
@@ -1458,6 +1465,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         micWhilePlaying: Boolean,
         loop: Boolean,
         speed: Float,
+        startMs: Long,
         onFinished: () -> Unit,
     ) {
         val generation = cameraGeneration
@@ -1480,6 +1488,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             compositor::repeatFrame,
             loop,
             speed,
+            startMs,
             onFinished,
         ) { message -> _ui.update { it.copy(error = message) } }
         player.volume = volume
