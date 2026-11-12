@@ -40,6 +40,8 @@ interface ChatListener {
     fun onMessageDeleted(messageId: String)
 
     fun onUserMessagesDeleted(userId: String)
+
+    fun onChannelId(id: String) = Unit
 }
 
 interface ChatClient {

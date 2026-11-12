@@ -144,14 +144,61 @@ them, not code style.
   3000 ms as Moblin does; it cannot send. A YouTube source starting with `@`, or anything that is not an
   11 character video id, is a handle. Kick resolves the channel slug to `chatroom.id`, listens on Pusher
   and sends with the `session_token` cookie of a kick.com web login as a Bearer token.
-- The app side: `chat/ChatController` batches events into `lines` (the newest 200) at most every 150 ms,
-  `ChatSpeech` reads messages aloud through Android's text to speech on the media stream, and `LoginStore`
-  keeps the Twitch and Kick logins in `logins.json`, outside the exported settings. The Twitch login is the
-  implicit flow in a WebView with Moblin's client id and the scopes `user:read:chat user:write:chat`.
+- The app side: `chat/ChatController` batches events into `lines` (the newest 200) at most every 150 ms, and
+  `LoginStore` keeps the logins and the voice API keys in `logins.json`, outside the exported settings. The
+  Twitch login is the implicit flow in a WebView with Moblin's client id and the scopes in `TWITCH_SCOPES`
+  (`TwitchApi.kt`); `TwitchAccount.scopes` is what the token was granted, and an account without all of them
+  gets a "Log in again" row. Add a scope there with every Helix call that needs a new one.
 - Each platform lives in its own package (`chat/twitch`, `chat/kick`, `chat/youtube`) and ports the
   behavior of Moblin's `Moblin/StreamingPlatforms/`. Parsing is pure functions tested with captured
   payloads; the network goes through the `OkHttpClient` passed in; JSON is read as `JsonElement` trees
   (`kotlinx.serialization.json`, no compiler plugin in the engine).
+
+## Platform APIs, emotes, voices and the chat bot
+
+- `engine/chat/Api.kt` is the contract for managing a stream: `StreamApi` (title, category, marker, poll,
+  delete a message, ban, unban, moderators, VIPs, chat modes) with one implementation per platform
+  (`TwitchApi`, `KickApi`, `YouTubeApi`), and `streamFeatures(platform)`, which says what each one can do; the
+  UI shows only those rows. Every call blocks and throws `ApiException` with a message for the user:
+  "Cannot reach X", "X login expired" (HTTP 401), the service's own message, or "X error <code>".
+  `ApiException.code` is the HTTP status. Tests run each client against a `MockWebServer` (`ApiServer`).
+- Twitch uses Helix as the logged in user, who is both broadcaster and moderator, so it manages that user's
+  own channel only. Kick uses the private API of kick.com with the web session token, as Moblin does, and
+  looks the channel up once for its slug and chatroom id. YouTube needs an OAuth access token for the
+  `youtube` scope and manages the active broadcast, else the first upcoming one; it can change the title and
+  ban a chatter by channel id.
+- The app side (`chat/Platforms`): `managedPlatforms` lists the platforms the selected stream can manage
+  (Twitch when the stream's Twitch channel is empty or the logged in user's, Kick with a login and a channel,
+  YouTube when connected), and `call(platform) { api -> ... }` runs one call on the IO dispatcher and returns
+  a `Result`. `ui/StreamTools.kt` (the tune button in the chat panel's header) is the page for all of it;
+  `PlatformRunner` runs a call from the UI and reports the outcome as an alert. Tapping a chat message of a
+  managed platform shows Delete, Timeout and Ban for it.
+- The YouTube login is Google Play services' authorization API (`chat/YouTubeAuth`): no client id is in the
+  app, Google matches the package name and signing certificate against an Android OAuth client of a Google
+  Cloud project. Until one is registered for `com.opirl.app` with the certificates in use (debug, release,
+  Play signing) the login cannot complete. `Logins.youtube` only records that the user connected; a token
+  is requested before each call.
+- Emotes: `engine/chat/emotes` fetches the BTTV, FFZ and 7TV sets (global, and the channel's by its Twitch
+  room id or Kick user id, which the chat clients report through `ChatListener.onChannelId`) and
+  `applyEmotes` turns whole words of text segments into emote segments. Images are stills: 7TV's static file,
+  the first frame of anything else. `chat/EmoteStore` keeps the tables, retries a failed fetch with backoff
+  (30 s doubling to an hour) and is applied to every message in `ChatController`; a message that arrives
+  before the tables keeps its text. `chat/EmoteImages` loads the bitmaps for the chat widget (at most 150,
+  112 px), and the widget is drawn again when one arrives.
+- Voices: `ChatSpeech` is one worker thread with a queue of 10 texts. It speaks with Android's text to
+  speech, or with `ChatSpeech.voice` (an ElevenLabs or TTS Monster voice, `engine/chat/tts`) it downloads
+  the audio and plays it with a `MediaPlayer`, one message at a time, on the phone and not in the stream. A
+  failed download is reported once as an alert and the message is skipped. Messages that start with `!` and
+  links are not read.
+- Chat bot: `engine/chat/bot` parses `!opirl <command>` (`parseBotCommand`) and decides who may run it
+  (`BotGate`): the streamer always, moderators when the command allows them, subscribers and everyone else
+  when enabled and then subject to the cooldown. `chat/ChatBot` runs the action on the main thread and shows
+  it as an alert; replies go to the chat the command came from and are not translated. Commands: `tts
+  on|off`, `say`, `snapshot`, `mute`, `unmute`, `zoom`, `torch on|off`, `scene`, `stream
+  start|stop|title|category`, `widget <name> enable|disable`, `send`, `help`. Scene and stream commands are
+  for the streamer only until moderators are allowed.
+- Predefined messages (`AppSettings.predefinedMessages`) are sent from the bolt button next to the chat
+  input, to the platform the input is set to.
 
 ## Recording
 
@@ -200,6 +247,7 @@ them, not code style.
   row did. An external camera (USB) is not a
   scene: while one is attached it replaces the camera of every scene (`sceneCamera`), and with several
   attached the one in use stays in use. A scene that plays videos (see Video scenes) keeps playing them.
+- An image or browser widget can remove its background (see Filters).
 - `AppSettings.widgets` are global; a `SceneWidget` places one in a scene: on or off, a corner, X and Y
   offsets from that corner in percent of the picture, and a size in percent of its width. Text and Music
   widgets ignore the size, their text size sets it. `Widget.previewOnly` keeps a widget out of the stream, the
@@ -239,6 +287,76 @@ them, not code style.
 - `VideoCompositor.setOverlays` draws them over the camera with premultiplied alpha blending: all of them
   on the preview, the ones that are not preview only on the encoder and recorder surfaces and in snapshots.
   They are never mirrored.
+
+## Filters
+
+- `AppSettings.effects` holds the filters that are on (`Filter`), their strengths and the LUTs. They are global,
+  not per scene, as Moblin's filter quick buttons are. The Filters quick button opens `ui/Panels.kt`'s
+  `FiltersPanel`: one switch per filter, with the sliders of a filter under it while it is on. The button is
+  lit while any filter or LUT is on.
+- `effects/EffectLoader` turns the settings into `EffectSettings` off the main thread (it decodes the LUTs,
+  the face image and the logo) and `StreamEngine` hands them to `VideoCompositor.setEffects`.
+- `media/gl/EffectRenderer` runs on the compositor thread. With no filter on, the compositor draws the camera
+  straight to each surface as before and holds no framebuffer. With one on, the camera is drawn once into a
+  texture of the output size (in stream orientation), the passes run between two textures, and the result is
+  copied to the encoder, the recorder, snapshots and the preview (flipped for a mirrored front camera).
+  Widgets and the drawing are drawn after the filters, so they are never filtered.
+- Pass order: LUTs, glasses and sparkle, blur faces, text and background, logo in mouth, beauty, whirlpool,
+  pinch, 4:3, black and white, sepia, triple, twin, pixellate, CRT. Everything that needs a face runs before
+  the passes that move the picture, so detections line up (Moblin runs beauty later). Shaders are GLSL ES
+  3.00; programs compile at first use.
+- LUTs are 3D textures of at most 64 entries a side. `effects/LutCube.kt` reads a `.cube` file or a square
+  image of tiles (one blue slice per tile, as Moblin's PNG LUTs). The bundled LUT is `assets/luts/<id>.png`;
+  imported ones are copies in `files/effects/`, like the face image. A LUT that cannot be read raises an
+  alert once and is skipped.
+- Faces and text come from ML Kit (`effects/Detector`, its own thread; bundled models, nothing is downloaded
+  and no picture leaves the phone). While a filter needs them, the renderer copies the unfiltered picture
+  into a small texture (640 px on the long side, 1280 px when text is due), reads it through a pixel buffer
+  object one frame later and hands it to the detector, one detection at a time: faces at most every 80 ms,
+  text every 400 ms. Results stay until the next detection replaces them; faces are kept for 400 ms after a
+  detection that finds none, so a blur does not flicker off. Contours (the lips, for the logo in the mouth)
+  are only requested while that filter is on, and ML Kit then gives them for the most prominent face only.
+  The detector is released when no filter needs it.
+- Blur faces, blur text and blur background share one pass and one "hide with" mode (`PrivacyMode`): a
+  Gaussian blur made at a quarter of the size, pixels, an image scaled to fill, or the logo over each face.
+  Blur background hides everything but the faces, and then faces are never hidden.
+- Glasses and sparkle (`Reaction`) are the GIFs in `assets/props/`, decoded with `android.graphics.Movie`
+  and drawn on every face for one run (glasses loop three times). The clock starts at the first detection,
+  and a prop gives up after 10 seconds without a face.
+- Remove background is per widget (image and browser): a chroma key between two hues (`chromaKey`) in the
+  overlay shaders, as Moblin's MetalPetal path.
+- Fixed horizon (Settings, Camera) is not a pass: `StreamEngine` listens to the gravity sensor ten times a
+  second while the preview runs and sets `VideoCompositor.horizonTilt`, the roll beyond the display rotation
+  (`horizonTilt`, null while the phone lies flat, which keeps the last tilt). The compositor eases towards it
+  each frame (`horizonStep`) and folds the rotation and the zoom that keeps the frame covered into the
+  camera's texture matrix, with the opposite sign on the stream of a mirrored preview. Built-in cameras only.
+- `VideoCompositor.repeatFrame` posts at most one pending repeat, so frames that take longer than 50 ms
+  cannot pile up behind a playing video.
+- The release build needs `-keep class * implements ...ComponentRegistrar { <init>(); }`
+  (`app/proguard-rules.pro`): R8 otherwise removes the constructors ML Kit creates by reflection and every
+  detection fails. Check a filter that needs detection on a release build after changing ML Kit or R8.
+
+## Auto scene switcher, macros and drawing
+
+- `AppSettings.autoSwitchers` are lists of scenes with a time each; `autoSwitcherId` is the one running, kept
+  across restarts. `scenes/AutoSceneSwitcher` gives the next entry: in order, or shuffled a round at a time
+  without showing the same scene twice in a row, skipping entries whose scene is gone. `StreamEngine` runs it
+  while the preview is active. The Switcher quick button opens the list to pick one or Off.
+- `AppSettings.macros` are lists of actions (`MacroFunction`): scene, zoom, filters (the set replaces the
+  filters that are on), reaction, record, snapshot, mute, torch, auto switcher, chat message, notification
+  (an alert titled with the macro's name), delay, wait for event, if, run macro. `macros/MacroRunner` runs
+  each started macro as a coroutine. If compares two texts after `{time}` and `{date}` are filled in, as
+  numbers when both start with one, and skips the next `runCount` actions when false. Wait for event takes
+  events from a queue of 100 that fills while the macro runs: stream started and stopped, recording started
+  and stopped, scene switched (optionally to one scene). A macro never runs a macro that is already on its
+  stack. A repeated macro waits a second between runs that had no delay. "Run when the app starts" starts it
+  at the first preview. Moblin's Twitch and Kick events, scene enabling, DJI and gimbal actions are not ported.
+- The Macros quick button lists the macros with run and stop; it is lit while one runs.
+- Draw (`widgets/DrawBoard`): while the quick button is on, drags on the preview draw lines, and a strip over
+  the preview has wipe, undo, six colours and the width. The lines are one overlay over the whole picture, on
+  the stream as well, drawn into a bitmap no wider than 1280 px that is uploaded at most 30 times a second.
+  They stay after leaving draw mode until wiped, and are not saved.
+- The Overlays quick button hides the status items and the chat over the preview until it is pressed again.
 
 ## Video scenes
 
@@ -374,7 +492,9 @@ them, not code style.
   rest moves over it. The control bar's width and the quick buttons' positions follow one spring
   (`QuickButtonGrid` places each button between its place in the wide and the two column layout), read in
   the layout phase only, while the panel slides out from behind the bar or fades away over the preview.
-- Panels (settings, chat, widgets, OBS, browser, remote) sit between the preview and the control bar on wide screens (350 dp, Moblin's
+- The chat panel keeps its draft and whether the stream tools page is open in `MainScreen`, so hiding the
+  panel loses neither.
+- Panels (settings, chat, widgets, OBS, browser, filters, auto switcher, macros, remote) sit between the preview and the control bar on wide screens (350 dp, Moblin's
   `settingsHalfWidth`) and fill the screen on near-square ones. Their header is 44 dp with `PanelButtons`:
   hide and close, extra small filled icon buttons with the expressive shape morph. They are 32 dp with
   16 dp between them, so their 48 dp touch targets do not overlap. Hide takes the panel off the screen and
@@ -383,7 +503,10 @@ them, not code style.
   them. Settings pages follow Moblin's categories and drill down with a back stack. Rows are
   `SegmentedListItem`s built with `Group { row { ... } }` from `SettingsWidgets.kt`, capped at 44 dp (56 dp
   with a supporting line) times the font scale, with 15 sp titles. The cap is a
-  `heightIn(max)`, because the list item's own minimum is 56 dp.
+  `heightIn(max)`, because the list item's own minimum is 56 dp. A `ChoiceRow`'s connected toggle buttons
+  share the row's width equally, or in proportion to their labels when the widest label would not fit an
+  equal share. A `TextRow` is `FilledField`, the wizard's text field drawn in the row's shape with a primary
+  outline while focused, so a field is the row and never a box inside one.
 - The microphone is open whenever the preview runs, so the audio meter works before going live: an
   `AudioEncoder` without a sink only reads and meters. It reports the peak level in dB about nine times a
   second to `StreamEngine.audioLevel`, which the meter reads in its draw phase only.
@@ -395,8 +518,9 @@ them, not code style.
 - `streamUrl` adds the profile's SRT latency to an `srt`/`srtla` URL that does not name one.
   `StreamProfile.bondingNetworks` limits which networks SRTLA requests.
 - `mirrorFrontCameraOnStream` makes the encoder draw the same mirrored picture as the preview.
-- The Widgets quick button opens a panel that turns the selected scene's widgets on and off. Scenes and
-  widgets are edited under Settings, Scenes: a scene page has the source (a camera or Video), the video list when the source is
+- The Widgets quick button opens a panel that turns the selected scene's widgets on and off. Scenes,
+  widgets, auto scene switchers and macros are edited under Settings, Scenes (`ui/Automation.kt` has the
+  last two): a scene page has the source (a camera or Video), the video list when the source is
   Video, and every widget with a switch; tapping a widget opens its placement in that scene.
 - The OBS quick button (OBS's own logo, `ObsLogo`) opens the OBS panel: the program picture with the
   stream and record buttons beside it, the scenes as toggle buttons, the audio inputs with their mute
@@ -525,8 +649,9 @@ JSON.
 
 - `RemoteControlTarget` is the phone as seen by a controller: `status()`, `settings()`, `state()` and
   `handle(request)`. `StreamEngine.remoteTarget` implements it with the pure functions in
-  `remote/RemoteModel.kt`. A request Moblin has and opIRL does not (filters, gimbal, scoreboard, macros, SRT
-  priorities) is `RemoteRequest.Unknown` and answered `unknownRequest`; a known one that cannot be done now
+  `remote/RemoteModel.kt`. A request the remote control does not handle (filters and macros, which are not
+  wired to it yet, gimbal, scoreboard, SRT priorities) is `RemoteRequest.Unknown` and answered
+  `unknownRequest`; a known one that cannot be done now
   (another stream while live, an unknown scene) is answered `error`.
 - Ids on the wire are UUIDs. Scenes and streams have one; a bitrate preset's and a zoom stop's are derived
   from its value (`bitratePresetId`, `zoomPresetId`), a mic's is its `MicSource` name.

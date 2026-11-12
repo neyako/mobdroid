@@ -25,7 +25,19 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Send
+import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.text.style.TextOverflow
+import com.opirl.app.chat.managedPlatforms
+import com.opirl.app.engine.chat.StreamFeature
+import com.opirl.app.engine.chat.streamFeatures
+import com.opirl.app.settings.PredefinedMessage
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
@@ -67,14 +79,14 @@ import com.opirl.app.settings.AppSettings
 import com.opirl.app.stream.StreamEngine
 import coil3.compose.AsyncImage
 
-private val ChatPlatform.color: Color
+internal val ChatPlatform.color: Color
     get() = when (this) {
         ChatPlatform.TWITCH -> Color(0xFFA970FF)
         ChatPlatform.YOUTUBE -> Color(0xFFFF4E45)
         ChatPlatform.KICK -> Color(0xFF53FC18)
     }
 
-private val ChatPlatform.label: String
+internal val ChatPlatform.label: String
     get() = when (this) {
         ChatPlatform.TWITCH -> "Twitch"
         ChatPlatform.YOUTUBE -> "YouTube"
@@ -132,6 +144,7 @@ fun ChatPanel(
     engine: StreamEngine,
     settings: AppSettings,
     draft: MutableState<String>,
+    tools: MutableState<Boolean>,
     onHide: () -> Unit,
     onClose: () -> Unit,
     header: (@Composable () -> Unit)? = null,
@@ -139,6 +152,10 @@ fun ChatPanel(
     val lines by engine.chat.lines.collectAsStateWithLifecycle()
     val connected by engine.chat.connected.collectAsStateWithLifecycle()
     val canSend by engine.chat.canSend.collectAsStateWithLifecycle()
+    val logins by engine.logins.logins.collectAsStateWithLifecycle()
+    val managed = remember(settings.selectedProfile, logins) { managedPlatforms(settings.selectedProfile, logins) }
+    val showTools = tools.value && managed.isNotEmpty()
+    var selected by remember { mutableStateOf<ChatLine?>(null) }
     val list = rememberLazyListState()
     val newest = lines.lastOrNull()?.key
     LaunchedEffect(newest) {
@@ -147,17 +164,33 @@ fun ChatPanel(
     Surface(Modifier.fillMaxSize(), color = Color.Black) {
         Column(Modifier.imePadding()) {
             Row(
-                Modifier.fillMaxWidth().height(PanelHeaderHeight).padding(start = 16.dp, end = 8.dp),
+                Modifier.fillMaxWidth().height(PanelHeaderHeight).padding(start = if (showTools) 0.dp else 16.dp, end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (showTools) {
+                    IconButton({ tools.value = false }, Modifier.size(44.dp)) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.navigate_back), Modifier.size(20.dp))
+                    }
+                }
                 Box(Modifier.weight(1f)) {
-                    if (header != null) {
+                    if (showTools) {
+                        Text(stringResource(R.string.stream_tools), style = PanelTitle)
+                    } else if (header != null) {
                         header()
                     } else {
                         Text(stringResource(R.string.chat), style = PanelTitle)
                     }
                 }
+                if (managed.isNotEmpty() && !showTools) {
+                    IconButton({ tools.value = true }, Modifier.size(44.dp)) {
+                        Icon(Icons.Rounded.Tune, stringResource(R.string.stream_tools), Modifier.size(20.dp))
+                    }
+                }
                 PanelButtons(hidden = false, onHide, onClose)
+            }
+            if (showTools) {
+                StreamTools(engine, managed, Modifier.weight(1f))
+                return@Column
             }
             val waiting = connected.filterValues { !it }.keys
             val note = when {
@@ -181,13 +214,57 @@ fun ChatPanel(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                items(lines.asReversed(), key = { it.key }) {
-                    ChatMessageText(it, settings.chatTextSize.sp, shadow = false, platformDot = connected.size > 1)
+                items(lines.asReversed(), key = { it.key }) { line ->
+                    val marked = selected?.key == line.key
+                    ChatMessageText(
+                        line,
+                        settings.chatTextSize.sp,
+                        shadow = false,
+                        platformDot = connected.size > 1,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(if (marked) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent, RoundedCornerShape(6.dp))
+                            .clickable(enabled = line.message.platform in managed) { selected = if (marked) null else line },
+                    )
                 }
             }
+            selected?.takeIf { it.message.platform in managed }?.let { line -> MessageActions(engine, line) { selected = null } }
             if (canSend.isNotEmpty()) {
-                ChatInput(canSend, draft) { platform, text, onResult -> engine.chat.send(platform, text, onResult) }
+                ChatInput(canSend, draft, settings.predefinedMessages) { platform, text, onResult -> engine.chat.send(platform, text, onResult) }
             }
+        }
+    }
+}
+
+@Composable
+private fun MessageActions(engine: StreamEngine, line: ChatLine, onDone: () -> Unit) {
+    val message = line.message
+    val features = streamFeatures(message.platform)
+    val runner = rememberPlatformRunner(engine)
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            message.user,
+            style = MaterialTheme.typography.labelLarge,
+            color = Color(chatNameColor(message)),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        val id = message.id
+        if (id != null && StreamFeature.DELETE_MESSAGE in features) {
+            TextButton({ runner.run(message.platform, onSuccess = onDone) { it.deleteMessage(id) } }, enabled = !runner.busy) {
+                Text(stringResource(R.string.delete))
+            }
+        }
+        if (message.userId != null || StreamFeature.UNBAN in features) {
+            TextButton(
+                { runner.run(message.platform, onSuccess = onDone) { it.ban(message.userId, message.user, TIMEOUT_SECONDS) } },
+                enabled = !runner.busy,
+            ) { Text(stringResource(R.string.timeout_10)) }
+            TextButton(
+                { runner.run(message.platform, onSuccess = onDone) { it.ban(message.userId, message.user, null) } },
+                enabled = !runner.busy,
+            ) { Text(stringResource(R.string.ban), color = MaterialTheme.colorScheme.error) }
         }
     }
 }
@@ -196,11 +273,13 @@ fun ChatPanel(
 private fun ChatInput(
     platforms: List<ChatPlatform>,
     draft: MutableState<String>,
+    predefined: List<PredefinedMessage>,
     onSend: (ChatPlatform, String, (String?) -> Unit) -> Unit,
 ) {
     var text by draft
     var error by remember { mutableStateOf<String?>(null) }
     var platform by remember(platforms) { mutableStateOf(platforms.first()) }
+    var choosing by remember { mutableStateOf(false) }
     val send = {
         val message = text.trim()
         if (message.isNotEmpty()) {
@@ -209,6 +288,26 @@ private fun ChatInput(
         }
     }
     Column(Modifier.padding(start = 12.dp, end = 4.dp, bottom = 8.dp)) {
+        if (choosing && predefined.isNotEmpty()) {
+            Column(Modifier.fillMaxWidth().heightIn(max = 180.dp).verticalScroll(rememberScrollState()).padding(end = 8.dp, bottom = 6.dp)) {
+                predefined.forEach { message ->
+                    Text(
+                        message.text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                choosing = false
+                                onSend(platform, message.text) { error = it }
+                            }
+                            .padding(horizontal = 10.dp, vertical = 9.dp),
+                    )
+                }
+            }
+        }
         error?.let {
             Text(
                 localized(it),
@@ -264,6 +363,11 @@ private fun ChatInput(
                         .clickable { platform = platforms[(platforms.indexOf(platform) + 1) % platforms.size] }
                         .padding(horizontal = 10.dp, vertical = 8.dp),
                 )
+            }
+            if (predefined.isNotEmpty()) {
+                IconButton({ choosing = !choosing }) {
+                    Icon(Icons.Rounded.Bolt, stringResource(R.string.predefined_messages), Modifier.size(22.dp))
+                }
             }
             IconButton(send, enabled = text.isNotBlank()) { Icon(Icons.AutoMirrored.Rounded.Send, stringResource(R.string.send), Modifier.size(22.dp)) }
         }

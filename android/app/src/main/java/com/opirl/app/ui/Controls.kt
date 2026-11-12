@@ -17,7 +17,10 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -39,7 +42,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoFixHigh
+import androidx.compose.material.icons.rounded.Autorenew
 import androidx.compose.material.icons.rounded.BatteryAlert
+import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.Brush
+import androidx.compose.material.icons.rounded.Dashboard
 import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Visibility
@@ -168,6 +176,16 @@ fun quickButtons(
     browserOpen: Boolean,
     remote: Boolean,
     remoteOpen: Boolean,
+    filters: Boolean,
+    drawing: Boolean,
+    overlaysHidden: Boolean,
+    switcher: Boolean,
+    macros: Boolean,
+    onFilters: () -> Unit,
+    onDraw: () -> Unit,
+    onOverlays: () -> Unit,
+    onSwitcher: () -> Unit,
+    onMacros: () -> Unit,
     onWidgets: () -> Unit,
     onObs: () -> Unit,
     onBrowser: () -> Unit,
@@ -212,6 +230,11 @@ fun quickButtons(
         } else {
             null
         }
+        QuickButtonId.FILTERS -> QuickButton(id.label, Icons.Rounded.AutoFixHigh, filters, onClick = onFilters)
+        QuickButtonId.DRAW -> QuickButton(id.label, Icons.Rounded.Brush, drawing, onClick = onDraw)
+        QuickButtonId.OVERLAYS -> QuickButton(id.label, Icons.Rounded.Dashboard, overlaysHidden, onClick = onOverlays)
+        QuickButtonId.AUTO_SWITCHER -> QuickButton(id.label, Icons.Rounded.Autorenew, switcher, onClick = onSwitcher)
+        QuickButtonId.MACROS -> QuickButton(id.label, Icons.Rounded.Bolt, macros, onClick = onMacros)
     }
 }
 
@@ -365,7 +388,7 @@ fun BitratePresets(presetsKbps: List<Int>, currentKbps: Int, onSelect: (Int) -> 
 fun formatMbps(kbps: Int): String = "%.2f".format(Locale.ROOT, kbps / 1000f).trimEnd('0').trimEnd('.')
 
 @Composable
-fun Preview(engine: StreamEngine, ui: UiState, corner: Dp, access: Access, flash: () -> Float) {
+fun Preview(engine: StreamEngine, ui: UiState, corner: Dp, access: Access, draw: DrawTool?, flash: () -> Float) {
     if (!access.ready) {
         AccessPrompt(access, corner)
         return
@@ -385,18 +408,32 @@ fun Preview(engine: StreamEngine, ui: UiState, corner: Dp, access: Access, flash
                 })
             }
         },
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(ui.camera) {
-                detectTapGestures { offset ->
-                    engine.tapToFocus(offset.x / viewSize.first, offset.y / viewSize.second)
+        modifier = if (draw != null) {
+            Modifier.fillMaxSize().pointerInput(draw) {
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    engine.drawBegin(down.position.x / size.width, down.position.y / size.height, draw.color, draw.width.dp.toPx() / size.width)
+                    drag(down.id) { change ->
+                        engine.drawExtend(change.position.x / size.width, change.position.y / size.height)
+                        change.consume()
+                    }
+                    engine.drawEnd()
                 }
             }
-            .pointerInput(ui.camera) {
-                detectTransformGestures { _, _, zoom, _ ->
-                    if (zoom != 1f) engine.setZoom(engine.ui.value.zoom * zoom, switchLens = false)
+        } else {
+            Modifier
+                .fillMaxSize()
+                .pointerInput(ui.camera) {
+                    detectTapGestures { offset ->
+                        engine.tapToFocus(offset.x / viewSize.first, offset.y / viewSize.second)
+                    }
                 }
-            },
+                .pointerInput(ui.camera) {
+                    detectTransformGestures { _, _, zoom, _ ->
+                        if (zoom != 1f) engine.setZoom(engine.ui.value.zoom * zoom, switchLens = false)
+                    }
+                }
+        },
     )
     Spacer(
         Modifier.fillMaxSize().drawWithCache {
@@ -602,9 +639,21 @@ private fun AudioMeter(level: StateFlow<Float>, muted: Boolean) {
 }
 
 @Composable
-fun CameraControls(ui: UiState, scenes: List<Scene>, scene: Scene?, video: VideoPlayer?, engine: StreamEngine, modifier: Modifier) {
+fun CameraControls(
+    ui: UiState,
+    scenes: List<Scene>,
+    scene: Scene?,
+    video: VideoPlayer?,
+    engine: StreamEngine,
+    draw: DrawTool?,
+    modifier: Modifier,
+) {
     val through = fadeThrough()
     Column(modifier, horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (draw != null) {
+            DrawStrip(draw, engine, Modifier)
+            return@Column
+        }
         AnimatedContent(video, transitionSpec = { through }, contentAlignment = Alignment.CenterEnd, label = "source") { player ->
             if (player != null) VideoStrip(player, Modifier.fillMaxWidth()) else ZoomStops(ui, engine::setZoom)
         }

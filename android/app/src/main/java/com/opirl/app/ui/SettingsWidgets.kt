@@ -1,23 +1,23 @@
 package com.opirl.app.ui
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.animateColorAsState
 import com.opirl.app.R
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.CornerBasedShape
-import androidx.compose.foundation.shape.CornerSize
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChevronRight
@@ -30,6 +30,7 @@ import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.ListItemShapes
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.SegmentedListItem
@@ -41,21 +42,26 @@ import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.graphics.shapes.RoundedPolygon
@@ -258,10 +264,7 @@ fun <T> ChoiceRow(
     SegmentedListItem(shapes = shapes, contentPadding = RowPadding, colors = rowColors()) {
         Column {
             Text(title, style = RowTitle)
-            Row(
-                Modifier.fillMaxWidth().padding(top = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween),
-            ) {
+            EqualWidthRow(Modifier.fillMaxWidth().padding(top = 4.dp)) {
                 values.forEachIndexed { index, value ->
                     ToggleButton(
                         checked = value == selected,
@@ -274,7 +277,6 @@ fun <T> ChoiceRow(
                         },
                         colors = ToggleButtonDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
                         contentPadding = PaddingValues(horizontal = 4.dp),
-                        modifier = Modifier.weight(label(value).length + 2f).height(32.dp),
                     ) {
                         Text(label(value), maxLines = 1, style = MaterialTheme.typography.labelMedium)
                     }
@@ -314,6 +316,35 @@ fun BitrateRow(
     }
 }
 
+@Composable
+private fun EqualWidthRow(modifier: Modifier, content: @Composable () -> Unit) {
+    Layout(content, modifier) { measurables, constraints ->
+        val height = 32.dp.roundToPx()
+        val gap = ButtonGroupDefaults.ConnectedSpaceBetween.roundToPx()
+        val space = (constraints.maxWidth - gap * (measurables.size - 1)).coerceAtLeast(0)
+        val natural = measurables.map { it.maxIntrinsicWidth(height) }
+        val fits = (natural.maxOrNull() ?: 0) * measurables.size <= space
+        val total = natural.sum().coerceAtLeast(1)
+        var left = space
+        val placeables = measurables.mapIndexed { index, measurable ->
+            val width = when {
+                index == measurables.lastIndex -> left
+                fits -> space / measurables.size
+                else -> (space.toLong() * natural[index] / total).toInt()
+            }
+            left -= width
+            measurable.measure(Constraints.fixed(width, height))
+        }
+        layout(constraints.maxWidth, height) {
+            var x = 0
+            placeables.forEach {
+                it.placeRelative(x, 0)
+                x += it.width + gap
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun TextRow(
@@ -325,33 +356,49 @@ fun TextRow(
     keyboard: KeyboardType = KeyboardType.Text,
     onChange: (String) -> Unit,
 ) {
-    val field = MaterialTheme.colorScheme.surfaceContainerHighest
-    SegmentedListItem(shapes = shapes, contentPadding = PaddingValues(FieldInset), colors = rowColors()) {
-        TextField(
-            value,
-            onChange,
-            label = { Text(title) },
-            placeholder = placeholder?.let { { Text(it) } },
-            singleLine = true,
-            enabled = enabled,
-            visualTransformation = if (keyboard == KeyboardType.Password) {
-                PasswordVisualTransformation()
-            } else {
-                VisualTransformation.None
-            },
-            keyboardOptions = KeyboardOptions(keyboardType = keyboard),
-            shape = insetShape(shapes.shape, FieldInset),
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = field,
-                unfocusedContainerColor = field,
-                disabledContainerColor = field,
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent,
-                disabledIndicatorColor = Color.Transparent,
-            ),
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
+    FilledField(shapes.shape, title, value, placeholder, enabled, keyboard, onChange)
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun FilledField(
+    shape: Shape,
+    title: String,
+    value: String,
+    placeholder: String? = null,
+    enabled: Boolean = true,
+    keyboard: KeyboardType = KeyboardType.Text,
+    onChange: (String) -> Unit,
+) {
+    val container = MaterialTheme.colorScheme.surfaceContainer
+    val primary = MaterialTheme.colorScheme.primary
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val outline by animateColorAsState(
+        primary.copy(alpha = if (focused) 1f else 0f),
+        MaterialTheme.motionScheme.fastEffectsSpec(),
+    )
+    TextField(
+        value,
+        onChange,
+        label = { Text(title) },
+        placeholder = placeholder?.let { { Text(it) } },
+        singleLine = true,
+        enabled = enabled,
+        visualTransformation = if (keyboard == KeyboardType.Password) PasswordVisualTransformation() else VisualTransformation.None,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboard),
+        interactionSource = interaction,
+        shape = shape,
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = container,
+            unfocusedContainerColor = container,
+            disabledContainerColor = container,
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+            disabledIndicatorColor = Color.Transparent,
+        ),
+        modifier = Modifier.fillMaxWidth().border(2.dp, outline, shape),
+    )
 }
 
 @Composable
@@ -401,14 +448,49 @@ fun RemovableRow(shapes: ListItemShapes, title: String, value: String, onClick: 
     }
 }
 
-private val FieldInset = 8.dp
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun PickRow(shapes: ListItemShapes, title: String, selected: Boolean, onClick: () -> Unit) {
+    SegmentedListItem(
+        contentPadding = RowPadding,
+        colors = rowColors(),
+        onClick = onClick,
+        shapes = shapes,
+        modifier = Modifier.heightIn(max = RowHeight),
+        leadingContent = { RadioButton(selected, null) },
+    ) { Text(title, style = RowTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun SwitchRemovableRow(shapes: ListItemShapes, title: String, checked: Boolean, onChange: (Boolean) -> Unit, onRemove: () -> Unit) {
+    SegmentedListItem(
+        contentPadding = PaddingValues(start = 14.dp, top = 4.dp, end = 4.dp, bottom = 4.dp),
+        colors = rowColors(),
+        onClick = { onChange(!checked) },
+        shapes = shapes,
+        modifier = Modifier.heightIn(max = RowHeight),
+        trailingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked, null, Modifier.scale(0.85f))
+                CompactIconButton(Icons.Rounded.Close, stringResource(R.string.remove_item, title), onClick = onRemove)
+            }
+        },
+    ) { Text(title, style = RowTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+}
 
 @Composable
-private fun insetShape(shape: Shape, inset: Dp): Shape {
-    val outer = shape as? CornerBasedShape ?: return RoundedCornerShape(4.dp)
-    val density = LocalDensity.current
-    val inner = { corner: CornerSize ->
-        CornerSize(with(density) { maxOf(corner.toPx(Size.Zero, this).toDp() - inset, 4.dp) })
+fun <T : Any> NumberRow(
+    shapes: ListItemShapes,
+    title: String,
+    value: T,
+    decimal: Boolean,
+    parse: (String) -> T?,
+    onChange: (T) -> Unit,
+) {
+    var text by remember(value) { mutableStateOf(value.toString().removeSuffix(".0")) }
+    TextRow(shapes, title, text, keyboard = if (decimal) KeyboardType.Decimal else KeyboardType.Number) { typed ->
+        text = typed
+        parse(typed.trim())?.let(onChange)
     }
-    return RoundedCornerShape(inner(outer.topStart), inner(outer.topEnd), inner(outer.bottomEnd), inner(outer.bottomStart))
 }
