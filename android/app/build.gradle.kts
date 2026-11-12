@@ -88,6 +88,7 @@ dependencies {
     implementation(libs.coil.network.okhttp)
     implementation(libs.mlkit.face.detection)
     implementation(libs.mlkit.text.recognition)
+    implementation(libs.play.services.auth)
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
 

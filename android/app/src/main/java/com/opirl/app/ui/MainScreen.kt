@@ -101,6 +101,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
     var panelHidden by remember { mutableStateOf(false) }
     val settingsPages = remember { SettingsPages() }
     val chatDraft = remember { mutableStateOf("") }
+    val chatTools = remember { mutableStateOf(false) }
     val browser = remember { BrowserState() }
     val drawTool = remember { DrawTool() }
     var drawing by remember { mutableStateOf(false) }
@@ -213,7 +214,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
     }
     val sidePanel: @Composable (Side, (@Composable () -> Unit)?) -> Unit = { shown, chatHeader ->
         when (shown) {
-            Side.CHAT -> ChatPanel(engine, appSettings, chatDraft, onHide = { panelHidden = true }, onClose = closePanel, header = chatHeader)
+            Side.CHAT -> ChatPanel(engine, appSettings, chatDraft, chatTools, onHide = { panelHidden = true }, onClose = closePanel, header = chatHeader)
             Side.WIDGETS -> WidgetsPanel(settings, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
             Side.OBS -> obsPanel()
             Side.BROWSER -> BrowserPanel(settings, appSettings, browser, onHide = { panelHidden = true }, onClose = closePanel)

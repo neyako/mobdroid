@@ -78,6 +78,8 @@ internal fun parseKickColor(text: String): Int? {
 internal fun parseKickChatroomId(body: String): Long? =
     (parseObject(body)?.obj("chatroom")?.get("id") as? JsonPrimitive)?.longOrNull?.takeIf { it > 0 }
 
+internal fun parseKickUserId(body: String): Long? = (parseObject(body)?.get("user_id") as? JsonPrimitive)?.longOrNull
+
 internal fun parseKickErrorMessage(body: String): String? =
     parseObject(body)?.string("message")?.takeIf { it.isNotBlank() }
 

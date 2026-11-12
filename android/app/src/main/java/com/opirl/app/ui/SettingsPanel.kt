@@ -112,6 +112,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.opirl.app.BuildConfig
+import com.opirl.app.engine.chat.bot.BotCommand
 import com.opirl.app.engine.media.VideoCodec
 import com.opirl.app.engine.net.LinkType
 import com.opirl.app.media.CodecCatalog
@@ -195,6 +196,20 @@ internal sealed interface Route {
 
     data object KickAccount : Route
 
+    data object YouTubeAccount : Route
+
+    data object Emotes : Route
+
+    data object Speech : Route
+
+    data object SpeechVoices : Route
+
+    data object PredefinedMessages : Route
+
+    data object ChatBot : Route
+
+    data class BotCommandPage(val command: BotCommand) : Route
+
     data object Display : Route
 
     data object StatusItems : Route
@@ -255,6 +270,13 @@ private fun title(route: Route, settings: AppSettings) = when (route) {
     Route.Chat -> stringResource(R.string.chat)
     Route.TwitchAccount -> stringResource(R.string.twitch_account)
     Route.KickAccount -> stringResource(R.string.kick_account)
+    Route.YouTubeAccount -> stringResource(R.string.youtube_account)
+    Route.Emotes -> stringResource(R.string.emotes)
+    Route.Speech -> stringResource(R.string.chat_speech)
+    Route.SpeechVoices -> stringResource(R.string.voice)
+    Route.PredefinedMessages -> stringResource(R.string.predefined_messages)
+    Route.ChatBot -> stringResource(R.string.chat_bot)
+    is Route.BotCommandPage -> botCommandTitle(route.command)
     Route.Display -> stringResource(R.string.display)
     Route.StatusItems -> stringResource(R.string.status)
     Route.QuickButtons -> stringResource(R.string.quick_buttons)
@@ -405,6 +427,13 @@ fun SettingsPanel(
                         }
                         Route.TwitchAccount -> TwitchAccountPage(engine)
                         Route.KickAccount -> KickAccountPage(engine)
+                        Route.YouTubeAccount -> YouTubeAccountPage(engine)
+                        Route.Emotes -> EmotesPage(store, settings)
+                        Route.Speech -> SpeechPage(store, settings, engine, push)
+                        Route.SpeechVoices -> SpeechVoicesPage(store, settings, engine)
+                        Route.PredefinedMessages -> PredefinedMessagesPage(store, settings)
+                        Route.ChatBot -> ChatBotPage(store, settings, push)
+                        is Route.BotCommandPage -> BotCommandPage(store, settings, route.command)
                         Route.Chat -> ChatPage(store, settings, engine, push)
                         Route.Display -> Display(store, settings, push)
                         Route.StatusItems -> Group {
@@ -458,103 +487,6 @@ fun SettingsPanel(
                         is Route.License -> LICENSES.firstOrNull { it.name == route.name }?.let { LicenseText(it.file) }
                         Route.ImportExport -> ImportExport(store, live)
                     }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TwitchAccountPage(engine: StreamEngine) {
-    val logins by engine.logins.logins.collectAsStateWithLifecycle()
-    var loggingIn by remember { mutableStateOf(false) }
-    val account = logins.twitch
-    Group {
-        if (account != null) {
-            row { ValueRow(it, stringResource(R.string.logged_in_as), account.login) }
-            row { shapes ->
-                ActionRow(shapes, stringResource(R.string.log_out), Icons.Rounded.Close, MaterialTheme.colorScheme.error) {
-                    engine.logins.update { it.copy(twitch = null) }
-                }
-            }
-        } else {
-            row { ActionRow(it, stringResource(R.string.log_in), Icons.Rounded.Add) { loggingIn = true } }
-        }
-    }
-    if (loggingIn) {
-        TwitchLoginDialog(
-            engine.http,
-            onAccount = { added ->
-                engine.logins.update { it.copy(twitch = added) }
-                loggingIn = false
-            },
-            onClose = { loggingIn = false },
-        )
-    }
-}
-
-@Composable
-private fun KickAccountPage(engine: StreamEngine) {
-    val logins by engine.logins.logins.collectAsStateWithLifecycle()
-    var loggingIn by remember { mutableStateOf(false) }
-    val account = logins.kick
-    Group {
-        if (account != null) {
-            row { ValueRow(it, stringResource(R.string.logged_in_as), account.username) }
-            row { shapes ->
-                ActionRow(shapes, stringResource(R.string.log_out), Icons.Rounded.Close, MaterialTheme.colorScheme.error) {
-                    engine.logins.update { it.copy(kick = null) }
-                }
-            }
-        } else {
-            row { ActionRow(it, stringResource(R.string.log_in), Icons.Rounded.Add) { loggingIn = true } }
-        }
-    }
-    if (loggingIn) {
-        KickLoginDialog(
-            engine.http,
-            onAccount = { added ->
-                engine.logins.update { it.copy(kick = added) }
-                loggingIn = false
-            },
-            onClose = { loggingIn = false },
-        )
-    }
-}
-
-@Composable
-private fun ChatPage(store: SettingsStore, settings: AppSettings, engine: StreamEngine, push: (Route) -> Unit) {
-    val logins by engine.logins.logins.collectAsStateWithLifecycle()
-    Group {
-        row { shapes ->
-            NavRow(shapes, stringResource(R.string.twitch_account), logins.twitch?.login ?: stringResource(R.string.not_logged_in)) {
-                push(Route.TwitchAccount)
-            }
-        }
-        row { shapes ->
-            NavRow(shapes, stringResource(R.string.kick_account), logins.kick?.username ?: stringResource(R.string.not_logged_in)) {
-                push(Route.KickAccount)
-            }
-        }
-    }
-    Group {
-        row { shapes ->
-            ChoiceRow(shapes, stringResource(R.string.text_size), ChatTextSize.entries, settings.chatTextSize, { stringResource(it.label) }) { size ->
-                store.update { it.copy(chatTextSize = size) }
-            }
-        }
-        row { shapes ->
-            SwitchRow(shapes, stringResource(R.string.chat_on_preview), settings.chatOnPreview) { on ->
-                store.update { it.copy(chatOnPreview = on) }
-            }
-        }
-        row { shapes ->
-            SwitchRow(shapes, stringResource(R.string.chat_speech), settings.chatSpeech) { on -> store.update { it.copy(chatSpeech = on) } }
-        }
-        if (settings.chatSpeech) {
-            row { shapes ->
-                SwitchRow(shapes, stringResource(R.string.chat_speech_names), settings.chatSpeechNames) { on ->
-                    store.update { it.copy(chatSpeechNames = on) }
                 }
             }
         }
@@ -1001,6 +933,7 @@ private val LICENSES = listOf(
     LicenseItem("Guava", "Apache 2.0", "apache-2.0.txt"),
     LicenseItem("JSpecify", "Apache 2.0", "apache-2.0.txt"),
     LicenseItem("ML Kit", "ML Kit terms", "mlkit.txt"),
+    LicenseItem("Google Play services", "Android SDK License", "android-sdk.txt"),
     LicenseItem("OBS logo", "GPL 2.0", "gpl-2.0.txt"),
 )
 

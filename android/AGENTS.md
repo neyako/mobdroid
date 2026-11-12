@@ -142,14 +142,61 @@ them, not code style.
   3000 ms as Moblin does; it cannot send. A YouTube source starting with `@`, or anything that is not an
   11 character video id, is a handle. Kick resolves the channel slug to `chatroom.id`, listens on Pusher
   and sends with the `session_token` cookie of a kick.com web login as a Bearer token.
-- The app side: `chat/ChatController` batches events into `lines` (the newest 200) at most every 150 ms,
-  `ChatSpeech` reads messages aloud through Android's text to speech on the media stream, and `LoginStore`
-  keeps the Twitch and Kick logins in `logins.json`, outside the exported settings. The Twitch login is the
-  implicit flow in a WebView with Moblin's client id and the scopes `user:read:chat user:write:chat`.
+- The app side: `chat/ChatController` batches events into `lines` (the newest 200) at most every 150 ms, and
+  `LoginStore` keeps the logins and the voice API keys in `logins.json`, outside the exported settings. The
+  Twitch login is the implicit flow in a WebView with Moblin's client id and the scopes in `TWITCH_SCOPES`
+  (`TwitchApi.kt`); `TwitchAccount.scopes` is what the token was granted, and an account without all of them
+  gets a "Log in again" row. Add a scope there with every Helix call that needs a new one.
 - Each platform lives in its own package (`chat/twitch`, `chat/kick`, `chat/youtube`) and ports the
   behavior of Moblin's `Moblin/StreamingPlatforms/`. Parsing is pure functions tested with captured
   payloads; the network goes through the `OkHttpClient` passed in; JSON is read as `JsonElement` trees
   (`kotlinx.serialization.json`, no compiler plugin in the engine).
+
+## Platform APIs, emotes, voices and the chat bot
+
+- `engine/chat/Api.kt` is the contract for managing a stream: `StreamApi` (title, category, marker, poll,
+  delete a message, ban, unban, moderators, VIPs, chat modes) with one implementation per platform
+  (`TwitchApi`, `KickApi`, `YouTubeApi`), and `streamFeatures(platform)`, which says what each one can do; the
+  UI shows only those rows. Every call blocks and throws `ApiException` with a message for the user:
+  "Cannot reach X", "X login expired" (HTTP 401), the service's own message, or "X error <code>".
+  `ApiException.code` is the HTTP status. Tests run each client against a `MockWebServer` (`ApiServer`).
+- Twitch uses Helix as the logged in user, who is both broadcaster and moderator, so it manages that user's
+  own channel only. Kick uses the private API of kick.com with the web session token, as Moblin does, and
+  looks the channel up once for its slug and chatroom id. YouTube needs an OAuth access token for the
+  `youtube` scope and manages the active broadcast, else the first upcoming one; it can change the title and
+  ban a chatter by channel id.
+- The app side (`chat/Platforms`): `managedPlatforms` lists the platforms the selected stream can manage
+  (Twitch when the stream's Twitch channel is empty or the logged in user's, Kick with a login and a channel,
+  YouTube when connected), and `call(platform) { api -> ... }` runs one call on the IO dispatcher and returns
+  a `Result`. `ui/StreamTools.kt` (the tune button in the chat panel's header) is the page for all of it;
+  `PlatformRunner` runs a call from the UI and reports the outcome as an alert. Tapping a chat message of a
+  managed platform shows Delete, Timeout and Ban for it.
+- The YouTube login is Google Play services' authorization API (`chat/YouTubeAuth`): no client id is in the
+  app, Google matches the package name and signing certificate against an Android OAuth client of a Google
+  Cloud project. Until one is registered for `com.opirl.app` with the certificates in use (debug, release,
+  Play signing) the login cannot complete. `Logins.youtube` only records that the user connected; a token
+  is requested before each call.
+- Emotes: `engine/chat/emotes` fetches the BTTV, FFZ and 7TV sets (global, and the channel's by its Twitch
+  room id or Kick user id, which the chat clients report through `ChatListener.onChannelId`) and
+  `applyEmotes` turns whole words of text segments into emote segments. Images are stills: 7TV's static file,
+  the first frame of anything else. `chat/EmoteStore` keeps the tables, retries a failed fetch with backoff
+  (30 s doubling to an hour) and is applied to every message in `ChatController`; a message that arrives
+  before the tables keeps its text. `chat/EmoteImages` loads the bitmaps for the chat widget (at most 150,
+  112 px), and the widget is drawn again when one arrives.
+- Voices: `ChatSpeech` is one worker thread with a queue of 10 texts. It speaks with Android's text to
+  speech, or with `ChatSpeech.voice` (an ElevenLabs or TTS Monster voice, `engine/chat/tts`) it downloads
+  the audio and plays it with a `MediaPlayer`, one message at a time, on the phone and not in the stream. A
+  failed download is reported once as an alert and the message is skipped. Messages that start with `!` and
+  links are not read.
+- Chat bot: `engine/chat/bot` parses `!opirl <command>` (`parseBotCommand`) and decides who may run it
+  (`BotGate`): the streamer always, moderators when the command allows them, subscribers and everyone else
+  when enabled and then subject to the cooldown. `chat/ChatBot` runs the action on the main thread and shows
+  it as an alert; replies go to the chat the command came from and are not translated. Commands: `tts
+  on|off`, `say`, `snapshot`, `mute`, `unmute`, `zoom`, `torch on|off`, `scene`, `stream
+  start|stop|title|category`, `widget <name> enable|disable`, `send`, `help`. Scene and stream commands are
+  for the streamer only until moderators are allowed.
+- Predefined messages (`AppSettings.predefinedMessages`) are sent from the bolt button next to the chat
+  input, to the platform the input is set to.
 
 ## Recording
 
@@ -443,6 +490,8 @@ them, not code style.
   rest moves over it. The control bar's width and the quick buttons' positions follow one spring
   (`QuickButtonGrid` places each button between its place in the wide and the two column layout), read in
   the layout phase only, while the panel slides out from behind the bar or fades away over the preview.
+- The chat panel keeps its draft and whether the stream tools page is open in `MainScreen`, so hiding the
+  panel loses neither.
 - Panels (settings, chat, widgets, OBS, browser, filters, auto switcher, macros) sit between the preview and the control bar on wide screens (350 dp, Moblin's
   `settingsHalfWidth`) and fill the screen on near-square ones. Their header is 44 dp with `PanelButtons`:
   hide and close, extra small filled icon buttons with the expressive shape morph. They are 32 dp with
@@ -452,7 +501,10 @@ them, not code style.
   them. Settings pages follow Moblin's categories and drill down with a back stack. Rows are
   `SegmentedListItem`s built with `Group { row { ... } }` from `SettingsWidgets.kt`, capped at 44 dp (56 dp
   with a supporting line) times the font scale, with 15 sp titles. The cap is a
-  `heightIn(max)`, because the list item's own minimum is 56 dp.
+  `heightIn(max)`, because the list item's own minimum is 56 dp. A `ChoiceRow`'s connected toggle buttons
+  share the row's width equally, or in proportion to their labels when the widest label would not fit an
+  equal share. A `TextRow` is `FilledField`, the wizard's text field drawn in the row's shape with a primary
+  outline while focused, so a field is the row and never a box inside one.
 - The microphone is open whenever the preview runs, so the audio meter works before going live: an
   `AudioEncoder` without a sink only reads and meters. It reports the peak level in dB about nine times a
   second to `StreamEngine.audioLevel`, which the meter reads in its draw phase only.

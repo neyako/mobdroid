@@ -2,6 +2,9 @@ package com.opirl.app.settings
 
 import com.opirl.app.R
 import androidx.annotation.StringRes
+import com.opirl.app.engine.chat.bot.BotCommand
+import com.opirl.app.engine.chat.bot.BotPermission
+import com.opirl.app.engine.chat.emotes.EmoteProvider
 import com.opirl.app.engine.media.VideoCodec
 import com.opirl.app.engine.net.LinkType
 import java.util.UUID
@@ -46,6 +49,30 @@ enum class ChatTextSize(@StringRes val label: Int, val sp: Int) {
     SMALL(R.string.size_small, 12),
     MEDIUM(R.string.size_medium, 14),
     LARGE(R.string.size_large, 17),
+}
+
+@Serializable
+enum class SpeechProvider(val label: String?) {
+    SYSTEM(null),
+    ELEVENLABS("ElevenLabs"),
+    TTS_MONSTER("TTS Monster"),
+}
+
+@Serializable
+data class SpeechVoice(val id: String, val name: String)
+
+@Serializable
+data class PredefinedMessage(val id: String = UUID.randomUUID().toString(), val text: String)
+
+@Serializable
+data class BotPermissionSettings(
+    val moderators: Boolean = true,
+    val subscribers: Boolean = false,
+    val others: Boolean = false,
+    val cooldownSeconds: Int = 0,
+    val replies: Boolean = false,
+) {
+    fun toPermission() = BotPermission(moderators, subscribers, others, cooldownSeconds, replies)
 }
 
 @Serializable
@@ -351,6 +378,12 @@ data class AppSettings(
     val chatTextSize: ChatTextSize = ChatTextSize.MEDIUM,
     val chatSpeech: Boolean = false,
     val chatSpeechNames: Boolean = true,
+    val chatSpeechProvider: SpeechProvider = SpeechProvider.SYSTEM,
+    val chatSpeechVoices: Map<SpeechProvider, SpeechVoice> = emptyMap(),
+    val disabledEmotes: Set<EmoteProvider> = emptySet(),
+    val predefinedMessages: List<PredefinedMessage> = emptyList(),
+    val chatBot: Boolean = false,
+    val chatBotPermissions: Map<BotCommand, BotPermissionSettings> = emptyMap(),
     val mirrorFrontCameraOnStream: Boolean = false,
     val mic: MicSource = MicSource.AUTO,
     val hiddenStatusItems: Set<StatusItem> = emptySet(),
@@ -374,6 +407,9 @@ data class AppSettings(
 
     val selectedScene: Scene?
         get() = scenes.firstOrNull { it.id == selectedSceneId } ?: scenes.firstOrNull()
+
+    fun botPermission(command: BotCommand): BotPermissionSettings =
+        chatBotPermissions[command] ?: BotPermissionSettings(moderators = command.moderatorsByDefault)
 }
 
 fun isValidBitrateKbps(kbps: Int) = kbps in 50..50_000

@@ -24,8 +24,14 @@ import android.util.Log
 import android.util.Size
 import android.view.Surface
 import com.opirl.app.camera.CameraCatalog
+import com.opirl.app.chat.ChatBot
 import com.opirl.app.chat.ChatController
 import com.opirl.app.chat.ChatSpeech
+import com.opirl.app.chat.EmoteImages
+import com.opirl.app.chat.EmoteStore
+import com.opirl.app.chat.Platforms
+import com.opirl.app.chat.RemoteVoice
+import com.opirl.app.chat.YouTubeAuth
 import com.opirl.app.chat.createChatClients
 import com.opirl.app.effects.EffectLoader
 import com.opirl.app.effects.horizonTilt
@@ -43,6 +49,9 @@ import java.time.LocalDateTime
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.withContext
+import com.opirl.app.chat.spokenText
+import com.opirl.app.chat.voiceService
+import com.opirl.app.engine.chat.emotes.EmoteProvider
 import com.opirl.app.engine.obs.ObsClient
 import com.opirl.app.engine.obs.ObsOutput
 import com.opirl.app.engine.obs.ObsState
@@ -117,6 +126,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -180,18 +190,28 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
     val stats: StateFlow<LiveStats> = _stats.asStateFlow()
     val http = OkHttpClient()
     val logins = LoginStore(File(context.filesDir, "logins.json"))
-    private val speech = ChatSpeech(context)
+    val speech = ChatSpeech(context) { showAlert(AlertLevel.WARNING, text(R.string.chat_speech), it) }
+    val youtubeAuth = YouTubeAuth(context)
+    val platforms = Platforms(http, { settings.settings.value.selectedProfile }, { logins.logins.value }, youtubeAuth)
+    private val emotes = EmoteStore(scope, http)
+    private val emoteImages = EmoteImages(context, scope)
+    private val bot = ChatBot(this, settings, scope, text(R.string.chat_bot))
     val chat = ChatController(
         scope,
         { listener -> createChatClients(settings.settings.value.selectedProfile, logins.logins.value, http, listener) },
+        emotes::apply,
+        emotes::setChannel,
         { message ->
             val current = settings.settings.value
-            if (current.chatSpeech) speech.say(message, current.chatSpeechNames)
+            if (current.chatSpeech) {
+                spokenText(message, current.chatSpeechNames, context.getString(R.string.chat_speech_said))?.let(speech::say)
+            }
+            bot.onMessage(message)
         },
     )
     val obs = ObsClient(http, { showAlert(AlertLevel.ERROR, "OBS", it) })
 
-    private fun text(@StringRes id: Int, vararg args: Any): String = context.getString(id, *args)
+    internal fun text(@StringRes id: Int, vararg args: Any): String = context.getString(id, *args)
     private val _alert = MutableStateFlow<Alert?>(null)
     val alert: StateFlow<Alert?> = _alert.asStateFlow()
     private val vibrator = context.getSystemService(Vibrator::class.java)
@@ -391,7 +411,22 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 .distinctUntilChanged()
                 .drop(1)
                 .debounce(1000)
-                .collect { synchronized(this@StreamEngine) { if (previewActive || isLive) chat.start() } }
+                .collect { synchronized(this@StreamEngine) { if (previewActive || isLive) startChat() } }
+        }
+        scope.launch {
+            settings.settings.map { it.disabledEmotes }.distinctUntilChanged().drop(1).collect {
+                synchronized(this@StreamEngine) { if (previewActive || isLive) startChat() }
+            }
+        }
+        scope.launch {
+            combine(
+                settings.settings.map { it.chatSpeechProvider to it.chatSpeechVoices }.distinctUntilChanged(),
+                logins.logins.map { it.elevenLabsKey to it.ttsMonsterToken }.distinctUntilChanged(),
+            ) { (provider, voices), _ ->
+                val voice = voices[provider]
+                val service = voiceService(http, provider, logins.logins.value)
+                if (voice == null || service == null) null else RemoteVoice(service, voice.id)
+            }.collect { speech.voice = it }
         }
         scope.launch {
             settings.settings
@@ -407,7 +442,9 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
             }
         }
         scope.launch {
-            logins.logins.drop(1).collect { synchronized(this@StreamEngine) { if (previewActive || isLive) chat.start() } }
+            logins.logins.map { it.twitch to it.kick }.distinctUntilChanged().drop(1).collect {
+                synchronized(this@StreamEngine) { if (previewActive || isLive) startChat() }
+            }
         }
         scope.launch {
             settings.settings.map { it.mic }.distinctUntilChanged().drop(1).collect {
@@ -624,6 +661,16 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
 
     val isLive: Boolean get() = session != null
 
+    private fun startChat() {
+        emotes.start(EmoteProvider.entries.toSet() - settings.settings.value.disabledEmotes)
+        chat.start()
+    }
+
+    private fun stopChat() {
+        emotes.stop()
+        chat.stop()
+    }
+
     private val busy: Boolean get() = session != null || activeRecording != null
 
     fun startPreview() {
@@ -646,7 +693,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
                 openCamera()
                 if (!busy) {
                     startAudioMeter()
-                    chat.start()
+                    startChat()
                 }
                 syncObs()
                 syncNowPlaying()
@@ -748,7 +795,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         if (!previewActive || busy) return
         previewActive = false
         syncHorizon()
-        chat.stop()
+        stopChat()
         obs.stop()
         nowPlaying.setEnabled(false)
         audioEncoder?.release()
@@ -1316,7 +1363,7 @@ class StreamEngine(private val context: Context, private val settings: SettingsS
         applyOverlays()
         syncBrowsers()
         if (widgetRenderer == null) {
-            widgetRenderer = WidgetRenderer(File(context.filesDir, "widgets"), scope, settings.settings, chat.lines, nowPlaying.track) { next ->
+            widgetRenderer = WidgetRenderer(File(context.filesDir, "widgets"), scope, settings.settings, chat.lines, nowPlaying.track, emoteImages) { next ->
                 synchronized(this) {
                     widgetOverlays = next
                     applyOverlays()
