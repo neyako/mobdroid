@@ -180,6 +180,16 @@ internal sealed interface Route {
 
     data class WidgetPage(val id: String) : Route
 
+    data class SwitcherPage(val id: String) : Route
+
+    data class SwitcherScenePage(val switcherId: String, val id: String) : Route
+
+    data class MacroPage(val id: String) : Route
+
+    data class MacroActionPage(val macroId: String, val id: String) : Route
+
+    data class MacroFunctionPage(val macroId: String, val id: String) : Route
+
     data object Chat : Route
 
     data object TwitchAccount : Route
@@ -251,6 +261,12 @@ private fun title(route: Route, settings: AppSettings) = when (route) {
         settings.scenes.firstOrNull { it.id == route.sceneId }?.name.orEmpty(),
     )
     is Route.WidgetPage -> settings.widgets.firstOrNull { it.id == route.id }?.name.orEmpty()
+    is Route.SwitcherPage -> settings.autoSwitchers.firstOrNull { it.id == route.id }?.name.orEmpty()
+    is Route.SwitcherScenePage -> stringResource(R.string.scene)
+    is Route.MacroPage -> settings.macros.firstOrNull { it.id == route.id }?.name.orEmpty()
+    is Route.MacroActionPage -> settings.macros.firstOrNull { it.id == route.macroId }?.actions?.firstOrNull { it.id == route.id }
+        ?.let { stringResource(it.function.label) }.orEmpty()
+    is Route.MacroFunctionPage -> stringResource(R.string.macro_function)
     Route.Chat -> stringResource(R.string.chat)
     Route.TwitchAccount -> stringResource(R.string.twitch_account)
     Route.KickAccount -> stringResource(R.string.kick_account)
@@ -393,6 +409,21 @@ fun SettingsPanel(
                         }
                         is Route.WidgetPage -> settings.widgets.firstOrNull { it.id == route.id }?.let {
                             WidgetPage(store, it, engine, pop)
+                        }
+                        is Route.SwitcherPage -> settings.autoSwitchers.firstOrNull { it.id == route.id }?.let {
+                            SwitcherPage(store, settings, it, push, pop)
+                        }
+                        is Route.SwitcherScenePage -> settings.autoSwitchers.firstOrNull { it.id == route.switcherId }?.let { switcher ->
+                            switcher.scenes.firstOrNull { it.id == route.id }?.let { SwitcherScenePage(store, settings, switcher, it) }
+                        }
+                        is Route.MacroPage -> settings.macros.firstOrNull { it.id == route.id }?.let {
+                            MacroPage(store, settings, it, push, pop)
+                        }
+                        is Route.MacroActionPage -> settings.macros.firstOrNull { it.id == route.macroId }?.let { macro ->
+                            macro.actions.firstOrNull { it.id == route.id }?.let { MacroActionPage(store, settings, macro, it, push) }
+                        }
+                        is Route.MacroFunctionPage -> settings.macros.firstOrNull { it.id == route.macroId }?.let { macro ->
+                            macro.actions.firstOrNull { it.id == route.id }?.let { MacroFunctionPage(store, macro, it, pop) }
                         }
                         Route.TwitchAccount -> TwitchAccountPage(engine)
                         Route.KickAccount -> KickAccountPage(engine)
@@ -806,6 +837,7 @@ private fun ScenesPage(store: SettingsStore, settings: AppSettings, engine: Stre
             }
         }
     }
+    AutomationGroups(store, settings, push)
 }
 
 @Composable
@@ -900,6 +932,7 @@ private val LICENSES = listOf(
     LicenseItem("Accompanist", "Apache 2.0", "apache-2.0.txt"),
     LicenseItem("Guava", "Apache 2.0", "apache-2.0.txt"),
     LicenseItem("JSpecify", "Apache 2.0", "apache-2.0.txt"),
+    LicenseItem("ML Kit", "ML Kit terms", "mlkit.txt"),
     LicenseItem("Google Play services", "Android SDK License", "android-sdk.txt"),
     LicenseItem("OBS logo", "GPL 2.0", "gpl-2.0.txt"),
 )
@@ -1094,6 +1127,27 @@ private fun WidgetPage(store: SettingsStore, widget: Widget, engine: StreamEngin
                         NavRow(shapes, stringResource(R.string.allow_notification_access)) {
                             context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                         }
+                    }
+                }
+            }
+        }
+    }
+    if (widget.type == WidgetType.IMAGE || widget.type == WidgetType.BROWSER) {
+        Group {
+            row { shapes ->
+                SwitchRow(shapes, stringResource(R.string.remove_background), widget.removeBackground) { on ->
+                    update(widget.copy(removeBackground = on))
+                }
+            }
+            if (widget.removeBackground) {
+                row { shapes ->
+                    SliderRow(shapes, stringResource(R.string.hue_from), widget.keyFrom, 0..359, "${widget.keyFrom}°") { hue ->
+                        update(widget.copy(keyFrom = hue))
+                    }
+                }
+                row { shapes ->
+                    SliderRow(shapes, stringResource(R.string.hue_to), widget.keyTo, 0..359, "${widget.keyTo}°") { hue ->
+                        update(widget.copy(keyTo = hue))
                     }
                 }
             }
@@ -1400,6 +1454,9 @@ private fun Camera(store: SettingsStore, settings: AppSettings) {
             ChoiceRow(shapes, stringResource(R.string.usb_rotation), listOf(0, 90, 180, 270), settings.usbCameraRotation, { "$it°" }) { value ->
                 store.update { it.copy(usbCameraRotation = value) }
             }
+        }
+        row { shapes ->
+            SwitchRow(shapes, stringResource(R.string.fixed_horizon), settings.fixedHorizon) { on -> store.update { it.copy(fixedHorizon = on) } }
         }
     }
 }

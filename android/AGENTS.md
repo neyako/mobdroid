@@ -245,6 +245,7 @@ them, not code style.
   row did. An external camera (USB) is not a
   scene: while one is attached it replaces the camera of every scene (`sceneCamera`), and with several
   attached the one in use stays in use. A scene that plays videos (see Video scenes) keeps playing them.
+- An image or browser widget can remove its background (see Filters).
 - `AppSettings.widgets` are global; a `SceneWidget` places one in a scene: on or off, a corner, X and Y
   offsets from that corner in percent of the picture, and a size in percent of its width. Text and Music
   widgets ignore the size, their text size sets it. `Widget.previewOnly` keeps a widget out of the stream, the
@@ -284,6 +285,76 @@ them, not code style.
 - `VideoCompositor.setOverlays` draws them over the camera with premultiplied alpha blending: all of them
   on the preview, the ones that are not preview only on the encoder and recorder surfaces and in snapshots.
   They are never mirrored.
+
+## Filters
+
+- `AppSettings.effects` holds the filters that are on (`Filter`), their strengths and the LUTs. They are global,
+  not per scene, as Moblin's filter quick buttons are. The Filters quick button opens `ui/Panels.kt`'s
+  `FiltersPanel`: one switch per filter, with the sliders of a filter under it while it is on. The button is
+  lit while any filter or LUT is on.
+- `effects/EffectLoader` turns the settings into `EffectSettings` off the main thread (it decodes the LUTs,
+  the face image and the logo) and `StreamEngine` hands them to `VideoCompositor.setEffects`.
+- `media/gl/EffectRenderer` runs on the compositor thread. With no filter on, the compositor draws the camera
+  straight to each surface as before and holds no framebuffer. With one on, the camera is drawn once into a
+  texture of the output size (in stream orientation), the passes run between two textures, and the result is
+  copied to the encoder, the recorder, snapshots and the preview (flipped for a mirrored front camera).
+  Widgets and the drawing are drawn after the filters, so they are never filtered.
+- Pass order: LUTs, glasses and sparkle, blur faces, text and background, logo in mouth, beauty, whirlpool,
+  pinch, 4:3, black and white, sepia, triple, twin, pixellate, CRT. Everything that needs a face runs before
+  the passes that move the picture, so detections line up (Moblin runs beauty later). Shaders are GLSL ES
+  3.00; programs compile at first use.
+- LUTs are 3D textures of at most 64 entries a side. `effects/LutCube.kt` reads a `.cube` file or a square
+  image of tiles (one blue slice per tile, as Moblin's PNG LUTs). The bundled LUT is `assets/luts/<id>.png`;
+  imported ones are copies in `files/effects/`, like the face image. A LUT that cannot be read raises an
+  alert once and is skipped.
+- Faces and text come from ML Kit (`effects/Detector`, its own thread; bundled models, nothing is downloaded
+  and no picture leaves the phone). While a filter needs them, the renderer copies the unfiltered picture
+  into a small texture (640 px on the long side, 1280 px when text is due), reads it through a pixel buffer
+  object one frame later and hands it to the detector, one detection at a time: faces at most every 80 ms,
+  text every 400 ms. Results stay until the next detection replaces them; faces are kept for 400 ms after a
+  detection that finds none, so a blur does not flicker off. Contours (the lips, for the logo in the mouth)
+  are only requested while that filter is on, and ML Kit then gives them for the most prominent face only.
+  The detector is released when no filter needs it.
+- Blur faces, blur text and blur background share one pass and one "hide with" mode (`PrivacyMode`): a
+  Gaussian blur made at a quarter of the size, pixels, an image scaled to fill, or the logo over each face.
+  Blur background hides everything but the faces, and then faces are never hidden.
+- Glasses and sparkle (`Reaction`) are the GIFs in `assets/props/`, decoded with `android.graphics.Movie`
+  and drawn on every face for one run (glasses loop three times). The clock starts at the first detection,
+  and a prop gives up after 10 seconds without a face.
+- Remove background is per widget (image and browser): a chroma key between two hues (`chromaKey`) in the
+  overlay shaders, as Moblin's MetalPetal path.
+- Fixed horizon (Settings, Camera) is not a pass: `StreamEngine` listens to the gravity sensor ten times a
+  second while the preview runs and sets `VideoCompositor.horizonTilt`, the roll beyond the display rotation
+  (`horizonTilt`, null while the phone lies flat, which keeps the last tilt). The compositor eases towards it
+  each frame (`horizonStep`) and folds the rotation and the zoom that keeps the frame covered into the
+  camera's texture matrix, with the opposite sign on the stream of a mirrored preview. Built-in cameras only.
+- `VideoCompositor.repeatFrame` posts at most one pending repeat, so frames that take longer than 50 ms
+  cannot pile up behind a playing video.
+- The release build needs `-keep class * implements ...ComponentRegistrar { <init>(); }`
+  (`app/proguard-rules.pro`): R8 otherwise removes the constructors ML Kit creates by reflection and every
+  detection fails. Check a filter that needs detection on a release build after changing ML Kit or R8.
+
+## Auto scene switcher, macros and drawing
+
+- `AppSettings.autoSwitchers` are lists of scenes with a time each; `autoSwitcherId` is the one running, kept
+  across restarts. `scenes/AutoSceneSwitcher` gives the next entry: in order, or shuffled a round at a time
+  without showing the same scene twice in a row, skipping entries whose scene is gone. `StreamEngine` runs it
+  while the preview is active. The Switcher quick button opens the list to pick one or Off.
+- `AppSettings.macros` are lists of actions (`MacroFunction`): scene, zoom, filters (the set replaces the
+  filters that are on), reaction, record, snapshot, mute, torch, auto switcher, chat message, notification
+  (an alert titled with the macro's name), delay, wait for event, if, run macro. `macros/MacroRunner` runs
+  each started macro as a coroutine. If compares two texts after `{time}` and `{date}` are filled in, as
+  numbers when both start with one, and skips the next `runCount` actions when false. Wait for event takes
+  events from a queue of 100 that fills while the macro runs: stream started and stopped, recording started
+  and stopped, scene switched (optionally to one scene). A macro never runs a macro that is already on its
+  stack. A repeated macro waits a second between runs that had no delay. "Run when the app starts" starts it
+  at the first preview. Moblin's Twitch and Kick events, scene enabling, DJI and gimbal actions are not ported.
+- The Macros quick button lists the macros with run and stop; it is lit while one runs.
+- Draw (`widgets/DrawBoard`): while the quick button is on, drags on the preview draw lines, and a strip over
+  the preview has wipe, undo, six colours and the width. The lines are one overlay over the whole picture, on
+  the stream as well, drawn into a bitmap no wider than 1280 px that is uploaded at most 30 times a second.
+  They stay after leaving draw mode until wiped, and are not saved.
+- The Overlays quick button hides the status items and the chat over the preview until it is pressed again.
 
 ## Video scenes
 
@@ -421,7 +492,7 @@ them, not code style.
   the layout phase only, while the panel slides out from behind the bar or fades away over the preview.
 - The chat panel keeps its draft and whether the stream tools page is open in `MainScreen`, so hiding the
   panel loses neither.
-- Panels (settings, chat, widgets, OBS, browser) sit between the preview and the control bar on wide screens (350 dp, Moblin's
+- Panels (settings, chat, widgets, OBS, browser, filters, auto switcher, macros) sit between the preview and the control bar on wide screens (350 dp, Moblin's
   `settingsHalfWidth`) and fill the screen on near-square ones. Their header is 44 dp with `PanelButtons`:
   hide and close, extra small filled icon buttons with the expressive shape morph. They are 32 dp with
   16 dp between them, so their 48 dp touch targets do not overlap. Hide takes the panel off the screen and
@@ -445,8 +516,9 @@ them, not code style.
 - `streamUrl` adds the profile's SRT latency to an `srt`/`srtla` URL that does not name one.
   `StreamProfile.bondingNetworks` limits which networks SRTLA requests.
 - `mirrorFrontCameraOnStream` makes the encoder draw the same mirrored picture as the preview.
-- The Widgets quick button opens a panel that turns the selected scene's widgets on and off. Scenes and
-  widgets are edited under Settings, Scenes: a scene page has the source (a camera or Video), the video list when the source is
+- The Widgets quick button opens a panel that turns the selected scene's widgets on and off. Scenes,
+  widgets, auto scene switchers and macros are edited under Settings, Scenes (`ui/Automation.kt` has the
+  last two): a scene page has the source (a camera or Video), the video list when the source is
   Video, and every widget with a switch; tapping a widget opens its placement in that scene.
 - The OBS quick button (OBS's own logo, `ObsLogo`) opens the OBS panel: the program picture with the
   stream and record buttons beside it, the scenes as toggle buttons, the audio inputs with their mute

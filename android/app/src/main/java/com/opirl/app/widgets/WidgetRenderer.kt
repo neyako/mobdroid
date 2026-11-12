@@ -23,6 +23,7 @@ import android.text.style.StyleSpan
 import com.opirl.app.chat.ChatLine
 import com.opirl.app.chat.EmoteImages
 import com.opirl.app.chat.chatNameColor
+import com.opirl.app.effects.chromaKey
 import com.opirl.app.engine.chat.ChatSegment
 import com.opirl.app.media.gl.BrowserPage
 import com.opirl.app.media.gl.Overlay
@@ -114,7 +115,7 @@ class WidgetRenderer(
                 val page = BrowserPage(widget.url, widget.browserWidth, widget.browserHeight)
                 val width = placement.size / 100f
                 val rect = overlayRect(placement, width, width * input.width / input.height * page.height / page.width)
-                return@mapNotNull Overlay(widget.id, null, rect.x, rect.y, rect.width, rect.height, widget.previewOnly, page)
+                return@mapNotNull Overlay(widget.id, null, rect.x, rect.y, rect.width, rect.height, widget.previewOnly, page, key(widget))
             }
             val bitmap = runCatching {
                 when (widget.type) {
@@ -153,9 +154,20 @@ class WidgetRenderer(
             val width = if (widget.type == WidgetType.IMAGE) placement.size / 100f else bitmap.width.toFloat() / input.width
             val height = width * input.width / input.height * bitmap.height / bitmap.width
             val rect = overlayRect(placement, width, height)
-            Overlay(widget.id, bitmap, rect.x, rect.y, rect.width, rect.height, widget.previewOnly)
+            Overlay(
+                widget.id,
+                bitmap,
+                rect.x,
+                rect.y,
+                rect.width,
+                rect.height,
+                widget.previewOnly,
+                key = if (widget.type == WidgetType.IMAGE) key(widget) else null,
+            )
         }
     }
+
+    private fun key(widget: Widget) = if (widget.removeBackground) chromaKey(widget.keyFrom, widget.keyTo) else null
 
     private fun cached(id: String, key: Any, create: () -> Bitmap?): Bitmap? {
         cache[id]?.takeIf { it.key == key }?.let { return it.bitmap }

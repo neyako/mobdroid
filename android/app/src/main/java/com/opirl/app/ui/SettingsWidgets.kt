@@ -30,6 +30,7 @@ import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.ListItemShapes
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.SegmentedListItem
@@ -42,7 +43,9 @@ import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -442,5 +445,52 @@ fun RemovableRow(shapes: ListItemShapes, title: String, value: String, onClick: 
             trailingContent = trailing,
             content = content,
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun PickRow(shapes: ListItemShapes, title: String, selected: Boolean, onClick: () -> Unit) {
+    SegmentedListItem(
+        contentPadding = RowPadding,
+        colors = rowColors(),
+        onClick = onClick,
+        shapes = shapes,
+        modifier = Modifier.heightIn(max = RowHeight),
+        leadingContent = { RadioButton(selected, null) },
+    ) { Text(title, style = RowTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun SwitchRemovableRow(shapes: ListItemShapes, title: String, checked: Boolean, onChange: (Boolean) -> Unit, onRemove: () -> Unit) {
+    SegmentedListItem(
+        contentPadding = PaddingValues(start = 14.dp, top = 4.dp, end = 4.dp, bottom = 4.dp),
+        colors = rowColors(),
+        onClick = { onChange(!checked) },
+        shapes = shapes,
+        modifier = Modifier.heightIn(max = RowHeight),
+        trailingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked, null, Modifier.scale(0.85f))
+                CompactIconButton(Icons.Rounded.Close, stringResource(R.string.remove_item, title), onClick = onRemove)
+            }
+        },
+    ) { Text(title, style = RowTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+}
+
+@Composable
+fun <T : Any> NumberRow(
+    shapes: ListItemShapes,
+    title: String,
+    value: T,
+    decimal: Boolean,
+    parse: (String) -> T?,
+    onChange: (T) -> Unit,
+) {
+    var text by remember(value) { mutableStateOf(value.toString().removeSuffix(".0")) }
+    TextRow(shapes, title, text, keyboard = if (decimal) KeyboardType.Decimal else KeyboardType.Number) { typed ->
+        text = typed
+        parse(typed.trim())?.let(onChange)
     }
 }
