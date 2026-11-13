@@ -52,6 +52,7 @@
     <string name="chat_empty">Chưa có tin nhắn</string>
     <string name="chat_message_platform">Nhắn tới %1$s</string>
     <string name="chat_send_message">Gửi tin nhắn</string>
+    <string name="chat_log_in_to_send">Đăng nhập để gửi tin nhắn</string>
     <string name="send">Gửi</string>
     <string name="chat_speech_said">%1$s nói %2$s</string>
     <string name="obs_status_live">đang phát</string>
@@ -90,6 +91,9 @@
     <string name="display">Hiển thị</string>
     <string name="status">Trạng thái</string>
     <string name="quick_buttons">Nút nhanh</string>
+    <string name="quick_page_stream">Phát</string>
+    <string name="quick_page_scene">Cảnh</string>
+    <string name="quick_page_connect">Kết nối</string>
     <string name="bitrate_presets">Bitrate đặt sẵn</string>
     <string name="about">Giới thiệu</string>
     <string name="licenses">Giấy phép</string>

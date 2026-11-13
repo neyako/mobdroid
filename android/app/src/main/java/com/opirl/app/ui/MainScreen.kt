@@ -1,5 +1,7 @@
 package com.opirl.app.ui
 
+import androidx.compose.ui.res.stringResource
+import com.opirl.app.settings.QuickButtonPage
 import android.graphics.Rect
 import java.util.Locale
 import kotlinx.coroutines.launch
@@ -49,9 +51,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -143,7 +143,6 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
             side = Side.SETTINGS
         }
     }
-    var showBitrate by remember { mutableStateOf(false) }
     val stealth = ui.stealth
     val moblinkStatus by engine.moblink.status.collectAsStateWithLifecycle()
     val remoteStatus by engine.remote.status.collectAsStateWithLifecycle()
@@ -176,6 +175,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
         widgetsOpen = side == Side.WIDGETS && !panelHidden,
         obsOpen = side == Side.OBS && !panelHidden,
         browserOpen = side == Side.BROWSER && !panelHidden,
+        bitrateOpen = side == Side.BITRATE && !panelHidden,
         replay = replay.takeIf { profile.replay.enabled },
         replayOpen = replayOpen,
         monitoring = monitoring.takeIf { transportOf(profile.previewStream.url) == Transport.WHIP },
@@ -217,11 +217,15 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                 flash.animateTo(0f, motion.slowEffectsSpec())
             }
         },
-        onBitrate = { showBitrate = true },
+        onBitrate = { toggle(Side.BITRATE) },
         onStealth = { engine.setStealth(true) },
         onMute = { engine.setMuted(!ui.muted) },
         onTorch = { engine.setTorch(!ui.torch) },
     )
+    val buttonPages = QuickButtonPage.entries
+        .map { page -> page to buttons.filter { appSettings.pageOf(it.id) == page } }
+        .filter { it.second.isNotEmpty() }
+    val orderedButtons = buttonPages.flatMap { it.second }
     val window = LocalWindowInfo.current.containerSize
     val density = LocalDensity.current
     val large = isLargeWindow()
@@ -250,7 +254,19 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
     }
     val sidePanel: @Composable (Side, (@Composable () -> Unit)?) -> Unit = { shown, chatHeader ->
         when (shown) {
-            Side.CHAT -> ChatPanel(engine, appSettings, chatDraft, chatTools, onHide = { panelHidden = true }, onClose = closePanel, header = chatHeader)
+            Side.CHAT -> ChatPanel(
+                engine,
+                appSettings,
+                chatDraft,
+                chatTools,
+                onHide = { panelHidden = true },
+                onClose = closePanel,
+                onLogin = {
+                    settingsPages.open(Route.Chat)
+                    side = Side.SETTINGS
+                },
+                header = chatHeader,
+            )
             Side.WIDGETS -> WidgetsPanel(settings, engine, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
             Side.OBS -> obsPanel()
             Side.REMOTE -> remotePanel()
@@ -258,6 +274,10 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
             Side.FILTERS -> FiltersPanel(settings, appSettings, engine, onHide = { panelHidden = true }, onClose = closePanel)
             Side.SWITCHER -> SwitcherPanel(settings, appSettings, onHide = { panelHidden = true }, onClose = closePanel)
             Side.MACROS -> MacrosPanel(appSettings, engine, onHide = { panelHidden = true }, onClose = closePanel)
+            Side.BITRATE -> BitratePanel(appSettings.bitratePresetsKbps, profile.bitrateKbps, onHide = { panelHidden = true }, onClose = closePanel) {
+                engine.setMaxBitrate(it)
+                closePanel()
+            }
             Side.SETTINGS -> SettingsPanel(settings, engine, busy, settingsPages, onHide = { panelHidden = true }, onClose = closePanel)
         }
     }
@@ -269,7 +289,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
     val picture: @Composable (Modifier) -> Unit = { modifier ->
         Box(modifier) {
             Preview(engine, ui, 16.dp, access, draw) { flash.value }
-            statusView(false, Modifier.align(Alignment.TopEnd).padding(12.dp).padding(top = statusInset))
+            statusView(false, Modifier.align(Alignment.TopEnd).padding(8.dp).padding(top = statusInset))
             floatingButtons(Modifier.align(Alignment.TopEnd).padding(8.dp))
             if (replayOpen) {
                 ReplayOverlay(engine, settings, replayPanel, aspect, Modifier.matchParentSize())
@@ -317,7 +337,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                                 horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                buttons.forEach { QuickButtonView(it, 48.dp, 60.dp) }
+                                orderedButtons.forEach { QuickButtonView(it, 48.dp, 60.dp) }
                             }
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 AppLogo()
@@ -355,11 +375,12 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                             AppLogo(48.dp)
                             SettingsButton(showSettings && !panelHidden, 48.dp) { toggle(Side.SETTINGS) }
                         }
+                        val rowScroll = rememberScrollState()
                         Row(
-                            Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                            Modifier.weight(1f).fadeEnd(rowScroll, 28.dp, vertical = false).horizontalScroll(rowScroll),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            buttons.forEach { QuickButtonView(it, 48.dp, 60.dp) }
+                            orderedButtons.forEach { QuickButtonView(it, 48.dp, 60.dp) }
                         }
                         LiveButton(ui.live, confirmStop, onLive, Modifier.padding(bottom = 14.dp).size(140.dp, 56.dp))
                     }
@@ -445,11 +466,12 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                         Modifier.fillMaxWidth().weight(1f).padding(horizontal = 20.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        val rowScroll = rememberScrollState()
                         Row(
-                            Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                            Modifier.weight(1f).fadeEnd(rowScroll, 28.dp, vertical = false).horizontalScroll(rowScroll),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            buttons.forEach { QuickButtonView(it, 44.dp, 46.dp) }
+                            orderedButtons.forEach { QuickButtonView(it, 44.dp, 46.dp) }
                         }
                         Spacer(Modifier.width(8.dp))
                         LiveButton(ui.live, confirmStop, onLive, Modifier.size(96.dp, 52.dp))
@@ -475,7 +497,7 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                         ) {
                             Box(Modifier.size(width, height)) {
                                 Preview(engine, ui, 16.dp, access, draw) { flash.value }
-                                statusView(false, Modifier.align(Alignment.TopEnd).padding(12.dp).padding(top = statusInset))
+                                statusView(false, Modifier.align(Alignment.TopEnd).padding(8.dp).padding(top = statusInset))
                                 floatingButtons(Modifier.align(Alignment.TopEnd).padding(8.dp))
                                 if (replayOpen) {
                                     ReplayOverlay(engine, settings, replayPanel, aspect, Modifier.matchParentSize())
@@ -537,21 +559,26 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
                             .padding(vertical = 8.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            AppLogo()
-                            SettingsButton(showSettings && !panelHidden) { toggle(Side.SETTINGS) }
-                        }
-                        QuickButtonGrid(
-                            buttons,
-                            (closedBar / 50.dp).toInt(),
+                        val columns = (closedBar / 50.dp).toInt()
+                        QuickButtonHeader(
+                            columns,
                             { open.value },
-                            Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp).verticalScroll(rememberScrollState()),
+                            { AppLogo() },
+                            { SettingsButton(showSettings && !panelHidden) { toggle(Side.SETTINGS) } },
+                            Modifier.fillMaxWidth(),
+                        )
+                        QuickButtonPages(
+                            buttonPages.map { it.second },
+                            buttonPages.map { stringResource(it.first.label) },
+                            columns,
+                            { open.value },
+                            Modifier.weight(1f).fillMaxWidth().padding(top = 6.dp),
                         )
                         LiveButton(
                             ui.live,
                             confirmStop,
                             onLive,
-                            Modifier.padding(horizontal = 8.dp).fillMaxWidth().height(40.dp),
+                            Modifier.padding(start = 8.dp, top = 8.dp, end = 8.dp).fillMaxWidth().height(52.dp),
                         )
                     }
                     }
@@ -606,21 +633,9 @@ fun MainScreen(engine: StreamEngine, settings: SettingsStore, access: Access, hi
     BackHandler(stealth) { engine.setStealth(false) }
     pendingLink?.let { DeepLinkDialog(it, settings, appSettings, engine, busy) }
 
-    if (showBitrate) {
-        ModalBottomSheet(
-            onDismissRequest = { showBitrate = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ) {
-            BitratePresets(appSettings.bitratePresetsKbps, profile.bitrateKbps) {
-                engine.setMaxBitrate(it)
-                showBitrate = false
-            }
-        }
-    }
 }
 
-private enum class Side { SETTINGS, CHAT, WIDGETS, OBS, BROWSER, FILTERS, SWITCHER, MACROS, REMOTE }
+private enum class Side { SETTINGS, CHAT, WIDGETS, OBS, BROWSER, FILTERS, SWITCHER, MACROS, REMOTE, BITRATE }
 
 fun formatBitrate(bps: Long): String = if (bps >= 1_000_000) "%.1f Mbps".format(Locale.ROOT, bps / 1e6) else "${bps / 1000} kbps"
 

@@ -1,5 +1,22 @@
 package com.opirl.app.ui
 
+import androidx.compose.ui.graphics.lerp
+import kotlin.math.absoluteValue
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.verticalScroll
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.foundation.ScrollState
 import java.util.Locale
 import androidx.compose.animation.core.animateDpAsState
 import androidx.annotation.StringRes
@@ -14,7 +31,6 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -26,8 +42,6 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -53,7 +67,8 @@ import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material.icons.rounded.SlowMotionVideo
 import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.CloseFullscreen
+import androidx.compose.material.icons.rounded.OpenInFull
 import androidx.compose.material.icons.rounded.Widgets
 import androidx.compose.material.icons.rounded.FiberManualRecord
 import androidx.compose.material.icons.rounded.Pause
@@ -108,6 +123,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -116,7 +132,6 @@ import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.util.lerp
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -162,6 +177,7 @@ internal val Warning = Color(0xFFFF9500)
 internal val Pending = Color(0xFFFFCC00)
 
 class QuickButton(
+    val id: QuickButtonId,
     @StringRes val label: Int,
     val icon: ImageVector,
     val checked: Boolean,
@@ -178,6 +194,7 @@ fun quickButtons(
     widgetsOpen: Boolean,
     obsOpen: Boolean,
     browserOpen: Boolean,
+    bitrateOpen: Boolean,
     replay: ReplayState?,
     replayOpen: Boolean,
     monitoring: Boolean?,
@@ -209,39 +226,43 @@ fun quickButtons(
     onTorch: () -> Unit,
 ) = QuickButtonId.entries.filter { it !in hidden }.mapNotNull { id ->
     when (id) {
-        QuickButtonId.CHAT -> QuickButton(id.label, Icons.Rounded.ChatBubble, chatOpen, onClick = onChat)
+        QuickButtonId.CHAT -> QuickButton(id, id.label, Icons.Rounded.ChatBubble, chatOpen, onClick = onChat)
         QuickButtonId.RECORD -> QuickButton(
+            id,
             if (confirmRecordStop) R.string.confirm else if (recording) R.string.stop else id.label,
             if (recording) Icons.Rounded.Stop else Icons.Rounded.FiberManualRecord,
             recording,
             LiveRed,
             onRecord,
         )
-        QuickButtonId.SNAPSHOT -> QuickButton(id.label, Icons.Rounded.PhotoCamera, false, onClick = onSnapshot)
-        QuickButtonId.REPLAY -> replay?.let { QuickButton(id.label, Icons.Rounded.SlowMotionVideo, replayOpen, onClick = onReplay) }
+        QuickButtonId.SNAPSHOT -> QuickButton(id, id.label, Icons.Rounded.PhotoCamera, false, onClick = onSnapshot)
+        QuickButtonId.REPLAY -> replay?.let { QuickButton(id, id.label, Icons.Rounded.SlowMotionVideo, replayOpen, onClick = onReplay) }
         QuickButtonId.INSTANT_REPLAY -> replay?.let {
             QuickButton(
+                id,
                 if (it == ReplayState.PLAYING) R.string.stop else id.label,
                 if (it == ReplayState.PLAYING) Icons.Rounded.Stop else Icons.Rounded.Replay,
                 it != ReplayState.IDLE,
                 onClick = onInstantReplay,
             )
         }
-        QuickButtonId.PREVIEW_STREAM -> monitoring?.let { QuickButton(id.label, Icons.Rounded.CastConnected, it, onClick = onMonitor) }
-        QuickButtonId.WIDGETS -> QuickButton(id.label, Icons.Rounded.Widgets, widgetsOpen, onClick = onWidgets)
-        QuickButtonId.OBS -> QuickButton(id.label, ObsLogo, obsOpen, onClick = onObs)
-        QuickButtonId.BROWSER -> QuickButton(id.label, Icons.Rounded.Language, browserOpen, onClick = onBrowser)
-        QuickButtonId.REMOTE -> if (remote) QuickButton(id.label, Icons.Rounded.SettingsRemote, remoteOpen, onClick = onRemote) else null
-        QuickButtonId.BITRATE -> QuickButton(id.label, Icons.Rounded.Speed, false, onClick = onBitrate)
+        QuickButtonId.PREVIEW_STREAM -> monitoring?.let { QuickButton(id, id.label, Icons.Rounded.CastConnected, it, onClick = onMonitor) }
+        QuickButtonId.WIDGETS -> QuickButton(id, id.label, Icons.Rounded.Widgets, widgetsOpen, onClick = onWidgets)
+        QuickButtonId.OBS -> QuickButton(id, id.label, ObsLogo, obsOpen, onClick = onObs)
+        QuickButtonId.BROWSER -> QuickButton(id, id.label, Icons.Rounded.Language, browserOpen, onClick = onBrowser)
+        QuickButtonId.REMOTE -> if (remote) QuickButton(id, id.label, Icons.Rounded.SettingsRemote, remoteOpen, onClick = onRemote) else null
+        QuickButtonId.BITRATE -> QuickButton(id, id.label, Icons.Rounded.Speed, bitrateOpen, onClick = onBitrate)
         QuickButtonId.MIC -> QuickButton(
+            id,
             id.label,
             if (ui.muted) Icons.Rounded.MicOff else Icons.Rounded.Mic,
             ui.muted,
             onClick = onMute,
         )
-        QuickButtonId.STEALTH -> QuickButton(id.label, Icons.Rounded.VisibilityOff, false, onClick = onStealth)
+        QuickButtonId.STEALTH -> QuickButton(id, id.label, Icons.Rounded.VisibilityOff, false, onClick = onStealth)
         QuickButtonId.TORCH -> if (ui.activeCamera?.hasFlash == true) {
             QuickButton(
+                id,
                 id.label,
                 if (ui.torch) Icons.Rounded.FlashlightOn else Icons.Rounded.FlashlightOff,
                 ui.torch,
@@ -250,11 +271,11 @@ fun quickButtons(
         } else {
             null
         }
-        QuickButtonId.FILTERS -> QuickButton(id.label, Icons.Rounded.AutoFixHigh, filters, onClick = onFilters)
-        QuickButtonId.DRAW -> QuickButton(id.label, Icons.Rounded.Brush, drawing, onClick = onDraw)
-        QuickButtonId.OVERLAYS -> QuickButton(id.label, Icons.Rounded.Dashboard, overlaysHidden, onClick = onOverlays)
-        QuickButtonId.AUTO_SWITCHER -> QuickButton(id.label, Icons.Rounded.Autorenew, switcher, onClick = onSwitcher)
-        QuickButtonId.MACROS -> QuickButton(id.label, Icons.Rounded.Bolt, macros, onClick = onMacros)
+        QuickButtonId.FILTERS -> QuickButton(id, id.label, Icons.Rounded.AutoFixHigh, filters, onClick = onFilters)
+        QuickButtonId.DRAW -> QuickButton(id, id.label, Icons.Rounded.Brush, drawing, onClick = onDraw)
+        QuickButtonId.OVERLAYS -> QuickButton(id, id.label, Icons.Rounded.Dashboard, overlaysHidden, onClick = onOverlays)
+        QuickButtonId.AUTO_SWITCHER -> QuickButton(id, id.label, Icons.Rounded.Autorenew, switcher, onClick = onSwitcher)
+        QuickButtonId.MACROS -> QuickButton(id, id.label, Icons.Rounded.Bolt, macros, onClick = onMacros)
     }
 }
 
@@ -267,7 +288,7 @@ internal fun BarButton(icon: ImageVector, label: String, checked: Boolean, size:
         onCheckedChange = { onClick() },
         shapes = IconButtonDefaults.toggleableShapes(),
         colors = IconButtonDefaults.iconToggleButtonColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             contentColor = Color.White,
             checkedContainerColor = color ?: MaterialTheme.colorScheme.primary,
             checkedContentColor = if (color != null) Color.White else MaterialTheme.colorScheme.onPrimary,
@@ -283,7 +304,15 @@ fun QuickButtonView(button: QuickButton, size: Dp, width: Dp) {
     val label = stringResource(button.label)
     Column(Modifier.width(width), horizontalAlignment = Alignment.CenterHorizontally) {
         BarButton(button.icon, label, button.checked, size, button.color, button.onClick)
-        Text(label, fontSize = 10.sp, lineHeight = 12.sp, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
+        Text(
+            label,
+            fontSize = 10.sp,
+            lineHeight = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = if (button.checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 3.dp),
+        )
     }
 }
 
@@ -304,7 +333,7 @@ fun PanelButtons(hidden: Boolean, onHide: () -> Unit, onClose: () -> Unit, modif
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         FilledIconButton(onHide, IconButtonDefaults.shapes(), size, colors = colors) {
             Icon(
-                if (hidden) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
+                if (hidden) Icons.Rounded.OpenInFull else Icons.Rounded.CloseFullscreen,
                 stringResource(if (hidden) R.string.show_panel else R.string.hide_panel),
                 icon,
             )
@@ -319,11 +348,115 @@ fun quickButtonX(index: Int, count: Int, columns: Int, width: Int, cell: Int): I
     (width - minOf(columns, count - index / columns * columns) * cell) / 2 + index % columns * cell
 
 @Composable
+fun QuickButtonPages(pages: List<List<QuickButton>>, labels: List<String>, closedColumns: Int, open: () -> Float, modifier: Modifier) {
+    val state = rememberPagerState { pages.size }
+    Column(modifier) {
+        HorizontalPager(
+            state,
+            Modifier.weight(1f).fillMaxWidth(),
+            flingBehavior = PagerDefaults.flingBehavior(state, snapAnimationSpec = MaterialTheme.motionScheme.fastSpatialSpec()),
+        ) { page ->
+            val scroll = rememberScrollState()
+            QuickButtonGrid(
+                pages[page],
+                closedColumns,
+                open,
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val distance = state.getOffsetDistanceInPages(page).absoluteValue.coerceAtMost(1f)
+                        alpha = 1f - 0.7f * distance
+                        scaleX = 1f - 0.08f * distance
+                        scaleY = scaleX
+                    }
+                    .fadeEnd(scroll, 16.dp, vertical = true)
+                    .verticalScroll(scroll),
+            )
+        }
+        if (pages.size > 1) PageDots(state, labels)
+    }
+}
+
+@Composable
+private fun PageDots(state: PagerState, labels: List<String>) {
+    val scope = rememberCoroutineScope()
+    val settle = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
+    val on = MaterialTheme.colorScheme.primary
+    val off = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+    Row(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.Center) {
+        repeat(state.pageCount) { page ->
+            val selection = { 1f - state.getOffsetDistanceInPages(page).absoluteValue.coerceAtMost(1f) }
+            Box(
+                Modifier
+                    .clickable(interactionSource = null, indication = null) {
+                        scope.launch { state.animateScrollToPage(page, animationSpec = settle) }
+                    }
+                    .semantics { contentDescription = labels.getOrElse(page) { "" } }
+                    .padding(horizontal = 3.dp, vertical = 5.dp)
+                    .layout { measurable, _ ->
+                        val width = lerp(6.dp.roundToPx(), 16.dp.roundToPx(), selection())
+                        val placeable = measurable.measure(Constraints.fixed(width, 6.dp.roundToPx()))
+                        layout(width, placeable.height) { placeable.place(0, 0) }
+                    }
+                    .drawBehind { drawRoundRect(lerp(off, on, selection()), cornerRadius = CornerRadius(size.height / 2)) },
+            )
+        }
+    }
+}
+
+@Composable
+fun QuickButtonHeader(closedColumns: Int, open: () -> Float, logo: @Composable () -> Unit, settings: @Composable () -> Unit, modifier: Modifier) {
+    Layout({ logo(); settings() }, modifier) { measurables, constraints ->
+        val (logoPlaceable, settingsPlaceable) = measurables.map { it.measure(Constraints()) }
+        val cell = 50.dp.roundToPx()
+        val inset = 1.dp.roundToPx() + (48.dp.roundToPx()) / 2
+        val width = constraints.maxWidth
+        val fraction = open()
+        val center = { column: Int, columns: Int -> (width - columns * cell) / 2 + column * cell + inset }
+        val height = maxOf(logoPlaceable.height, settingsPlaceable.height)
+        layout(width, height) {
+            logoPlaceable.place(
+                lerp(center(0, closedColumns), center(0, 2), fraction) - logoPlaceable.width / 2,
+                (height - logoPlaceable.height) / 2,
+            )
+            settingsPlaceable.place(
+                lerp(center(closedColumns - 1, closedColumns), center(1, 2), fraction) - settingsPlaceable.width / 2,
+                (height - settingsPlaceable.height) / 2,
+            )
+        }
+    }
+}
+
+fun Modifier.fadeEnd(scroll: ScrollState, length: Dp, vertical: Boolean): Modifier =
+    graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen).drawWithContent {
+        drawContent()
+        if (scroll.canScrollForward) {
+            val edge = length.toPx()
+            val colors = listOf(Color.Black, Color.Transparent)
+            if (vertical) {
+                drawRect(
+                    Brush.verticalGradient(colors, startY = size.height - edge, endY = size.height),
+                    topLeft = Offset(0f, size.height - edge),
+                    size = Size(size.width, edge),
+                    blendMode = BlendMode.DstIn,
+                )
+            } else {
+                drawRect(
+                    Brush.horizontalGradient(colors, startX = size.width - edge, endX = size.width),
+                    topLeft = Offset(size.width - edge, 0f),
+                    size = Size(edge, size.height),
+                    blendMode = BlendMode.DstIn,
+                )
+            }
+        }
+    }
+
+@Composable
 fun QuickButtonGrid(buttons: List<QuickButton>, closedColumns: Int, open: () -> Float, modifier: Modifier) {
     Layout({ buttons.forEach { QuickButtonView(it, 40.dp, 48.dp) } }, modifier) { measurables, constraints ->
         val placeables = measurables.map { it.measure(Constraints()) }
         val cell = 50.dp.roundToPx()
-        val rowHeight = (placeables.maxOfOrNull { it.height } ?: 0) + 6.dp.roundToPx()
+        val rowHeight = (placeables.maxOfOrNull { it.height } ?: 0) + 2.dp.roundToPx()
         val width = constraints.maxWidth
         val count = placeables.size
         val fraction = open()
@@ -342,7 +475,15 @@ fun QuickButtonGrid(buttons: List<QuickButton>, closedColumns: Int, open: () -> 
 
 @Composable
 fun AppLogo(size: Dp = 40.dp) {
-    Image(painterResource(R.drawable.ic_logo), "opIRL", Modifier.size(size))
+    val dot = MaterialTheme.colorScheme.primary
+    Canvas(Modifier.size(size).semantics { contentDescription = "opIRL" }) {
+        val unit = this.size.width / 72f
+        val stroke = Stroke(6.5f * unit)
+        drawCircle(Color.White, 9f * unit, Offset(14.25f * unit, 31.775f * unit), style = stroke)
+        drawCircle(Color.White, 9f * unit, Offset(43.75f * unit, 31.775f * unit), style = stroke)
+        drawLine(Color.White, Offset(34.75f * unit, 19.525f * unit), Offset(34.75f * unit, 52.475f * unit), 6.5f * unit)
+        drawCircle(dot, 4.8f * unit, Offset(65f * unit, 39.575f * unit))
+    }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -352,7 +493,7 @@ fun LiveButton(state: LiveState, confirmStop: Boolean, onClick: () -> Unit, modi
     val haptics = LocalHapticFeedback.current
     val motion = MaterialTheme.motionScheme
     val description = stringResource(if (confirmStop) R.string.confirm_stop else if (live) R.string.stop_stream else R.string.go_live)
-    val corner by animateDpAsState(if (live) 26.dp else 14.dp, motion.defaultSpatialSpec(), label = "corner")
+    val corner by animateDpAsState(if (live) 28.dp else 16.dp, motion.defaultSpatialSpec(), label = "corner")
     val border by animateDpAsState(if (live) 2.dp else 0.dp, motion.defaultSpatialSpec(), label = "border")
     Button(
         onClick = {
@@ -374,33 +515,6 @@ fun LiveButton(state: LiveState, confirmStop: Boolean, onClick: () -> Unit, modi
             label = "live",
         ) { label ->
             Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1)
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalLayoutApi::class)
-@Composable
-fun BitratePresets(presetsKbps: List<Int>, currentKbps: Int, onSelect: (Int) -> Unit) {
-    Text(
-        stringResource(R.string.bitrate_mbps),
-        style = MaterialTheme.typography.titleMedium,
-        modifier = Modifier.padding(start = 20.dp, bottom = 12.dp),
-    )
-    FlowRow(
-        Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        maxItemsInEachRow = 4,
-    ) {
-        presetsKbps.forEach { kbps ->
-            ToggleButton(
-                checked = kbps == currentKbps,
-                onCheckedChange = { onSelect(kbps) },
-                colors = ToggleButtonDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(formatMbps(kbps), maxLines = 1)
-            }
         }
     }
 }
@@ -618,7 +732,13 @@ fun Status(
             }
         }
     } else {
-        Column(modifier, horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        val shown = StatusItem.TEMPERATURE !in hidden || StatusItem.AUDIO_LEVEL !in hidden || live || recording != null ||
+            obs != null || moblink != null || remoteControl != null || error != null
+        Column(
+            if (shown) modifier.background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 6.dp) else modifier,
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
             remote()
             connections()
             uptime()
@@ -647,7 +767,7 @@ private fun AudioMeter(level: StateFlow<Float>, muted: Boolean) {
         val decibels = level.collectAsStateWithLifecycle()
         Canvas(Modifier.size(84.dp, 6.dp)) {
             val radius = CornerRadius(size.height / 2)
-            drawRoundRect(Color.Black.copy(alpha = 0.45f), cornerRadius = radius)
+            drawRoundRect(Color.White.copy(alpha = 0.22f), cornerRadius = radius)
             val filled = size.width * (1f - decibels.value / AUDIO_LEVEL_FLOOR_DB)
             clipRect(right = filled) {
                 drawRoundRect(Color(0xFF34C759), cornerRadius = radius)
@@ -729,7 +849,7 @@ internal fun <T> Segments(
     modifier: Modifier,
     label: (T) -> String,
     fill: Boolean = false,
-    container: Color = Color.Black.copy(alpha = 0.55f),
+    container: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
     small: Boolean = false,
     onSelect: (T) -> Unit,
 ) {

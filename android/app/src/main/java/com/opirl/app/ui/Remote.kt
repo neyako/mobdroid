@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.FiberManualRecord
@@ -30,7 +29,6 @@ import androidx.compose.material.icons.rounded.MicOff
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -76,25 +74,14 @@ fun remoteZoomPresets(settings: RemoteSettings?, position: String?): List<Remote
 @Composable
 fun RemotePanel(engine: StreamEngine, settings: RemoteControlSettings, onHide: () -> Unit, onClose: () -> Unit, onSettings: () -> Unit) {
     val assistant by engine.remote.assistant.collectAsStateWithLifecycle()
-    Surface(Modifier.fillMaxSize(), color = Color.Black) {
-        Column {
-            Row(
-                Modifier.fillMaxWidth().height(PanelHeaderHeight).padding(start = 16.dp, end = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.weight(1f)) { Text(stringResource(R.string.quick_remote), style = PanelTitle) }
-                PanelButtons(hidden = false, onHide, onClose)
-            }
-            Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp).padding(bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                val current = assistant
-                if (current == null) {
-                    Waiting(stringResource(R.string.message_remote_settings), onSettings)
-                } else {
-                    Assistant(current, settings.assistantPort, onSettings)
-                }
+    PanelSurface {
+        PanelHeader(stringResource(R.string.quick_remote), onHide, onClose)
+        PanelBody {
+            val current = assistant
+            if (current == null) {
+                Waiting(stringResource(R.string.message_remote_settings), onSettings)
+            } else {
+                Assistant(current, settings.assistantPort, onSettings)
             }
         }
     }
@@ -201,7 +188,7 @@ private fun Connected(assistant: RemoteControlAssistant, state: RemoteAssistantS
             assistant.request(RemoteRequest.SetStealthMode(!stealth))
         }
     }
-    val container = MaterialTheme.colorScheme.surfaceContainerHighest
+    val container = MaterialTheme.colorScheme.secondaryContainer
     val scenes = state.settings?.scenes.orEmpty()
     if (scenes.size > 1) {
         val fill = scenes.size <= 4
@@ -243,7 +230,7 @@ private fun Picture(assistant: RemoteControlAssistant, state: RemoteAssistantSta
             .fillMaxWidth()
             .aspectRatio(image?.let { (it.width.toFloat() / it.height).coerceAtLeast(1f) } ?: (16f / 9f))
             .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .semantics { contentDescription = description },
     ) {
         image?.let { Image(it, null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().background(Color.Black)) }

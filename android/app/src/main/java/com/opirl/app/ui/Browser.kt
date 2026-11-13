@@ -19,15 +19,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -35,17 +31,13 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bookmarks
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -67,7 +59,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -176,32 +167,28 @@ fun BrowserPanel(store: SettingsStore, settings: AppSettings, browser: BrowserSt
     BackHandler(showBookmarks || browser.canGoBack) {
         if (showBookmarks) showBookmarks = false else browser.webView?.goBack()
     }
-    Surface(Modifier.fillMaxSize(), color = Color.Black) {
+    PanelSurface {
         Column(Modifier.imePadding()) {
             if (showBookmarks) {
-                Row(Modifier.fillMaxWidth().height(PanelHeaderHeight).padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.width(70.dp)) {
-                        IconButton({ showBookmarks = false }, Modifier.size(44.dp)) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.navigate_back), Modifier.size(20.dp))
-                        }
-                    }
-                    Text(stringResource(R.string.bookmarks), style = PanelTitle, textAlign = TextAlign.Center, maxLines = 1, modifier = Modifier.weight(1f))
-                    PanelButtons(hidden = false, onHide, onClose)
-                }
+                PanelHeader(stringResource(R.string.bookmarks), onHide, onClose, onBack = { showBookmarks = false })
                 Bookmarks(store, settings, browser, add = true, open)
             } else {
-                Row(Modifier.fillMaxWidth().height(PanelHeaderHeight).padding(start = 4.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    CompactIconButton(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.previous_page), browser.canGoBack) { view?.goBack() }
-                    CompactIconButton(Icons.AutoMirrored.Rounded.ArrowForward, stringResource(R.string.next_page), browser.canGoForward) { view?.goForward() }
-                    AddressField(browser.url, Modifier.weight(1f), open)
+                PanelHeader(
+                    stringResource(R.string.quick_browser),
+                    onHide,
+                    onClose,
+                    onBack = if (browser.canGoBack) ({ view?.goBack() }) else null,
+                    titleContent = { AddressField(browser.url, Modifier.fillMaxWidth(), open) },
+                ) {
+                    if (browser.canGoForward) {
+                        CompactIconButton(Icons.AutoMirrored.Rounded.ArrowForward, stringResource(R.string.next_page)) { view?.goForward() }
+                    }
                     if (browser.progress < 100) {
                         CompactIconButton(Icons.Rounded.Close, stringResource(R.string.stop_loading)) { view?.stopLoading() }
-                    } else {
-                        CompactIconButton(Icons.Rounded.Refresh, stringResource(R.string.reload), view != null) { view?.reload() }
+                    } else if (view != null) {
+                        CompactIconButton(Icons.Rounded.Refresh, stringResource(R.string.reload)) { view.reload() }
                     }
                     CompactIconButton(Icons.Rounded.Bookmarks, stringResource(R.string.bookmarks)) { showBookmarks = true }
-                    Spacer(Modifier.width(4.dp))
-                    PanelButtons(hidden = false, onHide, onClose)
                 }
                 Box(Modifier.fillMaxWidth().height(2.dp)) {
                     if (browser.progress < 100) {
@@ -250,9 +237,9 @@ private fun AddressField(url: String, modifier: Modifier, onGo: (String) -> Unit
     ) { field ->
         Box(
             Modifier
-                .height(32.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainer)
+                .height(36.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                 .padding(horizontal = 12.dp),
             contentAlignment = Alignment.CenterStart,
         ) {
@@ -273,7 +260,7 @@ private fun AddressField(url: String, modifier: Modifier, onGo: (String) -> Unit
 @Composable
 private fun Bookmarks(store: SettingsStore, settings: AppSettings, browser: BrowserState, add: Boolean, onOpen: (String) -> Unit) {
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp).padding(top = 4.dp, bottom = 16.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 10.dp).padding(bottom = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (add) {
@@ -293,12 +280,7 @@ private fun Bookmarks(store: SettingsStore, settings: AppSettings, browser: Brow
             }
         }
         if (settings.bookmarks.isEmpty()) {
-            Text(
-                stringResource(R.string.no_bookmarks),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 4.dp),
-            )
+            PanelNote(stringResource(R.string.no_bookmarks), Icons.Rounded.Bookmarks)
         } else {
             Group {
                 settings.bookmarks.forEach { bookmark ->

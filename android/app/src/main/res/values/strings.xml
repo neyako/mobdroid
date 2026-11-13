@@ -38,6 +38,9 @@
     <string name="play_video">Play video</string>
     <string name="next_video">Next video</string>
     <string name="video_position">Video position</string>
+    <string name="quick_page_stream">Stream</string>
+    <string name="quick_page_scene">Scene</string>
+    <string name="quick_page_connect">Connect</string>
     <string name="quick_chat" translatable="false">Chat</string>
     <string name="quick_record">Record</string>
     <string name="quick_snapshot">Snapshot</string>
@@ -59,6 +62,7 @@
     <string name="chat_empty">No messages yet</string>
     <string name="chat_message_platform">Message %1$s</string>
     <string name="chat_send_message">Send a message</string>
+    <string name="chat_log_in_to_send">Log in to send messages</string>
     <string name="send">Send</string>
     <string name="chat_speech_said">%1$s said %2$s</string>
     <string name="obs_status_live">live</string>

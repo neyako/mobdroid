@@ -77,23 +77,24 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.graphics.shapes.RoundedPolygon
 
-val RowPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp)
+val RowPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)
+val BlockPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 10.dp)
 val RowHeight: Dp
-    @Composable get() = 44.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)
+    @Composable get() = 48.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)
 
 val TwoLineRowHeight: Dp
-    @Composable get() = 56.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)
-val PanelHeaderHeight = 44.dp
+    @Composable get() = 60.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)
+val PanelHeaderHeight = 52.dp
 
 val RowTitle: TextStyle
     @Composable get() = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp)
 
 val PanelTitle: TextStyle
-    @Composable get() = MaterialTheme.typography.titleMediumEmphasized.copy(fontSize = 15.sp)
+    @Composable get() = MaterialTheme.typography.titleMediumEmphasized.copy(fontSize = 17.sp)
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun rowColors() = ListItemDefaults.segmentedColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+fun rowColors() = ListItemDefaults.segmentedColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
 
 class Badge(val icon: ImageVector, val color: Color, val shape: RoundedPolygon)
 
@@ -120,8 +121,8 @@ fun Group(build: GroupBuilder.() -> Unit) {
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun BadgeIcon(badge: Badge) {
-    Box(Modifier.size(26.dp).clip(badge.shape.toShape()).background(badge.color), contentAlignment = Alignment.Center) {
-        Icon(badge.icon, null, tint = Color.Black, modifier = Modifier.size(15.dp))
+    Box(Modifier.size(28.dp).clip(badge.shape.toShape()).background(badge.color), contentAlignment = Alignment.Center) {
+        Icon(badge.icon, null, tint = Color.Black, modifier = Modifier.size(16.dp))
     }
 }
 
@@ -214,7 +215,14 @@ fun SwitchRow(shapes: ListItemShapes, title: String, checked: Boolean, enabled: 
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun SwitchNavRow(shapes: ListItemShapes, title: String, checked: Boolean, onChange: (Boolean) -> Unit, onClick: () -> Unit) {
+fun SwitchNavRow(
+    shapes: ListItemShapes,
+    title: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+    value: String? = null,
+    onClick: () -> Unit,
+) {
     SegmentedListItem(
         contentPadding = RowPadding,
         colors = rowColors(),
@@ -223,6 +231,15 @@ fun SwitchNavRow(shapes: ListItemShapes, title: String, checked: Boolean, onChan
         modifier = Modifier.heightIn(max = RowHeight),
         trailingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                if (value != null) {
+                    Text(
+                        value,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        modifier = Modifier.padding(end = 8.dp),
+                    )
+                }
                 Switch(checked, onChange, Modifier.scale(0.85f))
                 Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -241,7 +258,7 @@ fun SliderRow(
     step: Int = 1,
     onChange: (Int) -> Unit,
 ) {
-    SegmentedListItem(shapes = shapes, contentPadding = RowPadding, colors = rowColors()) {
+    SegmentedListItem(shapes = shapes, contentPadding = BlockPadding, colors = rowColors()) {
         Column {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(title, style = RowTitle)
@@ -272,10 +289,10 @@ fun <T> ChoiceRow(
     enabled: Boolean = true,
     onSelect: (T) -> Unit,
 ) {
-    SegmentedListItem(shapes = shapes, contentPadding = RowPadding, colors = rowColors()) {
+    SegmentedListItem(shapes = shapes, contentPadding = BlockPadding, colors = rowColors()) {
         Column {
             Text(title, style = RowTitle)
-            EqualWidthRow(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+            EqualWidthRow(Modifier.fillMaxWidth().padding(top = 6.dp)) {
                 values.forEachIndexed { index, value ->
                     ToggleButton(
                         checked = value == selected,
@@ -286,10 +303,15 @@ fun <T> ChoiceRow(
                             values.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
                             else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
                         },
-                        colors = ToggleButtonDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
-                        contentPadding = PaddingValues(horizontal = 4.dp),
+                        colors = ToggleButtonDefaults.colors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                        contentPadding = PaddingValues(horizontal = 2.dp),
                     ) {
-                        Text(label(value), maxLines = 1, style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            label(value),
+                            maxLines = 1,
+                            style = MaterialTheme.typography.labelLarge.copy(fontSize = 13.sp, letterSpacing = 0.sp),
+                            color = if (enabled && isEnabled(value)) Color.Unspecified else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        )
                     }
                 }
             }
@@ -307,7 +329,7 @@ fun BitrateRow(
     enabled: Boolean = true,
     onChange: (Int) -> Unit,
 ) {
-    SegmentedListItem(shapes = shapes, contentPadding = RowPadding, colors = rowColors()) {
+    SegmentedListItem(shapes = shapes, contentPadding = BlockPadding, colors = rowColors()) {
         Column {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(title, style = RowTitle)
@@ -330,7 +352,7 @@ fun BitrateRow(
 @Composable
 private fun EqualWidthRow(modifier: Modifier, content: @Composable () -> Unit) {
     Layout(content, modifier) { measurables, constraints ->
-        val height = 32.dp.roundToPx()
+        val height = 36.dp.roundToPx()
         val gap = ButtonGroupDefaults.ConnectedSpaceBetween.roundToPx()
         val space = (constraints.maxWidth - gap * (measurables.size - 1)).coerceAtLeast(0)
         val natural = measurables.map { it.maxIntrinsicWidth(height) }
@@ -383,7 +405,7 @@ fun FilledField(
     singleLine: Boolean = true,
     onChange: (String) -> Unit,
 ) {
-    val container = MaterialTheme.colorScheme.surfaceContainer
+    val container = MaterialTheme.colorScheme.surfaceContainerHigh
     val primary = MaterialTheme.colorScheme.primary
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
@@ -425,7 +447,7 @@ fun CompactIconButton(icon: ImageVector, label: String, enabled: Boolean = true,
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun RemovableRow(shapes: ListItemShapes, title: String, value: String, onClick: (() -> Unit)?, onRemove: () -> Unit) {
-    val padding = PaddingValues(start = 14.dp, top = 4.dp, end = 4.dp, bottom = 4.dp)
+    val padding = PaddingValues(start = 16.dp, top = 4.dp, end = 4.dp, bottom = 4.dp)
     val trailing: @Composable () -> Unit = {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -464,7 +486,12 @@ fun RemovableRow(shapes: ListItemShapes, title: String, value: String, onClick: 
 
 @Composable
 fun Note(text: String) {
-    Text(text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 12.dp))
+    Text(
+        text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp),
+    )
 }
 
 @Composable
@@ -478,29 +505,39 @@ fun <T> PickerRow(
 ) {
     var open by remember { mutableStateOf(false) }
     NavRow(shapes, title, label(selected)) { open = true }
-    if (open) {
-        AlertDialog(
-            onDismissRequest = { open = false },
-            title = { Text(title) },
-            text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    values.forEach { value ->
-                        Row(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable {
-                                open = false
-                                onSelect(value)
-                            }.padding(vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RadioButton(value == selected, null, Modifier.padding(10.dp))
-                            Text(label(value), style = RowTitle)
-                        }
+    if (open) ChoiceDialog(title, values, selected, label, onSelect) { open = false }
+}
+
+@Composable
+fun <T> ChoiceDialog(
+    title: String,
+    values: List<T>,
+    selected: T,
+    label: @Composable (T) -> String,
+    onSelect: (T) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                values.forEach { value ->
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable {
+                            onDismiss()
+                            onSelect(value)
+                        }.padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(value == selected, null, Modifier.padding(10.dp))
+                        Text(label(value), style = RowTitle)
                     }
                 }
-            },
-            confirmButton = { TextButton({ open = false }) { Text(stringResource(R.string.cancel)) } },
-        )
-    }
+            }
+        },
+        confirmButton = { TextButton(onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
 }
 
 val COLOR_PRESETS = listOf(
@@ -536,7 +573,7 @@ fun PickRow(shapes: ListItemShapes, title: String, selected: Boolean, onClick: (
 @Composable
 fun SwitchRemovableRow(shapes: ListItemShapes, title: String, checked: Boolean, onChange: (Boolean) -> Unit, onRemove: () -> Unit) {
     SegmentedListItem(
-        contentPadding = PaddingValues(start = 14.dp, top = 4.dp, end = 4.dp, bottom = 4.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 4.dp, end = 4.dp, bottom = 4.dp),
         colors = rowColors(),
         onClick = { onChange(!checked) },
         shapes = shapes,

@@ -17,10 +17,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Mic
@@ -32,7 +32,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItemShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedListItem
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.ToggleButtonDefaults
@@ -105,38 +104,27 @@ fun ObsPanel(
         obs.setScreenshots(true)
         onStopOrDispose { obs.setScreenshots(false) }
     }
-    Surface(Modifier.fillMaxSize(), color = Color.Black) {
-        Column {
-            Row(
-                Modifier.fillMaxWidth().height(PanelHeaderHeight).padding(start = 16.dp, end = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.weight(1f)) { Text("OBS", style = PanelTitle) }
-                PanelButtons(hidden = false, onHide, onClose)
-            }
-            Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp).padding(bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                when {
-                    url == null -> Setup(profile.obs.url, profile.obs.password) { newUrl, password ->
-                        store.updateProfile(profile.copy(obs = profile.obs.copy(enabled = true, url = newUrl, password = password)))
-                    }
-                    !state.connected -> {
-                        Text(
-                            if (state.error == null) {
-                                stringResource(R.string.connecting_to, url)
-                            } else {
-                                stringResource(R.string.obs_retrying, localized(state.error.orEmpty()), url)
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 4.dp),
-                        )
-                        Group { row { NavRow(it, stringResource(R.string.obs_remote_settings), onClick = onSettings) } }
-                    }
-                    else -> Connected(obs, state)
+    PanelSurface {
+        PanelHeader("OBS", onHide, onClose)
+        PanelBody {
+            when {
+                url == null -> Setup(profile.obs.url, profile.obs.password) { newUrl, password ->
+                    store.updateProfile(profile.copy(obs = profile.obs.copy(enabled = true, url = newUrl, password = password)))
                 }
+                !state.connected -> {
+                    Text(
+                        if (state.error == null) {
+                            stringResource(R.string.connecting_to, url)
+                        } else {
+                            stringResource(R.string.obs_retrying, localized(state.error.orEmpty()), url)
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                    )
+                    Group { row { NavRow(it, stringResource(R.string.obs_remote_settings), onClick = onSettings) } }
+                }
+                else -> Connected(obs, state)
             }
         }
     }
@@ -154,11 +142,11 @@ private fun Setup(url: String, password: String, onConnect: (String, String) -> 
                 passwordDraft = text
             }
         }
-        row { shapes ->
-            ActionRow(shapes, stringResource(R.string.connect), Icons.Rounded.Link, enabled = valid != null) {
-                onConnect(valid!!, passwordDraft)
-            }
-        }
+    }
+    Button({ onConnect(valid!!, passwordDraft) }, Modifier.fillMaxWidth().height(48.dp), enabled = valid != null) {
+        Icon(Icons.Rounded.Link, null, Modifier.size(20.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(stringResource(R.string.connect))
     }
 }
 
@@ -197,7 +185,7 @@ private fun Connected(obs: ObsClient, state: ObsState) {
             ToggleButton(
                 checked = scene == state.scene,
                 onCheckedChange = { if (scene != state.scene) obs.setScene(scene) },
-                colors = ToggleButtonDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                colors = ToggleButtonDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
                 contentPadding = PaddingValues(horizontal = 14.dp),
                 modifier = Modifier.height(36.dp),
             ) {
@@ -221,7 +209,7 @@ private fun Snapshot(obs: ObsClient, scene: String) {
         Modifier
             .size(156.dp, 88.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .semantics { contentDescription = picture },
     ) {
         image?.let { Image(it, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
@@ -272,7 +260,7 @@ private fun OutputButton(
         },
         shapes = ButtonDefaults.shapes(shape = shape, pressedShape = RoundedCornerShape(8.dp)),
         colors = ButtonDefaults.buttonColors(
-            containerColor = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainer,
+            containerColor = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
             contentColor = if (active) MaterialTheme.colorScheme.onPrimary else Color.White,
         ),
         contentPadding = PaddingValues(horizontal = 14.dp),

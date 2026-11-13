@@ -130,7 +130,7 @@ fun Wizard(store: SettingsStore, access: Access) {
         Surface(
             Modifier.padding(horizontal = 16.dp, vertical = 8.dp).widthIn(max = 440.dp),
             shape = RoundedCornerShape(28.dp),
-            color = Color.Black,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
             contentColor = Color.White,
         ) {
             Column(Modifier.padding(horizontal = 20.dp).padding(top = 4.dp)) {
@@ -273,7 +273,7 @@ private fun <T> Choices(options: List<T>, selected: T, columns: Int, label: @Com
                 ToggleButton(
                     checked = option == selected,
                     onCheckedChange = { onSelect(option) },
-                    colors = ToggleButtonDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    colors = ToggleButtonDefaults.colors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
                     contentPadding = PaddingValues(0.dp),
                     modifier = Modifier.weight(1f).height(40.dp),
                 ) { Text(label(option), maxLines = 1) }

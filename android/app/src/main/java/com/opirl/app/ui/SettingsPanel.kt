@@ -54,20 +54,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Share
@@ -98,7 +93,6 @@ import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SegmentedListItem
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -113,7 +107,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -141,6 +134,7 @@ import com.opirl.app.settings.transportOf
 import com.opirl.app.stream.LiveState
 import com.opirl.app.settings.Platform
 import com.opirl.app.settings.QuickButtonId
+import com.opirl.app.settings.QuickButtonPage
 import com.opirl.app.settings.Resolution
 import com.opirl.app.settings.SettingsStore
 import com.opirl.app.settings.StabilizationSetting
@@ -415,197 +409,167 @@ fun SettingsPanel(
     val fastSpatial = motion.fastSpatialSpec<IntOffset>()
     val effects = motion.defaultEffectsSpec<Float>()
     val fastEffects = motion.fastEffectsSpec<Float>()
-    Surface(
-        Modifier.fillMaxSize(),
-        color = Color.Black,
-    ) {
-        Column {
-            Row(Modifier.fillMaxWidth().height(PanelHeaderHeight).padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.width(70.dp)) {
-                    if (stack.size > 1) {
-                        IconButton({ pop() }, Modifier.size(44.dp)) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.navigate_back), Modifier.size(20.dp))
-                        }
+    PanelSurface {
+        PanelHeader(title(stack.last(), settings), onHide, onClose, onBack = if (stack.size > 1) ({ pop() }) else null)
+        AnimatedContent(
+            targetState = stack.size to stack.last(),
+            modifier = Modifier.backGesture(back),
+            transitionSpec = {
+                val forward = targetState.first > initialState.first
+                (slideInHorizontally(spatial) { if (forward) it / 4 else -it / 4 } + fadeIn(effects)) togetherWith
+                    (slideOutHorizontally(fastSpatial) { if (forward) -it / 4 else it / 4 } + fadeOut(fastEffects))
+            },
+            label = "settings",
+        ) { (_, route) ->
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .imePadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 10.dp)
+                    .padding(bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                when (route) {
+                    Route.Home -> Home(settings, engine, push)
+                    Route.Streams -> Streams(store, settings, live, push)
+                    is Route.Stream -> settings.profile(route.id)?.let { StreamPage(store, settings, it, live, push, pop) }
+                    is Route.StreamUrl -> settings.profile(route.id)?.let { StreamUrl(store, it, editable(settings, it, live)) }
+                    is Route.StreamVideo -> settings.profile(route.id)?.let { StreamVideo(store, it, editable(settings, it, live)) }
+                    is Route.StreamAudio -> settings.profile(route.id)?.let { StreamAudio(store, it, editable(settings, it, live)) }
+                    is Route.StreamTransport -> settings.profile(route.id)?.let {
+                        StreamTransport(store, it, editable(settings, it, live))
                     }
-                }
-                Text(
-                    title(stack.last(), settings),
-                    style = PanelTitle,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                PanelButtons(hidden = false, onHide, onClose)
-            }
-            AnimatedContent(
-                targetState = stack.size to stack.last(),
-                modifier = Modifier.backGesture(back),
-                transitionSpec = {
-                    val forward = targetState.first > initialState.first
-                    (slideInHorizontally(spatial) { if (forward) it / 4 else -it / 4 } + fadeIn(effects)) togetherWith
-                        (slideOutHorizontally(fastSpatial) { if (forward) -it / 4 else it / 4 } + fadeOut(fastEffects))
-                },
-                label = "settings",
-            ) { (_, route) ->
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .imePadding()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 12.dp)
-                        .padding(bottom = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    when (route) {
-                        Route.Home -> Home(settings, engine, push)
-                        Route.Streams -> Streams(store, settings, live, push)
-                        is Route.Stream -> settings.profile(route.id)?.let { StreamPage(store, settings, it, live, push, pop) }
-                        is Route.StreamUrl -> settings.profile(route.id)?.let { StreamUrl(store, it, editable(settings, it, live)) }
-                        is Route.StreamVideo -> settings.profile(route.id)?.let { StreamVideo(store, it, editable(settings, it, live)) }
-                        is Route.StreamAudio -> settings.profile(route.id)?.let { StreamAudio(store, it, editable(settings, it, live)) }
-                        is Route.StreamTransport -> settings.profile(route.id)?.let {
-                            StreamTransport(store, it, editable(settings, it, live))
-                        }
-                        is Route.StreamChat -> settings.profile(route.id)?.let { profile ->
-                            Group {
-                                row { shapes ->
-                                    TextRow(shapes, stringResource(R.string.twitch_channel), profile.twitchChannel) {
-                                        store.updateProfile(profile.copy(twitchChannel = it.trim()))
-                                    }
-                                }
-                                row { shapes ->
-                                    TextRow(shapes, stringResource(R.string.youtube_channel), profile.youtubeChannel) {
-                                        store.updateProfile(profile.copy(youtubeChannel = it.trim()))
-                                    }
-                                }
-                                row { shapes ->
-                                    TextRow(shapes, stringResource(R.string.kick_channel), profile.kickChannel) {
-                                        store.updateProfile(profile.copy(kickChannel = it.trim()))
-                                    }
-                                }
-                            }
-                        }
-                        is Route.StreamRecording -> settings.profile(route.id)?.let {
-                            StreamRecording(store, it, editable(settings, it, live))
-                        }
-                        is Route.StreamObs -> settings.profile(route.id)?.let { StreamObs(store, engine, it) }
-                        is Route.StreamDestinations -> settings.profile(route.id)?.let {
-                            StreamDestinations(store, it, engine, editable(settings, it, live), push)
-                        }
-                        is Route.StreamDestination -> settings.profile(route.id)?.let { profile ->
-                            profile.destinations.firstOrNull { it.id == route.destinationId }?.let {
-                                StreamDestination(store, profile, it, editable(settings, profile, live), pop)
-                            }
-                        }
-                        is Route.StreamReplay -> settings.profile(route.id)?.let { StreamReplay(store, it, editable(settings, it, live)) }
-                        is Route.StreamPreview -> settings.profile(route.id)?.let { StreamPreview(store, it, editable(settings, it, live)) }
-                        Route.Recordings -> RecordingsPage(engine)
-                        Route.Scenes -> ScenesPage(store, settings, engine, push)
-                        is Route.ScenePage -> settings.scenes.firstOrNull { it.id == route.id }?.let {
-                            ScenePage(store, settings, it, engine, push, pop)
-                        }
-                        is Route.SceneVideos -> settings.scenes.firstOrNull { it.id == route.id }?.let { SceneVideosPage(store, it) }
-                        is Route.Placement -> {
-                            val scene = settings.scenes.firstOrNull { it.id == route.sceneId }
-                            val widget = settings.widgets.firstOrNull { it.id == route.widgetId }
-                            if (scene != null && widget != null) PlacementPage(store, scene, widget)
-                        }
-                        is Route.WidgetPage -> settings.widgets.firstOrNull { it.id == route.id }?.let {
-                            WidgetPage(store, settings, it, route, engine, push, pop)
-                        }
-                        Route.NewWidget -> NewWidgetPage(store) { widget ->
-                            pop()
-                            push(Route.WidgetPage(widget.id))
-                        }
-                        is Route.SwitcherPage -> settings.autoSwitchers.firstOrNull { it.id == route.id }?.let {
-                            SwitcherPage(store, settings, it, push, pop)
-                        }
-                        is Route.SwitcherScenePage -> settings.autoSwitchers.firstOrNull { it.id == route.switcherId }?.let { switcher ->
-                            switcher.scenes.firstOrNull { it.id == route.id }?.let { SwitcherScenePage(store, settings, switcher, it) }
-                        }
-                        is Route.MacroPage -> settings.macros.firstOrNull { it.id == route.id }?.let {
-                            MacroPage(store, settings, it, push, pop)
-                        }
-                        is Route.MacroActionPage -> settings.macros.firstOrNull { it.id == route.macroId }?.let { macro ->
-                            macro.actions.firstOrNull { it.id == route.id }?.let { MacroActionPage(store, settings, macro, it, push) }
-                        }
-                        is Route.MacroFunctionPage -> settings.macros.firstOrNull { it.id == route.macroId }?.let { macro ->
-                            macro.actions.firstOrNull { it.id == route.id }?.let { MacroFunctionPage(store, macro, it, pop) }
-                        }
-                        Route.TwitchAccount -> TwitchAccountPage(engine)
-                        Route.KickAccount -> KickAccountPage(engine)
-                        Route.YouTubeAccount -> YouTubeAccountPage(engine)
-                        Route.Emotes -> EmotesPage(store, settings)
-                        Route.Speech -> SpeechPage(store, settings, engine, push)
-                        Route.SpeechVoices -> SpeechVoicesPage(store, settings, engine)
-                        Route.PredefinedMessages -> PredefinedMessagesPage(store, settings)
-                        Route.ChatBot -> ChatBotPage(store, settings, push)
-                        is Route.BotCommandPage -> BotCommandPage(store, settings, route.command)
-                        Route.Chat -> ChatPage(store, settings, engine, push)
-                        Route.Display -> Display(store, settings, push)
-                        Route.StatusItems -> Group {
-                            StatusItem.entries.forEach { item ->
-                                row { shapes ->
-                                    SwitchRow(shapes, stringResource(item.label), item !in settings.hiddenStatusItems) { shown ->
-                                        store.update { it.copy(hiddenStatusItems = it.hiddenStatusItems.toggled(item, !shown)) }
-                                    }
-                                }
-                            }
-                        }
-                        Route.QuickButtons -> Group {
-                            QuickButtonId.entries.forEach { item ->
-                                row { shapes ->
-                                    SwitchRow(shapes, stringResource(item.label), item !in settings.hiddenQuickButtons) { shown ->
-                                        store.update { it.copy(hiddenQuickButtons = it.hiddenQuickButtons.toggled(item, !shown)) }
-                                    }
-                                }
-                            }
-                        }
-                        Route.Camera -> Camera(store, settings)
-                        Route.Audio -> Microphones(store, settings, engine)
-                        Route.BitratePresets -> BitratePresetsPage(store, settings)
-                        Route.About -> Group {
-                            row { ValueRow(it, stringResource(R.string.version), BuildConfig.VERSION_NAME) }
-                            row { ValueRow(it, stringResource(R.string.based_on), "Moblin") }
+                    is Route.StreamChat -> settings.profile(route.id)?.let { profile ->
+                        Group {
                             row { shapes ->
-                                val context = LocalContext.current
-                                NavRow(shapes, stringResource(R.string.source_code), "GitHub") {
-                                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SOURCE_URL))) }
+                                TextRow(shapes, stringResource(R.string.twitch_channel), profile.twitchChannel) {
+                                    store.updateProfile(profile.copy(twitchChannel = it.trim()))
                                 }
                             }
-                            row { NavRow(it, stringResource(R.string.licenses)) { push(Route.Licenses) } }
+                            row { shapes ->
+                                TextRow(shapes, stringResource(R.string.youtube_channel), profile.youtubeChannel) {
+                                    store.updateProfile(profile.copy(youtubeChannel = it.trim()))
+                                }
+                            }
+                            row { shapes ->
+                                TextRow(shapes, stringResource(R.string.kick_channel), profile.kickChannel) {
+                                    store.updateProfile(profile.copy(kickChannel = it.trim()))
+                                }
+                            }
                         }
-                        Route.Licenses -> Group {
-                            LICENSES.forEach { item -> row { NavRow(it, item.name, item.license) { push(Route.License(item.name)) } } }
-                        }
-                        is Route.License -> LICENSES.firstOrNull { it.name == route.name }?.let { LicenseText(it.file) }
-                        Route.ImportExport -> ImportExport(store, engine, live, push)
-                        Route.ShareStreams -> ShareStreamsPage(settings)
-                        Route.RemoteControl -> RemoteControlPage(store, settings, engine, push)
-                        Route.RemoteStreamer -> RemoteStreamerPage(store, settings.remoteControl)
-                        Route.RemoteAssistant -> RemoteAssistantPage(store, settings.remoteControl)
-                        Route.RemoteWeb -> RemoteWebPage(store, settings.remoteControl)
-                        Route.Moblink -> MoblinkPage(store, settings, engine, push)
-                        Route.MoblinkStreamer -> {
-                            val relays by engine.moblink.relays.collectAsStateWithLifecycle()
-                            MoblinkStreamerPage(store, settings.moblink, relays)
-                        }
-                        Route.MoblinkRelay -> MoblinkRelayPage(store, settings.moblink)
-                        Route.Gamepad -> GamepadPage(settings, engine, push)
-                        Route.Keyboard -> KeyboardPage(store, settings, push)
-                        is Route.KeyboardKeyPage -> settings.keyboard.firstOrNull { it.id == route.id }?.let {
-                            KeyboardKeyPage(store, settings, it, push, pop)
-                        }
-                        Route.StreamDecks -> StreamDecksPage(store, settings, engine, push)
-                        is Route.StreamDeckPage -> settings.streamDecks.firstOrNull { it.id == route.id }?.let {
-                            StreamDeckPage(store, settings, it, push, pop)
-                        }
-                        is Route.StreamDeckKeyPage -> settings.streamDecks.firstOrNull { it.id == route.layoutId }?.let {
-                            StreamDeckKeyPage(store, settings, it, route.index, push)
-                        }
-                        is Route.ActionPage -> ActionPage(store, settings, route.target)
                     }
+                    is Route.StreamRecording -> settings.profile(route.id)?.let {
+                        StreamRecording(store, it, editable(settings, it, live))
+                    }
+                    is Route.StreamObs -> settings.profile(route.id)?.let { StreamObs(store, engine, it) }
+                    is Route.StreamDestinations -> settings.profile(route.id)?.let {
+                        StreamDestinations(store, it, engine, editable(settings, it, live), push)
+                    }
+                    is Route.StreamDestination -> settings.profile(route.id)?.let { profile ->
+                        profile.destinations.firstOrNull { it.id == route.destinationId }?.let {
+                            StreamDestination(store, profile, it, editable(settings, profile, live), pop)
+                        }
+                    }
+                    is Route.StreamReplay -> settings.profile(route.id)?.let { StreamReplay(store, it, editable(settings, it, live)) }
+                    is Route.StreamPreview -> settings.profile(route.id)?.let { StreamPreview(store, it, editable(settings, it, live)) }
+                    Route.Recordings -> RecordingsPage(engine)
+                    Route.Scenes -> ScenesPage(store, settings, engine, push)
+                    is Route.ScenePage -> settings.scenes.firstOrNull { it.id == route.id }?.let {
+                        ScenePage(store, settings, it, engine, push, pop)
+                    }
+                    is Route.SceneVideos -> settings.scenes.firstOrNull { it.id == route.id }?.let { SceneVideosPage(store, it) }
+                    is Route.Placement -> {
+                        val scene = settings.scenes.firstOrNull { it.id == route.sceneId }
+                        val widget = settings.widgets.firstOrNull { it.id == route.widgetId }
+                        if (scene != null && widget != null) PlacementPage(store, scene, widget)
+                    }
+                    is Route.WidgetPage -> settings.widgets.firstOrNull { it.id == route.id }?.let {
+                        WidgetPage(store, settings, it, route, engine, push, pop)
+                    }
+                    Route.NewWidget -> NewWidgetPage(store) { widget ->
+                        pop()
+                        push(Route.WidgetPage(widget.id))
+                    }
+                    is Route.SwitcherPage -> settings.autoSwitchers.firstOrNull { it.id == route.id }?.let {
+                        SwitcherPage(store, settings, it, push, pop)
+                    }
+                    is Route.SwitcherScenePage -> settings.autoSwitchers.firstOrNull { it.id == route.switcherId }?.let { switcher ->
+                        switcher.scenes.firstOrNull { it.id == route.id }?.let { SwitcherScenePage(store, settings, switcher, it) }
+                    }
+                    is Route.MacroPage -> settings.macros.firstOrNull { it.id == route.id }?.let {
+                        MacroPage(store, settings, it, push, pop)
+                    }
+                    is Route.MacroActionPage -> settings.macros.firstOrNull { it.id == route.macroId }?.let { macro ->
+                        macro.actions.firstOrNull { it.id == route.id }?.let { MacroActionPage(store, settings, macro, it, push) }
+                    }
+                    is Route.MacroFunctionPage -> settings.macros.firstOrNull { it.id == route.macroId }?.let { macro ->
+                        macro.actions.firstOrNull { it.id == route.id }?.let { MacroFunctionPage(store, macro, it, pop) }
+                    }
+                    Route.TwitchAccount -> TwitchAccountPage(engine)
+                    Route.KickAccount -> KickAccountPage(engine)
+                    Route.YouTubeAccount -> YouTubeAccountPage(engine)
+                    Route.Emotes -> EmotesPage(store, settings)
+                    Route.Speech -> SpeechPage(store, settings, engine, push)
+                    Route.SpeechVoices -> SpeechVoicesPage(store, settings, engine)
+                    Route.PredefinedMessages -> PredefinedMessagesPage(store, settings)
+                    Route.ChatBot -> ChatBotPage(store, settings, push)
+                    is Route.BotCommandPage -> BotCommandPage(store, settings, route.command)
+                    Route.Chat -> ChatPage(store, settings, engine, push)
+                    Route.Display -> Display(store, settings, push)
+                    Route.StatusItems -> Group {
+                        StatusItem.entries.forEach { item ->
+                            row { shapes ->
+                                SwitchRow(shapes, stringResource(item.label), item !in settings.hiddenStatusItems) { shown ->
+                                    store.update { it.copy(hiddenStatusItems = it.hiddenStatusItems.toggled(item, !shown)) }
+                                }
+                            }
+                        }
+                    }
+                    Route.QuickButtons -> QuickButtonsPage(store, settings)
+                    Route.Camera -> Camera(store, settings)
+                    Route.Audio -> Microphones(store, settings, engine)
+                    Route.BitratePresets -> BitratePresetsPage(store, settings)
+                    Route.About -> Group {
+                        row { ValueRow(it, stringResource(R.string.version), BuildConfig.VERSION_NAME) }
+                        row { ValueRow(it, stringResource(R.string.based_on), "Moblin") }
+                        row { shapes ->
+                            val context = LocalContext.current
+                            NavRow(shapes, stringResource(R.string.source_code), "GitHub") {
+                                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SOURCE_URL))) }
+                            }
+                        }
+                        row { NavRow(it, stringResource(R.string.licenses)) { push(Route.Licenses) } }
+                    }
+                    Route.Licenses -> Group {
+                        LICENSES.forEach { item -> row { NavRow(it, item.name, item.license) { push(Route.License(item.name)) } } }
+                    }
+                    is Route.License -> LICENSES.firstOrNull { it.name == route.name }?.let { LicenseText(it.file) }
+                    Route.ImportExport -> ImportExport(store, engine, live, push)
+                    Route.ShareStreams -> ShareStreamsPage(settings)
+                    Route.RemoteControl -> RemoteControlPage(store, settings, engine, push)
+                    Route.RemoteStreamer -> RemoteStreamerPage(store, settings.remoteControl)
+                    Route.RemoteAssistant -> RemoteAssistantPage(store, settings.remoteControl)
+                    Route.RemoteWeb -> RemoteWebPage(store, settings.remoteControl)
+                    Route.Moblink -> MoblinkPage(store, settings, engine, push)
+                    Route.MoblinkStreamer -> {
+                        val relays by engine.moblink.relays.collectAsStateWithLifecycle()
+                        MoblinkStreamerPage(store, settings.moblink, relays)
+                    }
+                    Route.MoblinkRelay -> MoblinkRelayPage(store, settings.moblink)
+                    Route.Gamepad -> GamepadPage(settings, engine, push)
+                    Route.Keyboard -> KeyboardPage(store, settings, push)
+                    is Route.KeyboardKeyPage -> settings.keyboard.firstOrNull { it.id == route.id }?.let {
+                        KeyboardKeyPage(store, settings, it, push, pop)
+                    }
+                    Route.StreamDecks -> StreamDecksPage(store, settings, engine, push)
+                    is Route.StreamDeckPage -> settings.streamDecks.firstOrNull { it.id == route.id }?.let {
+                        StreamDeckPage(store, settings, it, push, pop)
+                    }
+                    is Route.StreamDeckKeyPage -> settings.streamDecks.firstOrNull { it.id == route.layoutId }?.let {
+                        StreamDeckKeyPage(store, settings, it, route.index, push)
+                    }
+                    is Route.ActionPage -> ActionPage(store, settings, route.target)
                 }
             }
         }
@@ -1873,5 +1837,32 @@ private fun StreamPreview(store: SettingsStore, profile: StreamProfile, editable
                 enabled = editable,
             ) { update(preview.copy(bitrateKbps = it)) }
         }
+    }
+}
+
+@Composable
+private fun QuickButtonsPage(store: SettingsStore, settings: AppSettings) {
+    var moving by remember { mutableStateOf<QuickButtonId?>(null) }
+    QuickButtonPage.entries.forEach { page ->
+        val items = QuickButtonId.entries.filter { settings.pageOf(it) == page }
+        if (items.isEmpty()) return@forEach
+        Group {
+            items.forEach { item ->
+                row { shapes ->
+                    SwitchNavRow(
+                        shapes,
+                        stringResource(item.label),
+                        item !in settings.hiddenQuickButtons,
+                        { shown -> store.update { it.copy(hiddenQuickButtons = it.hiddenQuickButtons.toggled(item, !shown)) } },
+                        value = stringResource(page.label),
+                    ) { moving = item }
+                }
+            }
+        }
+    }
+    moving?.let { item ->
+        ChoiceDialog(stringResource(item.label), QuickButtonPage.entries, settings.pageOf(item), { stringResource(it.label) }, { page ->
+            store.update { it.copy(quickButtonPages = if (page == item.page) it.quickButtonPages - item else it.quickButtonPages + (item to page)) }
+        }) { moving = null }
     }
 }
